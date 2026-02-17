@@ -1,82 +1,49 @@
 using Mirror;
 using UnityEngine;
 using UnityEngine.Rendering;
+using System.Collections;
 
-/// <summary>
-/// The controller for the characters.
-/// </summary>
 [RequireComponent(typeof(CharacterController))]
 [RequireComponent(typeof(CapsuleCollider))]
 [RequireComponent(typeof(NetworkIdentity))]
 [RequireComponent(typeof(NetworkTransformReliable))]
 public class PlayerController : NetworkBehaviour
 {
-    /// <summary>
-    /// The view rotation controlled on the local player.
-    /// </summary>
     private float _rotationYLocal;
 
-    /// <summary>
-    /// If this player is ready to start the match.
-    /// </summary>
-    [field: SyncVar]
-    public bool Ready { get; private set; }
+    [field: SyncVar] public bool Ready { get; private set; }
+    [field: SyncVar] public string PlayerName { get; private set; }
 
-    /// <summary>
-    /// The name of the player.
-    /// </summary>
-    [field: SyncVar]
-    public string PlayerName { get; private set; }
-
-    /// <summary>
-    /// Where the camera will be positioned.
-    /// </summary>
     public Transform CameraPosition => cameraPosition;
-    
-    /// <summary>
-    /// Where the camera will be positioned.
-    /// </summary>
-    [SerializeField]
-    [Tooltip("Where the camera will be positioned.")]
-    private Transform cameraPosition;
 
-    /// <summary>
-    /// The head of the player visuals.
-    /// </summary>
-    [SerializeField]
-    [Tooltip("The head of the player visuals.")]
-    private Transform headPosition;
-    
-    /// <summary>
-    /// Sync the view to remote players.
-    /// </summary>
-    [SyncVar]
-    private float _rotationYRemote;
+    [SerializeField] private Transform cameraPosition;
+    [SerializeField] private Transform headPosition;
 
-    /// <summary>
-    /// The controller for the local player.
-    /// </summary>
+    [SyncVar] private float _rotationYRemote;
+
     private CharacterController _characterController;
-
-    /// <summary>
-    /// The main capsule collider for remote players.
-    /// </summary>
     private CapsuleCollider _capsuleCollider;
 
-    /// <summary>
-    /// The current falling velocity.
-    /// </summary>
     private float _velocityY;
-    
-    /// <summary>
-    /// If falling or not.
-    /// </summary>
     private bool _airborne;
 
-    /// <summary>
-    /// Set that this player is ready or not.
-    /// </summary>
-    /// <param name="ready">The value to set being ready to.</param>
+    // =========================
+    // DASH VARIABLES
+    // =========================
+
+    [Header("Dash Settings")]
+    [SerializeField] private float dashDistance = 2f;
+    [SerializeField] private float dashDuration = 0.15f;
+    [SerializeField] private float dashCooldown = 0.6f;
+
+    private bool _isDashing;
+    private float _lastDashTime;
+
+    private Vector3 _dashDirection;
+    private float _dashElapsed;
+
+    // =========================
+
     [Command]
     public void SetReadyCmd(bool ready)
     {
@@ -85,46 +52,30 @@ public class PlayerController : NetworkBehaviour
 
     private void Awake()
     {
-        // Store a reference to this player.
-        GameManager.players.Add(this);
+        if (GameManager.players != null) GameManager.players.Add(this);
     }
 
     private void OnDestroy()
     {
-        // Remove the reference to this player.
-        GameManager.players.Remove(this);
+        if (GameManager.players != null) GameManager.players.Remove(this);
     }
 
     private void Start()
     {
-        // Get all components.
         _characterController = GetComponent<CharacterController>();
         _capsuleCollider = GetComponent<CapsuleCollider>();
-        
-        // Adjust the size so it is not floating because of the skin width.
+
         _characterController.height -= _characterController.skinWidth * 2;
         _characterController.radius -= _characterController.skinWidth;
 
-        // The collider is only active for remote connections to hit against.
         _capsuleCollider.enabled = !isLocalPlayer;
-
-        // The character controller is only active for the controlling player.
         _characterController.enabled = isLocalPlayer;
     }
 
     public override void OnStartLocalPlayer()
     {
-        // Keep a reference to the local player.
         GameManager.localPlayer = this;
-        
-        // Set the name of the player.
         SetNameCmd(GameManager.PlayerName);
-
-        // Ensure all materials are rendering only shadows
-        foreach (MeshRenderer mr in GetComponents<MeshRenderer>())
-        {
-            mr.shadowCastingMode = ShadowCastingMode.ShadowsOnly;
-        }
 
         foreach (MeshRenderer mr in GetComponentsInChildren<MeshRenderer>())
         {
@@ -134,108 +85,173 @@ public class PlayerController : NetworkBehaviour
 
     private void Update()
     {
-        // On the local client, move.
         if (isLocalPlayer)
         {
             Movement();
             return;
         }
 
-        // Ensure the character controller is not enabled on remote clients.
+        // Remote players (Ghosts) only update visuals
         _characterController.enabled = false;
-
-        // On remote clients, aim the head where the player is looking.
         headPosition.localRotation = Quaternion.Euler(Mathf.Clamp(_rotationYRemote, -45, 45), 0, 0);
     }
 
-    /// <summary>
-    /// Handle movement logic.
-    /// </summary>
     private void Movement()
     {
-        // Can only move if the controller is enabled.
         if (!_characterController.enabled)
-        {
             return;
+
+        // =========================
+        // DASH INPUT (KEYBOARD)
+        // =========================
+        if (!_isDashing)
+        {
+            if (Input.GetKeyDown(KeyCode.I)) VoiceDashForward();
+            if (Input.GetKeyDown(KeyCode.K)) VoiceDashBack();
+            if (Input.GetKeyDown(KeyCode.J)) VoiceDashLeft();
+            if (Input.GetKeyDown(KeyCode.L)) VoiceDashRight();
         }
-        
-        // Rotate first.
+
+        // =========================
+        // ROTATION
+        // =========================
         transform.Rotate(0, GameManager.Look.x * GameManager.Sensitivity * Time.deltaTime, 0);
 
-        // Vertical camera movement.
-        _rotationYLocal = Mathf.Clamp(_rotationYLocal + -GameManager.Look.y * GameManager.Sensitivity * Time.deltaTime, -90, 90);
+        _rotationYLocal = Mathf.Clamp(
+            _rotationYLocal + -GameManager.Look.y * GameManager.Sensitivity * Time.deltaTime,
+            -90, 90);
 
-        // Sync vertical view across the network.
         if (NetworkClient.ready)
         {
             UpdateLookRotationCmd(_rotationYLocal);
         }
-        
-        // Update the local vertical rotation.
-        cameraPosition.transform.localRotation = Quaternion.Euler(_rotationYLocal, 0, 0);
-        
-        // If on the ground.
+
+        cameraPosition.localRotation = Quaternion.Euler(_rotationYLocal, 0, 0);
+
+        // =========================
+        // DASH LOGIC (RUNS LOCALLY NOW!)
+        // =========================
+        if (_isDashing)
+        {
+            float dashSpeed = dashDistance / dashDuration;
+            Vector3 move = transform.TransformDirection(_dashDirection) * dashSpeed;
+            _characterController.Move(move * Time.deltaTime);
+
+            _dashElapsed += Time.deltaTime;
+
+            if (_dashElapsed >= dashDuration)
+            {
+                _isDashing = false;
+            }
+
+            return; // Skip normal movement/gravity while dashing
+        }
+
+        // =========================
+        // NORMAL MOVEMENT
+        // =========================
+
         if (_characterController.isGrounded)
         {
-            // Zero out any falling velocity.
             _velocityY = 0;
-            
-            // If requested to jump and are able to, jump.
             if (GameManager.Jump)
             {
                 _airborne = true;
                 _velocityY += Mathf.Sqrt(-GameManager.JumpForce * Physics.gravity.y);
             }
-            // Otherwise, not airborne.
-            else
-            {
-                _airborne = false;
-            }
-        }
-        
-        // If not airborne, perform additional checks to confirm this.
-        if (!_airborne)
-        {
-            // Cast down to see if we can stay on the ground to deal with slopes given the character is not set to be airborne.
-            if (Physics.Raycast(transform.position + new Vector3(0, _characterController.center.y, 0), Vector3.down, GameManager.GroundedDistance))
-            {
-                // Snap down to the ground.
-                _velocityY = Physics.gravity.y;
-            }
-            // Otherwise, something such as walking off a ledge has happened, so the character is airborne.
-            else
-            {
-                _airborne = true;
-            }
+            else _airborne = false;
         }
 
-        // Add gravity.
+        if (!_airborne)
+        {
+            if (Physics.Raycast(transform.position + new Vector3(0, _characterController.center.y, 0), Vector3.down, GameManager.GroundedDistance))
+                _velocityY = Physics.gravity.y;
+            else
+                _airborne = true;
+        }
+
         _velocityY += Physics.gravity.y * Time.deltaTime;
-        
-        // Apply movement.
+
         Transform tr = transform;
         Vector3 targetVelocity = (GameManager.Move.y * tr.forward + GameManager.Move.x * tr.right) * GameManager.Speed;
         targetVelocity.y = _velocityY;
         _characterController.Move(targetVelocity * Time.deltaTime);
     }
 
-    /// <summary>
-    /// Update vertical look rotation on the server.
-    /// </summary>
-    /// <param name="rotationY">The rotation to set.</param>
-    [Command]
-    private void UpdateLookRotationCmd(float rotationY)
-    {
-        _rotationYRemote = rotationY;
+    // =========================================================
+    // VOICE WRAPPERS (UPDATED)
+    // =========================================================
+    // Now we trigger the dash LOCALLY instantly, then tell the server.
+    
+    public void VoiceDashForward() 
+    { 
+        if (!isLocalPlayer) return;
+        ApplyDash(Vector3.forward); // Local Move (Instant)
+        CmdDashForward();           // Server Sync
     }
 
-    /// <summary>
-    /// Update the name on the server.
-    /// </summary>
-    /// <param name="playerName">The name.</param>
-    [Command]
-    private void SetNameCmd(string playerName)
-    {
-        PlayerName = playerName;
+    public void VoiceDashBack()    
+    { 
+        if (!isLocalPlayer) return;
+        ApplyDash(Vector3.back); 
+        CmdDashBack(); 
     }
+
+    public void VoiceDashLeft()    
+    { 
+        if (!isLocalPlayer) return;
+        ApplyDash(Vector3.left); 
+        CmdDashLeft(); 
+    }
+
+    public void VoiceDashRight()   
+    { 
+        if (!isLocalPlayer) return;
+        ApplyDash(Vector3.right); 
+        CmdDashRight(); 
+    }
+
+    // =========================
+    // SHARED DASH LOGIC
+    // =========================
+    // This function runs on both Client and Server to ensure they match.
+    private void ApplyDash(Vector3 localDirection)
+    {
+        // Don't dash if already dashing or on cooldown
+        if (_isDashing) return;
+        if (Time.time - _lastDashTime < dashCooldown) return;
+
+        _lastDashTime = Time.time;
+        _dashDirection = localDirection;
+        _dashElapsed = 0f;
+        _isDashing = true;
+    }
+
+    // =========================
+    // SERVER COMMANDS
+    // =========================
+
+    [Command] 
+    private void CmdDashForward() 
+    { 
+        ApplyDash(Vector3.forward); 
+        RpcSyncDash(Vector3.forward); // Tell other clients (Ghosts) to look like they are dashing
+    }
+
+    [Command] private void CmdDashBack()    { ApplyDash(Vector3.back); RpcSyncDash(Vector3.back); }
+    [Command] private void CmdDashLeft()    { ApplyDash(Vector3.left); RpcSyncDash(Vector3.left); }
+    [Command] private void CmdDashRight()   { ApplyDash(Vector3.right); RpcSyncDash(Vector3.right); }
+
+    [ClientRpc]
+    private void RpcSyncDash(Vector3 direction)
+    {
+        // Ignore LocalPlayer because we already moved instantly in VoiceDashForward!
+        if (isLocalPlayer) return; 
+        
+        // This makes the ghost on other people's screens dash
+        ApplyDash(direction);
+    }
+
+    [Command] private void UpdateLookRotationCmd(float rotationY) { _rotationYRemote = rotationY; }
+    [Command] private void SetNameCmd(string playerName) { PlayerName = playerName; }
 }

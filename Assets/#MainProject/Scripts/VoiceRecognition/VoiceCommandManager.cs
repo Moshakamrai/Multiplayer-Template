@@ -3,8 +3,8 @@ using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.UI;
 
-// Ensures we can always find the player controller neighbor
-[RequireComponent(typeof(PlayerController))] 
+[RequireComponent(typeof(PlayerController))]
+[RequireComponent(typeof(PlayerCombat))]
 public class VoiceCommandManager : MonoBehaviour
 {
     [Header("Vosk Settings")]
@@ -14,49 +14,28 @@ public class VoiceCommandManager : MonoBehaviour
     public Text InputText; 
     public Text OutputText;
 
-    [Header("Logic Settings")]
-    public float CommandCooldown = 0.35f; 
-
-    [System.Serializable]
-    public struct VoiceCommand
-    {
-        public string TriggerPhrase; 
-        public UnityEvent OnRecognized; 
-    }
-
-    public List<VoiceCommand> Commands = new List<VoiceCommand>();
-
-    private Dictionary<string, UnityEvent> _commandCache = new Dictionary<string, UnityEvent>();
-    private float _lastCommandTime = 0f;
-    private string _lastProcessedText = "";
-
-    // Reference to the player script on THIS object
-    private PlayerController _myPlayer;
+    private string _previousPartialText = "";
+    private PlayerController _myController; // For Movement
+    private PlayerCombat _myCombat;         // For Attacks
 
     void Start()
     {
-        _myPlayer = GetComponent<PlayerController>();
+        _myController = GetComponent<PlayerController>();
+        _myCombat = GetComponent<PlayerCombat>();
 
-        // ----------------------------------------------------------------
-        // CRITICAL FIX: If this is NOT my player, shut down voice control.
-        // This prevents the "Ghost" player from listening to your mic.
-        // ----------------------------------------------------------------
-        if (!_myPlayer.isLocalPlayer)
+        // 1. If this is a remote player's body on our screen, just turn off this script.
+        // We removed VoskInstance.enabled = false so we don't accidentally mute the Host!
+        if (!_myController.isLocalPlayer)
         {
-            if (VoskInstance != null) VoskInstance.enabled = false; // Turn off mic
-            this.enabled = false; // Turn off this script
+            this.enabled = false; 
             return;
         }
 
-        // 1. Build Cache
-        foreach(var cmd in Commands)
-        {
-            string cleanKey = cmd.TriggerPhrase.ToLower().Trim();
-            if (!_commandCache.ContainsKey(cleanKey))
-                _commandCache.Add(cleanKey, cmd.OnRecognized);
-        }
+        // Standard UI Setup
+        if (InputText == null) InputText = GameObject.Find("InputText")?.GetComponent<Text>();
+        if (OutputText == null) OutputText = GameObject.Find("OutputText")?.GetComponent<Text>();
 
-        // 2. Subscribe to Vosk
+        // 2. Only hook up the events if this is OUR local player
         if (VoskInstance != null)
         {
             VoskInstance.OnPartialResult += HandlePartialResult;
@@ -64,71 +43,96 @@ public class VoiceCommandManager : MonoBehaviour
             VoskInstance.StartRecordingManual(); 
         }
 
-        if (OutputText != null) OutputText.text = "Listening...";
+        if (OutputText != null) OutputText.text = "Voice Ready.";
     }
 
     void HandlePartialResult(string jsonResult)
     {
-        string text = ParsePartialJson(jsonResult);
-        if (!string.IsNullOrEmpty(text)) ProcessCommand(text);
+        // 3. CRITICAL FOR 1-PC TESTING: 
+        // Ignore the microphone if this Unity window is in the background.
+        // This stops the Client window from stealing the Host's voice commands!
+        if (!Application.isFocused) return;
+
+        string currentText = ParsePartialJson(jsonResult).ToLower().Trim();
+        if (string.IsNullOrEmpty(currentText)) return;
+
+        string newSegment = currentText.StartsWith(_previousPartialText) 
+            ? currentText.Substring(_previousPartialText.Length).Trim() 
+            : currentText;
+
+        _previousPartialText = currentText;
+
+        if (!string.IsNullOrEmpty(newSegment))
+        {
+             ProcessWords(newSegment);
+             if (InputText != null) InputText.text = currentText;
+        }
     }
 
-    void HandleFinalResult(string jsonResult)
+    void HandleFinalResult(string jsonResult) => _previousPartialText = "";
+
+    void ProcessWords(string segment)
     {
-        var result = new RecognitionResult(jsonResult);
-        if (result.Phrases != null && result.Phrases.Length > 0)
-            ProcessCommand(result.Phrases[0].Text);
+        string lowerSegment = segment.ToLower().Trim();
+        
+        // Phrase Check
+        if (GetSimilarity(lowerSegment, "uppercut") > 0.6f)
+        {
+            _myCombat.VoiceAttackUppercut(); 
+            LogExecution("UPPERCUT");
+            return;
+        }
+
+        string[] words = lowerSegment.Split(' ');
+        foreach (string word in words)
+        {
+            bool found = true;
+
+            // Combat Actions (PlayerCombat.cs)
+            if (GetSimilarity(word, "punch") > 0.72f) _myCombat.VoiceAttackJab();
+            else if (GetSimilarity(word, "cross") > 0.72f) _myCombat.VoiceAttackCross();
+            else if (GetSimilarity(word, "hook") > 0.72f) _myCombat.VoiceAttackHook();
+            
+            // Movement Actions (PlayerController.cs)
+            else if (word == "forward") _myController.VoiceDashForward();
+            else if (word == "back") _myController.VoiceDashBack();
+            else if (word == "left") _myController.VoiceDashLeft();
+            else if (word == "right") _myController.VoiceDashRight();
+            else found = false;
+
+            if (found) LogExecution(word.ToUpper());
+        }
     }
 
-    void ProcessCommand(string rawText)
+    // ==========================================
+    // RESTORED HELPER FUNCTIONS
+    // ==========================================
+
+    private float GetSimilarity(string source, string target)
     {
-        string text = rawText.ToLower().Trim();
+        if (source == target) return 1.0f;
+        int distance = LevenshteinDistance(source, target);
+        int maxLen = Mathf.Max(source.Length, target.Length);
+        if (maxLen == 0) return 1.0f;
+        return 1.0f - ((float)distance / maxLen);
+    }
 
-        if (text == _lastProcessedText && Time.time - _lastCommandTime < CommandCooldown)
-            return; 
-
-        bool commandExecuted = false;
-
-        // DIRECT CONNECTION: Use the _myPlayer reference
-        if (text.Contains("forward")) 
-        { 
-            _myPlayer.VoiceDashForward(); 
-            commandExecuted = true;
-        }
-        else if (text.Contains("back"))    
-        { 
-            _myPlayer.VoiceDashBack();    
-            commandExecuted = true;
-        }
-        else if (text.Contains("left"))    
-        { 
-            _myPlayer.VoiceDashLeft();    
-            commandExecuted = true;
-        }
-        else if (text.Contains("right"))   
-        { 
-            _myPlayer.VoiceDashRight();   
-            commandExecuted = true;
-        }
-
-        // Fallback for attacks/other events
-        if (!commandExecuted && _commandCache.TryGetValue(text, out UnityEvent action))
-        {
-            action.Invoke();
-            commandExecuted = true;
-        }
-
-        if (commandExecuted)
-        {
-            if (InputText != null) InputText.text = text;
-            if (OutputText != null) 
-            {
-                OutputText.text = "HIT: " + text;
-                OutputText.color = Color.green;
+    private int LevenshteinDistance(string s, string t)
+    {
+        int n = s.Length;
+        int m = t.Length;
+        int[,] d = new int[n + 1, m + 1];
+        if (n == 0) return m;
+        if (m == 0) return n;
+        for (int i = 0; i <= n; d[i, 0] = i++) ;
+        for (int j = 0; j <= m; d[0, j] = j++) ;
+        for (int i = 1; i <= n; i++) {
+            for (int j = 1; j <= m; j++) {
+                int cost = (t[j - 1] == s[i - 1]) ? 0 : 1;
+                d[i, j] = Mathf.Min(Mathf.Min(d[i - 1, j] + 1, d[i, j - 1] + 1), d[i - 1, j - 1] + cost);
             }
-            _lastCommandTime = Time.time;
-            _lastProcessedText = text;
         }
+        return d[n, m];
     }
 
     private string ParsePartialJson(string json)
@@ -139,5 +143,14 @@ public class VoiceCommandManager : MonoBehaviour
         int end = json.LastIndexOf("\"");
         if (end > start) return json.Substring(start, end - start);
         return "";
+    }
+
+    private void LogExecution(string cmd)
+    {
+        if (OutputText != null)
+        {
+            OutputText.text = "EXEC: " + cmd;
+            OutputText.color = Color.cyan;
+        }
     }
 }

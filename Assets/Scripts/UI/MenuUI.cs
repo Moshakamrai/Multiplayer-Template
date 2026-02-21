@@ -14,7 +14,10 @@ namespace UI
         private TextField _nameTextField;
         private TextField _addressTextField;
 
-        // NEW: Reference to the SteamLobby script
+        [Header("Networking Mode")]
+        [Tooltip("Uncheck this to test locally without Steam")]
+        public bool UseSteam = false; 
+        
         public SteamLobby steamLobby; 
 
         private void Start()
@@ -27,20 +30,18 @@ namespace UI
             _nameTextField = root.Q<TextField>("NameTextField");
             _addressTextField = root.Q<TextField>("AddressTextField");
 
-            // CRITICAL CHANGE: Call SteamLobby instead of NetworkManager directly
-            if (steamLobby != null)
+            // --- LOCAL VS STEAM TOGGLE ---
+            if (UseSteam && steamLobby != null)
             {
                 _hostButton.clicked += steamLobby.HostSteamLobby;
             }
             else
             {
-                Debug.LogError("SteamLobby script is missing from MenuUI inspector!");
-                // Fallback (Will likely fail for Steam, but works for local)
+                // Local Hosting bypasses Steam entirely
                 _hostButton.clicked += NetworkManager.singleton.StartHost;
             }
 
-            // Note: Join button is usually not needed for Steam (you join via Friend List), 
-            // but we keep it for direct IP testing if needed.
+            // Join button for Local Testing (Requires 'localhost' in address field)
             _joinButton.clicked += NetworkManager.singleton.StartClient;
             
             _quitButton.clicked += Application.Quit;
@@ -56,8 +57,11 @@ namespace UI
         {
             try
             {
-                if (_hostButton != null && steamLobby != null) 
-                    _hostButton.clicked -= steamLobby.HostSteamLobby;
+                if (_hostButton != null)
+                {
+                    if (UseSteam && steamLobby != null) _hostButton.clicked -= steamLobby.HostSteamLobby;
+                    else _hostButton.clicked -= NetworkManager.singleton.StartHost;
+                }
                     
                 if (_joinButton != null) 
                     _joinButton.clicked -= NetworkManager.singleton.StartClient;
@@ -71,7 +75,6 @@ namespace UI
             catch { }
         }
 
-        // ... (Keep the rest of your NameChanged / AddressChanged logic exactly the same) ...
         private void NameChanged(ChangeEvent<string> evt)
         {
             if (string.IsNullOrWhiteSpace(evt.newValue)) {

@@ -134,7 +134,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1487612618}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: e6e55fca1f4e4844593a3dd65a3ecb39, type: 3}
   m_Name: 
@@ -150,7 +150,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1487612618}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: abbd67010b4803e4f8811546718299fc, type: 3}
   m_Name: 
@@ -162,11 +162,40 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1487612618}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: ef4bffeda13d7a748973ff9204401c07, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+--- !u!114 &1487612627
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1487612618}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6b0fecffa3f624585964b0d0eb21b18e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  port: 7777
+  DualMode: 1
+  NoDelay: 1
+  Interval: 10
+  Timeout: 10000
+  RecvBufferSize: 7361536
+  SendBufferSize: 7361536
+  FastResend: 2
+  ReceiveWindowSize: 4096
+  SendWindowSize: 4096
+  MaxRetransmit: 40
+  MaximizeSocketBuffers: 1
+  ReliableMaxMessageSize: 297433
+  UnreliableMaxMessageSize: 1194
+  debugLog: 0
+  statisticsGUI: 0
+  statisticsLog: 0
 --- !u!850595691 &2008439074
 LightingSettings:
   m_ObjectHideFlags: 0
@@ -239,6 +268,10 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 0}
     m_Modifications:
+    - target: {fileID: 631507460551479432, guid: 3e17a6aeb95098945bd530e6a6eaccfd, type: 3}
+      propertyPath: UseSteam
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 631507460551479432, guid: 3e17a6aeb95098945bd530e6a6eaccfd, type: 3}
       propertyPath: steamLobby
       value: 
@@ -372,12 +405,12 @@ PrefabInstance:
     m_Modifications:
     - target: {fileID: 2376842459006364307, guid: d18cf5e0a9e9c5a4b85fe2391358695a, type: 3}
       propertyPath: m_Enabled
-      value: 0
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 8076579910483855913, guid: d18cf5e0a9e9c5a4b85fe2391358695a, type: 3}
       propertyPath: transport
       value: 
-      objectReference: {fileID: 1487612624}
+      objectReference: {fileID: 8076579911880126201}
     - target: {fileID: 8076579910483855914, guid: d18cf5e0a9e9c5a4b85fe2391358695a, type: 3}
       propertyPath: m_RootOrder
       value: 0
@@ -427,8 +460,7 @@ PrefabInstance:
       value: Game Manager
       objectReference: {fileID: 0}
     m_RemovedComponents:
-    - {fileID: 5156852503761177613, guid: d18cf5e0a9e9c5a4b85fe2391358695a, type: 3}
-    - {fileID: 2376842459006364307, guid: d18cf5e0a9e9c5a4b85fe2391358695a, type: 3}
+    - {fileID: 0}
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
     m_AddedComponents:
@@ -441,7 +473,21 @@ PrefabInstance:
     - targetCorrespondingSourceObject: {fileID: 8076579910483855927, guid: d18cf5e0a9e9c5a4b85fe2391358695a, type: 3}
       insertIndex: -1
       addedObject: {fileID: 1487612626}
+    - targetCorrespondingSourceObject: {fileID: 8076579910483855927, guid: d18cf5e0a9e9c5a4b85fe2391358695a, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 1487612627}
   m_SourcePrefab: {fileID: 100100000, guid: d18cf5e0a9e9c5a4b85fe2391358695a, type: 3}
+--- !u!114 &8076579911880126201 stripped
+MonoBehaviour:
+  m_CorrespondingSourceObject: {fileID: 2376842459006364307, guid: d18cf5e0a9e9c5a4b85fe2391358695a, type: 3}
+  m_PrefabInstance: {fileID: 8076579911880126200}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1487612618}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c7424c1070fad4ba2a7a96b02fbeb4bb, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

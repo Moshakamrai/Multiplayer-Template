@@ -1,11 +1,20 @@
 using Mirror;
 using UnityEngine;
+using UnityEngine.UI; // Added for ShieldText
 using System.Collections;
 using System.Collections.Generic;
 
 public class PlayerCombat : NetworkBehaviour
 {
     [SyncVar] public int CurrentHealth = 100;
+    
+    // --- NEW SHIELD VARIABLES ---
+    [SyncVar] public int CurrentShield = 25;
+    public int MaxShield = 25;
+    public Text ShieldText;
+    private Coroutine _rechargeCoroutine; 
+    // ----------------------------
+
     public Animator animator;
 
     // Use this as the "Master Lock" for the queue
@@ -19,6 +28,15 @@ public class PlayerCombat : NetworkBehaviour
     public SphereCollider weaponGloveLeft;
     public SphereCollider weaponGloveRight;
 
+    // --- NEW: AUTO-FIND UI ---
+    private void Start()
+    {
+        if (isLocalPlayer && ShieldText == null)
+        {
+            ShieldText = GameObject.Find("ShieldText")?.GetComponent<Text>();
+        }
+    }
+
     // VOICE WRAPPERS
     public void VoiceAttackJab() { if (isLocalPlayer && !IsDead) _attackQueue.Enqueue("Jab"); }
     public void VoiceAttackCross() { if (isLocalPlayer && !IsDead) _attackQueue.Enqueue("Cross"); }
@@ -27,6 +45,12 @@ public class PlayerCombat : NetworkBehaviour
 
     private void Update()
     {
+        // --- NEW: UPDATE SHIELD UI ---
+        if (isLocalPlayer && ShieldText != null)
+        {
+            ShieldText.text = CurrentShield.ToString();
+        }
+
         if (!isLocalPlayer || IsDead || IsHurting) return;
 
         // Only pull from queue if we are NOT currently in an attack animation
@@ -60,6 +84,7 @@ public class PlayerCombat : NetworkBehaviour
         yield return new WaitUntil(() => isAttacking == false);
         yield return new WaitForSeconds(0.1f);
     }
+
     // --- ANIMATION EVENTS ---
     // Make sure these are placed at the very start and very end of your attack clips!
     public void StartAttackWindow()
@@ -95,7 +120,6 @@ public class PlayerCombat : NetworkBehaviour
     }
 
     // --- NETWORK COMMANDS ---
-    // --- NETWORK COMMANDS ---
     
     [Command] 
     void CmdTriggerAttack(string t, int damage) 
@@ -107,8 +131,6 @@ public class PlayerCombat : NetworkBehaviour
         RpcTriggerAttack(t); 
     }
 
-    
-    
     [ClientRpc] 
     void RpcTriggerAttack(string t) 
     { 
@@ -119,9 +141,54 @@ public class PlayerCombat : NetworkBehaviour
     public void TakeDamage(int damage)
     {
         if (IsDead) return;
-        CurrentHealth -= damage;
-        if (CurrentHealth <= 0) RpcKnockout();
-        else RpcTriggerHurt("Hurt " + Random.Range(1, 5));
+
+        // 1. SHIELD RECHARGE RESET: Stop the current timer and restart it
+        if (_rechargeCoroutine != null) StopCoroutine(_rechargeCoroutine);
+        _rechargeCoroutine = StartCoroutine(ShieldRechargeRoutine());
+
+        // 2. SHIELD MATH
+        if (CurrentShield > 0)
+        {
+            CurrentShield -= damage;
+            
+            if (CurrentShield < 0)
+            {
+                // Shield Broke! Overflow damage hits health and causes flinch.
+                CurrentHealth += CurrentShield; // CurrentShield is negative here, so this subtracts it
+                CurrentShield = 0;
+                
+                if (CurrentHealth <= 0) RpcKnockout();
+                else RpcTriggerHurt("Hurt " + Random.Range(1, 5));
+            }
+            else
+            {
+                // Shield absorbed the hit completely! Player takes NO flinch animation.
+                // We do NOT call RpcTriggerHurt here!
+                Debug.Log("Shield absorbed the hit! No flinch animation triggered.");
+            }
+        }
+        else
+        {
+            // No shield left. Direct health damage and flinch.
+            CurrentHealth -= damage;
+            if (CurrentHealth <= 0) RpcKnockout();
+            else RpcTriggerHurt("Hurt " + Random.Range(1, 5));
+        }
+    }
+
+    // --- NEW: SHIELD TIMER COROUTINE ---
+    [Server]
+    private IEnumerator ShieldRechargeRoutine()
+    {
+        // Wait 3 seconds of taking no damage
+        yield return new WaitForSeconds(3f);
+
+        // Rapidly recharge the shield back to full
+        while (CurrentShield < MaxShield && !IsDead)
+        {
+            CurrentShield++;
+            yield return new WaitForSeconds(0.05f); // Super fast recharge speed
+        }
     }
 
     [ClientRpc]
@@ -200,6 +267,4 @@ public class PlayerCombat : NetworkBehaviour
 
     [ClientRpc] void RpcKnockout() { IsDead = true; animator.SetTrigger("Knock out"); }
 
-    //[Command] void CmdTriggerAttack(string t) => RpcTriggerAttack(t);
-    //[ClientRpc] void RpcTriggerAttack(string t) { if (!isLocalPlayer && animator != null) animator.SetTrigger(t); }
 }

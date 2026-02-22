@@ -14,35 +14,35 @@ public class VoiceCommandManager : MonoBehaviour
     public Text InputText; 
     public Text OutputText;
 
-    private string _previousPartialText = "";
-    private PlayerController _myController; // For Movement
-    private PlayerCombat _myCombat;         // For Attacks
+    [SerializeField] private string _previousPartialText = "";
+    [SerializeField] private PlayerController _myController; // For Movement
+    [SerializeField] private PlayerCombat _myCombat;         // For Attacks
+
+    private PlayerEnergy _myEnergy; // Add this reference at the top of the script!
 
     void Start()
     {
         _myController = GetComponent<PlayerController>();
         _myCombat = GetComponent<PlayerCombat>();
+        _myEnergy = GetComponent<PlayerEnergy>(); // Get the new script!
 
-        // 1. If this is a remote player's body on our screen, just turn off this script.
-        // We removed VoskInstance.enabled = false so we don't accidentally mute the Host!
         if (!_myController.isLocalPlayer)
         {
+            if (VoskInstance != null) Destroy(VoskInstance); 
             this.enabled = false; 
             return;
         }
 
-        // Standard UI Setup
-        if (InputText == null) InputText = GameObject.Find("InputText")?.GetComponent<Text>();
-        if (OutputText == null) OutputText = GameObject.Find("OutputText")?.GetComponent<Text>();
-
-        // 2. Only hook up the events if this is OUR local player
         if (VoskInstance != null)
         {
+            VoskInstance.enabled = true; 
             VoskInstance.OnPartialResult += HandlePartialResult;
             VoskInstance.OnTranscriptionResult += HandleFinalResult;
             VoskInstance.StartRecordingManual(); 
         }
 
+        if (InputText == null) InputText = GameObject.Find("InputText")?.GetComponent<Text>();
+        if (OutputText == null) OutputText = GameObject.Find("OutputText")?.GetComponent<Text>();
         if (OutputText != null) OutputText.text = "Voice Ready.";
     }
 
@@ -73,34 +73,67 @@ public class VoiceCommandManager : MonoBehaviour
 
     void ProcessWords(string segment)
     {
+        if (_myCombat.IsHurting || _myCombat.IsDead)
+        {
+            LogExecution("BLOCKED (Stunned)");
+            return; 
+        }
+
         string lowerSegment = segment.ToLower().Trim();
         
-        // Phrase Check
+        // Phrase Check: UPPERCUT (Cost 4)
         if (GetSimilarity(lowerSegment, "uppercut") > 0.6f)
         {
-            _myCombat.VoiceAttackUppercut(); 
-            LogExecution("UPPERCUT");
+            if (_myEnergy.TryUseEnergy(4f))
+            {
+                _myCombat.VoiceAttackUppercut(); 
+                LogExecution("UPPERCUT (-4)");
+            }
+            else LogExecution("NO ENERGY FOR UPPERCUT!");
+            
+            return;
+        }
+
+        string lowerSegment2 = segment.ToLower().Trim();
+
+        // NEW: CANCEL LOGIC
+        if (GetSimilarity(lowerSegment2, "cancel") > 0.8f || lowerSegment2 == "stop")
+        {
+            _myCombat.RequestCancelAttack();
+            LogExecution("CANCELLED");
             return;
         }
 
         string[] words = lowerSegment.Split(' ');
         foreach (string word in words)
         {
-            bool found = true;
+            bool recognized = false;
+            float cost = 0f;
+            string cmdName = "";
+            System.Action actionToPerform = null; // Stores the command to execute
 
-            // Combat Actions (PlayerCombat.cs)
-            if (GetSimilarity(word, "punch") > 0.72f) _myCombat.VoiceAttackJab();
-            else if (GetSimilarity(word, "cross") > 0.72f) _myCombat.VoiceAttackCross();
-            else if (GetSimilarity(word, "hook") > 0.72f) _myCombat.VoiceAttackHook();
-            
-            // Movement Actions (PlayerController.cs)
-            else if (word == "forward") _myController.VoiceDashForward();
-            else if (word == "back") _myController.VoiceDashBack();
-            else if (word == "left") _myController.VoiceDashLeft();
-            else if (word == "right") _myController.VoiceDashRight();
-            else found = false;
+            // Check dictionary of costs and actions
+            if (GetSimilarity(word, "punch") > 0.72f) { cost = 1f; cmdName = "JAB"; actionToPerform = _myCombat.VoiceAttackJab; recognized = true; }
+            else if (GetSimilarity(word, "cross") > 0.72f) { cost = 2f; cmdName = "CROSS"; actionToPerform = _myCombat.VoiceAttackCross; recognized = true; }
+            else if (GetSimilarity(word, "hook") > 0.72f) { cost = 3f; cmdName = "HOOK"; actionToPerform = _myCombat.VoiceAttackHook; recognized = true; }
+            else if (word == "forward") { cost = 0.5f; cmdName = "FWD DASH"; actionToPerform = _myController.VoiceDashForward; recognized = true; }
+            else if (word == "back") { cost = 0.5f; cmdName = "BCK DASH"; actionToPerform = _myController.VoiceDashBack; recognized = true; }
+            else if (word == "left") { cost = 0.5f; cmdName = "LFT DASH"; actionToPerform = _myController.VoiceDashLeft; recognized = true; }
+            else if (word == "right") { cost = 0.5f; cmdName = "RGT DASH"; actionToPerform = _myController.VoiceDashRight; recognized = true; }
 
-            if (found) LogExecution(word.ToUpper());
+            // If a valid word was spoken, try to buy it with energy
+            if (recognized)
+            {
+                if (_myEnergy.TryUseEnergy(cost))
+                {
+                    actionToPerform.Invoke(); // Executes the punch or dash!
+                    LogExecution($"{cmdName} (-{cost})");
+                }
+                else
+                {
+                    LogExecution($"NO ENERGY FOR {cmdName}");
+                }
+            }
         }
     }
 

@@ -35,26 +35,31 @@ public class PlayerCombat : NetworkBehaviour
             StartCoroutine(PerformAttack(_attackQueue.Dequeue()));
         }
 
-        if (Input.GetKeyDown(KeyCode.E)) CmdTestDamage(); 
+        //if (Input.GetKeyDown(KeyCode.E)) CmdTestDamage(); 
     }
 
     private IEnumerator PerformAttack(string trigger)
     {
-        // 1. Lock the system
         isAttacking = true;
 
-        // 2. Trigger animations
-        if (animator) animator.SetTrigger(trigger);
-        CmdTriggerAttack(trigger);
+        // --- SET DAMAGE VALUES ---
+        int damageToSet = 10; // Default
+        if (trigger == "Cross") damageToSet = 15;
+        else if (trigger == "Hook") damageToSet = 25;
+        else if (trigger == "Uppercut") damageToSet = 30;
 
-        // 3. WAIT until the Animation Event calls EndAttackWindow()
-        // This ensures the next attack in the queue waits for the current one to finish
-        yield return new WaitUntil(() => isAttacking == false);
+        // Set it locally
+        weaponGloveLeft.GetComponent<HitboxProperties>().currentDamage = damageToSet;
+        weaponGloveRight.GetComponent<HitboxProperties>().currentDamage = damageToSet;
+
+        if (animator) animator.SetTrigger(trigger);
         
-        // Small buffer to prevent instant "snapping" between animations
+        // NEW: Send the damage value to the Server!
+        CmdTriggerAttack(trigger, damageToSet);
+
+        yield return new WaitUntil(() => isAttacking == false);
         yield return new WaitForSeconds(0.1f);
     }
-
     // --- ANIMATION EVENTS ---
     // Make sure these are placed at the very start and very end of your attack clips!
     public void StartAttackWindow()
@@ -69,42 +74,46 @@ public class PlayerCombat : NetworkBehaviour
 
     private void OnTriggerEnter(Collider other)
     {
-        if (!other.CompareTag("Jabbed")) return;
+        if (!isServer || !other.CompareTag("Jabbed")) return;
 
-        
+        // Get the properties script from the glove that hit us
+        HitboxProperties hitbox = other.GetComponent<HitboxProperties>();
+        if (hitbox == null || hitbox.owner == null) return;
 
-        PlayerCombat attacker = other.GetComponentInParent<PlayerCombat>();
-        if (attacker == null) return;
+        // Self-harm protection using the owner reference
+        if (hitbox.owner.netId == this.netId) return;
 
-        // 1. Log exactly who hit who, on every screen!
-        Debug.Log($"[Physics] Victim: {gameObject.name} | Attacker: Player {attacker.netId} | isServer: {isServer}");
-
-        // 2. Stop Clients from dealing damage
-        if (!isServer) 
-        {
-            // Debug.Log("Hit ignored: This window is a Client, not the Server.");
-            return; 
-        }
-
-        // 3. Stop Self-Harm
-        if (attacker.netId == this.netId) 
-        {
-            Debug.Log("Hit ignored: Player hit themselves.");
-            return; 
-        }
-
-        // 4. WE HAVE A VALID MULTIPLAYER HIT!
-        Debug.Log($"[Physics] BOOM! VALID HIT! Player {attacker.netId} punched {gameObject.name}!");
-        
         if (!IsDead && !IsHurting) 
         {
-            ParticlePoolManager.Instance.PlayParticle("HitSpatter", other.gameObject.transform.position);
-            TakeDamage(10);
+            Debug.Log($"Hit by {hitbox.owner.netId} for {hitbox.currentDamage} damage!");
+            
+            ParticlePoolManager.Instance.PlayParticle("Hit", other.transform.position);
+            
+            // USE THE VARIABLE DAMAGE HERE
+            TakeDamage(hitbox.currentDamage);
         }
     }
 
     // --- NETWORK COMMANDS ---
-    [Command] void CmdTestDamage() => TakeDamage(10);
+    // --- NETWORK COMMANDS ---
+    
+    [Command] 
+    void CmdTriggerAttack(string t, int damage) 
+    { 
+        // The Server updates its own copy of the gloves so it knows how hard the punch is!
+        weaponGloveLeft.GetComponent<HitboxProperties>().currentDamage = damage;
+        weaponGloveRight.GetComponent<HitboxProperties>().currentDamage = damage;
+        
+        RpcTriggerAttack(t); 
+    }
+
+    
+    
+    [ClientRpc] 
+    void RpcTriggerAttack(string t) 
+    { 
+        if (!isLocalPlayer && animator != null) animator.SetTrigger(t); 
+    }
 
     [Server]
     public void TakeDamage(int damage)
@@ -189,8 +198,8 @@ public class PlayerCombat : NetworkBehaviour
         // _attackQueue.Clear(); 
     }
 
-    [ClientRpc] void RpcKnockout() { IsDead = true; animator.SetTrigger("Knockout"); }
+    [ClientRpc] void RpcKnockout() { IsDead = true; animator.SetTrigger("Knock out"); }
 
-    [Command] void CmdTriggerAttack(string t) => RpcTriggerAttack(t);
-    [ClientRpc] void RpcTriggerAttack(string t) { if (!isLocalPlayer && animator != null) animator.SetTrigger(t); }
+    //[Command] void CmdTriggerAttack(string t) => RpcTriggerAttack(t);
+    //[ClientRpc] void RpcTriggerAttack(string t) { if (!isLocalPlayer && animator != null) animator.SetTrigger(t); }
 }

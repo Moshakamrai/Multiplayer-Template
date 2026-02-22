@@ -1707,6 +1707,9 @@ PrefabInstance:
     m_AddedComponents:
     - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: d892b5bc1d8d6104cad8e60fac3b01b0, type: 3}
       insertIndex: -1
+      addedObject: {fileID: 6753207961264779783}
+    - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: d892b5bc1d8d6104cad8e60fac3b01b0, type: 3}
+      insertIndex: -1
       addedObject: {fileID: 4246265404567632835}
   m_SourcePrefab: {fileID: 100100000, guid: d892b5bc1d8d6104cad8e60fac3b01b0, type: 3}
 --- !u!1 &2707507557071005399 stripped
@@ -1714,6 +1717,20 @@ GameObject:
   m_CorrespondingSourceObject: {fileID: 919132149155446097, guid: d892b5bc1d8d6104cad8e60fac3b01b0, type: 3}
   m_PrefabInstance: {fileID: 2977888803377257350}
   m_PrefabAsset: {fileID: 0}
+--- !u!114 &6753207961264779783
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2707507557071005399}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e94b9a1563316b94a969fd08202aea0f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  currentDamage: 10
+  owner: {fileID: 0}
 --- !u!135 &4246265404567632835
 SphereCollider:
   m_ObjectHideFlags: 0
@@ -1818,6 +1835,9 @@ PrefabInstance:
     m_AddedComponents:
     - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: d892b5bc1d8d6104cad8e60fac3b01b0, type: 3}
       insertIndex: -1
+      addedObject: {fileID: 6942286029032734358}
+    - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: d892b5bc1d8d6104cad8e60fac3b01b0, type: 3}
+      insertIndex: -1
       addedObject: {fileID: 6838551958696098282}
   m_SourcePrefab: {fileID: 100100000, guid: d892b5bc1d8d6104cad8e60fac3b01b0, type: 3}
 --- !u!1 &6034412296530589488 stripped
@@ -1825,6 +1845,20 @@ GameObject:
   m_CorrespondingSourceObject: {fileID: 919132149155446097, guid: d892b5bc1d8d6104cad8e60fac3b01b0, type: 3}
   m_PrefabInstance: {fileID: 6881469250871577185}
   m_PrefabAsset: {fileID: 0}
+--- !u!114 &6942286029032734358
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6034412296530589488}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e94b9a1563316b94a969fd08202aea0f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  currentDamage: 10
+  owner: {fileID: 0}
 --- !u!135 &6838551958696098282
 SphereCollider:
   m_ObjectHideFlags: 0

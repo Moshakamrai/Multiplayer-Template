@@ -90,7 +90,7 @@ PlayerSettings:
   hideHomeButton: 0
   submitAnalytics: 1
   usePlayerLog: 1
-  dedicatedServerOptimizations: 0
+  dedicatedServerOptimizations: 1
   bakeCollisionMeshes: 0
   forceSingleInstance: 0
   useFlipModelSwapchain: 1
@@ -763,6 +763,7 @@ PlayerSettings:
     PS4: 1
     PS5: 1
     QNX: 1
+    Server: 3
     Stadia: 1
     VisionOS: 1
     WebGL: 1

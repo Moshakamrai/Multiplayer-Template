@@ -276,77 +276,80 @@ public class GameManager : NetworkManager
         }
     }
 
-    public override void Awake()
+public override void Awake()
+{
+    base.Awake();
+
+    if (Application.isBatchMode)
     {
-        // Ensure there is only one manager.
-        if (Instance != null && Instance != this)
+        // 1. Get the active transport
+        Transport activeTransport = Transport.active != null ? Transport.active : GetComponent<Transport>();
+        ushort displayPort = 0;
+
+        // 2. Cast to KcpTransport to get the port
+        if (activeTransport is kcp2k.KcpTransport kcp)
         {
-            Destroy(gameObject);
-            return;
+            displayPort = kcp.Port;
         }
-        
-        base.Awake();
+        else if (activeTransport is Mirror.TelepathyTransport tele)
+        {
+            displayPort = tele.port;
+        }
 
-        // Load values.
-        SetResolution(PlayerPrefs.GetInt(FullscreenKey) != 0, true);
-        networkAddress = PlayerPrefs.GetString(nameof(networkAddress), DefaultAddress).Trim();
-        PlayerName = PlayerPrefs.GetString(nameof(PlayerName), DefaultPlayerName).Trim();
-        _sensitivity = PlayerPrefs.GetFloat(nameof(Sensitivity), DefaultSensitivity);
-        Sound = PlayerPrefs.GetFloat(nameof(Sound), DefaultAudio);
+        Debug.Log($"🌐 SERVER DETECTED: Starting Mirror Server on port {displayPort}");
+        StartServer(); 
+        return; 
     }
 
-    public override void Start()
-    {
-        base.Start();
-        
-        // Get the root.
-        _optionsRoot = GetComponent<UIDocument>().rootVisualElement;
-        
-        // Store elements.
-        _closeButton = _optionsRoot.Q<Button>("CloseButton");
-        _lobbyButton = _optionsRoot.Q<Button>("LobbyButton");
-        _leaveButton = _optionsRoot.Q<Button>("LeaveButton");
-        _soundSlider = _optionsRoot.Q<Slider>("SoundSlider");
-        _sensitivityFloatField = _optionsRoot.Q<FloatField>("SensitivityFloatField");
-        
-        // Add button callbacks.
-        _closeButton.clicked += HideOptions;
-        _lobbyButton.clicked += ReturnToLobby;
-        _leaveButton.clicked += LeaveMatch;
+    // --- EVERYTHING BELOW THIS IS FOR YOUR LAPTOP ONLY ---
+    SetResolution(PlayerPrefs.GetInt(FullscreenKey) != 0, true);
+    PlayerName = PlayerPrefs.GetString(nameof(PlayerName), DefaultPlayerName).Trim();
+    _sensitivity = PlayerPrefs.GetFloat(nameof(Sensitivity), DefaultSensitivity);
+    Sound = PlayerPrefs.GetFloat(nameof(Sound), DefaultAudio);
+}
 
-        // Set field changing callbacks.
-        _soundSlider.RegisterValueChangedCallback(SoundChanged);
-        _sensitivityFloatField.RegisterValueChangedCallback(SensitivityChanged);
-        
-        // Set initial field values.
-        _soundSlider.value = Sound;
-        _sensitivityFloatField.value = _sensitivity;
-    }
+public override void Start()
+{
+    // 3. Prevent the server from running UI logic in Start()
+    if (Application.isBatchMode) return;
+
+    base.Start();
+
+    // 4. Client-Only UI logic
+    _optionsRoot = GetComponent<UIDocument>().rootVisualElement;
+    _closeButton = _optionsRoot.Q<Button>("CloseButton");
+    _lobbyButton = _optionsRoot.Q<Button>("LobbyButton");
+    _leaveButton = _optionsRoot.Q<Button>("LeaveButton");
+    _soundSlider = _optionsRoot.Q<Slider>("SoundSlider");
+    _sensitivityFloatField = _optionsRoot.Q<FloatField>("SensitivityFloatField");
+    
+    _closeButton.clicked += HideOptions;
+    _lobbyButton.clicked += ReturnToLobby;
+    _leaveButton.clicked += LeaveMatch;
+    _soundSlider.RegisterValueChangedCallback(SoundChanged);
+    _sensitivityFloatField.RegisterValueChangedCallback(SensitivityChanged);
+    
+    _soundSlider.value = Sound;
+    _sensitivityFloatField.value = _sensitivity;
+}
+
+    
 
     public override void OnDestroy()
     {
         base.OnDestroy();
 
+        // 🛑 HEADLESS PROTECTION: Skip UI cleanup and resolution saving on server
+        if (Application.isBatchMode) return;
+
         // Cleanup buttons.
-        if (_closeButton != null)
-        {
-            _closeButton.clicked -= HideOptions;
-        }
-
-        if (_lobbyButton != null)
-        {
-            _lobbyButton.clicked -= ReturnToLobby;
-        }
-
-        if (_leaveButton != null)
-        {
-            _leaveButton.clicked -= LeaveMatch;
-        }
+        if (_closeButton != null) _closeButton.clicked -= HideOptions;
+        if (_lobbyButton != null) _lobbyButton.clicked -= ReturnToLobby;
+        if (_leaveButton != null) _leaveButton.clicked -= LeaveMatch;
 
         _sensitivityFloatField?.UnregisterValueChangedCallback(SensitivityChanged);
         _soundSlider?.UnregisterValueChangedCallback(SoundChanged);
 
-        // Save the screen resolution.
         SaveResolution();
     }
     
@@ -354,7 +357,9 @@ public class GameManager : NetworkManager
     {
         base.OnApplicationQuit();
         
-        // Save the screen resolution.
+        // 🛑 HEADLESS PROTECTION: Skip resolution saving on server
+        if (Application.isBatchMode) return;
+
         SaveResolution();
     }
 
@@ -362,24 +367,25 @@ public class GameManager : NetworkManager
     {
         base.LateUpdate();
 
-        // Handle the cursor.
-        HandleCursor();
-
-        // Handle displaying the options.
-        HandleOptions();
-
-        // If in the lobby, display ready to start messages.
+        // 🛑 SERVER LOGIC: The server still needs to check if players are ready
         if (IsLobby)
         {
             ReadyToStart();
         }
+
+        // 🛑 HEADLESS PROTECTION: Stop here if running in the cloud.
+        // The server has no Cursor, UI, or Camera to handle.
+        if (Application.isBatchMode) return;
+
+        // --- CLIENT ONLY BELOW THIS LINE ---
+        HandleCursor();
+        HandleOptions();
         
         if (!IsClient)
         {
             return;
         }
         
-        // Handle objects you can interact with and the camera on clients (not standalone servers).
         HandleInteractions();
         HandleCamera();
     }
@@ -655,6 +661,7 @@ public class GameManager : NetworkManager
     /// </summary>
     private static void SaveResolution()
     {
+        if (Application.isBatchMode) return;
         // Save the fullscreen value.
         PlayerPrefs.SetInt(FullscreenKey, Screen.fullScreenMode == FullScreenMode.Windowed ? 0 : 1);
 
@@ -721,4 +728,22 @@ public class GameManager : NetworkManager
     {
         SetResolution(Screen.fullScreenMode == FullScreenMode.Windowed);
     }
+public override void OnClientConnect()
+{
+    base.OnClientConnect();
+    Debug.Log("🚀 SUCCESS: We are physically connected to Edgegap!");
+
+    // FORCE SYNC: If the server is in the Lobby but we are still in Menu, move us.
+    if (SceneManager.GetActiveScene().name != onlineScene)
+    {
+        Debug.Log($"⚠️ Scene mismatch. Force loading: {onlineScene}");
+        SceneManager.LoadScene(onlineScene);
+    }
+}
+
+public override void OnClientDisconnect()
+{
+    base.OnClientDisconnect();
+    Debug.Log("❌ ERROR: The connection was closed or timed out.");
+}
 }

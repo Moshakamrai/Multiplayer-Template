@@ -82,12 +82,12 @@ public class VoiceCommandManager : MonoBehaviour
         string lowerSegment = segment.ToLower().Trim();
         
         // Phrase Check: UPPERCUT (Cost 4)
-        if (GetSimilarity(lowerSegment, "uppercut") > 0.6f)
+        if (GetSimilarity(lowerSegment, "upper strike") > 0.6f)
         {
             if (_myEnergy.TryUseEnergy(4f))
             {
                 _myCombat.VoiceAttackUppercut(); 
-                LogExecution("UPPERCUT (-4)");
+                LogExecution("upper strike (-4)");
             }
             else LogExecution("NO ENERGY FOR UPPERCUT!");
             

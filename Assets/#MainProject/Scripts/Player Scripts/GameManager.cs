@@ -276,52 +276,50 @@ public class GameManager : NetworkManager
         }
     }
 
-    public override void Awake()
+   public override void Awake()
+{
+    // 1. Singleton Check: Essential because you have this in every scene!
+    if (singleton != null && singleton != this)
     {
-        // Ensure there is only one manager.
-        if (Instance != null && Instance != this)
-        {
-            Destroy(gameObject);
-            return;
-        }
-        
-        base.Awake();
-
-        // Load values.
-        SetResolution(PlayerPrefs.GetInt(FullscreenKey) != 0, true);
-        networkAddress = PlayerPrefs.GetString(nameof(networkAddress), DefaultAddress).Trim();
-        PlayerName = PlayerPrefs.GetString(nameof(PlayerName), DefaultPlayerName).Trim();
-        _sensitivity = PlayerPrefs.GetFloat(nameof(Sensitivity), DefaultSensitivity);
-        Sound = PlayerPrefs.GetFloat(nameof(Sound), DefaultAudio);
+        Destroy(gameObject);
+        return;
     }
+    
+    base.Awake();
 
-    public override void Start()
-    {
-        base.Start();
-        
-        // Get the root.
-        _optionsRoot = GetComponent<UIDocument>().rootVisualElement;
-        
-        // Store elements.
-        _closeButton = _optionsRoot.Q<Button>("CloseButton");
-        _lobbyButton = _optionsRoot.Q<Button>("LobbyButton");
-        _leaveButton = _optionsRoot.Q<Button>("LeaveButton");
-        _soundSlider = _optionsRoot.Q<Slider>("SoundSlider");
-        _sensitivityFloatField = _optionsRoot.Q<FloatField>("SensitivityFloatField");
-        
-        // Add button callbacks.
-        _closeButton.clicked += HideOptions;
-        _lobbyButton.clicked += ReturnToLobby;
-        _leaveButton.clicked += LeaveMatch;
+    // 2. Client-Specific Setup
+    // We don't need the batchmode check if we are 100% committed to Steam P2P.
+    SetResolution(PlayerPrefs.GetInt(FullscreenKey) != 0, true);
+    PlayerName = PlayerPrefs.GetString(nameof(PlayerName), DefaultPlayerName).Trim();
+    _sensitivity = PlayerPrefs.GetFloat(nameof(Sensitivity), DefaultSensitivity);
+    Sound = PlayerPrefs.GetFloat(nameof(Sound), DefaultAudio);
+}
 
-        // Set field changing callbacks.
-        _soundSlider.RegisterValueChangedCallback(SoundChanged);
-        _sensitivityFloatField.RegisterValueChangedCallback(SensitivityChanged);
-        
-        // Set initial field values.
-        _soundSlider.value = Sound;
-        _sensitivityFloatField.value = _sensitivity;
-    }
+public override void Start()
+{
+    base.Start();
+    
+    // 3. UI Protection: Since GameManager persists, we must find the UI of the current scene.
+    UIDocument uiDoc = GetComponent<UIDocument>();
+    if (uiDoc == null || uiDoc.rootVisualElement == null) return;
+
+    _optionsRoot = uiDoc.rootVisualElement;
+    
+    // Store elements (using Null Propagation ?. to be safe)
+    _closeButton = _optionsRoot.Q<Button>("CloseButton");
+    _lobbyButton = _optionsRoot.Q<Button>("LobbyButton");
+    _leaveButton = _optionsRoot.Q<Button>("LeaveButton");
+    _soundSlider = _optionsRoot.Q<Slider>("SoundSlider");
+    _sensitivityFloatField = _optionsRoot.Q<FloatField>("SensitivityFloatField");
+    
+    // Bind callbacks
+    if (_closeButton != null) _closeButton.clicked += HideOptions;
+    if (_lobbyButton != null) _lobbyButton.clicked += ReturnToLobby;
+    if (_leaveButton != null) _leaveButton.clicked += LeaveMatch;
+
+    if (_soundSlider != null) _soundSlider.RegisterValueChangedCallback(SoundChanged);
+    if (_sensitivityFloatField != null) _sensitivityFloatField.RegisterValueChangedCallback(SensitivityChanged);
+}
 
     public override void OnDestroy()
     {
@@ -448,6 +446,7 @@ public class GameManager : NetworkManager
         {
             camTransform.position = CameraPosition.position;
             camTransform.rotation = CameraPosition.rotation;
+            _cam.fieldOfView = 80;
         }
 
         transform.position = camTransform.position;

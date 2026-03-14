@@ -82,13 +82,13 @@ public class PlayerController : NetworkBehaviour
 
     private void HandleTestingInput()
     {
-        if (Input.GetKeyDown(KeyCode.P)) CmdTriggerEquidistance();
+        //if (Input.GetKeyDown(KeyCode.P)) CmdTriggerEquidistance();
         
         // Testing shortcuts
-        if (Input.GetKeyDown(KeyCode.I)) VoiceDashForward();
-        if (Input.GetKeyDown(KeyCode.K)) VoiceDashBack();
-        if (Input.GetKeyDown(KeyCode.J)) VoiceDashLeft();
-        if (Input.GetKeyDown(KeyCode.L)) VoiceDashRight();
+        //if (Input.GetKeyDown(KeyCode.I)) VoiceDashForward();
+        //if (Input.GetKeyDown(KeyCode.K)) VoiceDashBack();
+       // if (Input.GetKeyDown(KeyCode.J)) VoiceDashLeft();
+        //if (Input.GetKeyDown(KeyCode.L)) VoiceDashRight();
     }
 
     private void FixedUpdate()
@@ -120,7 +120,7 @@ public class PlayerController : NetworkBehaviour
 
     private void ProcessDashQueue()
     {
-        if (_isDashing || Time.time - _lastDashTime < dashCooldown || _dashQueue.Count == 0) return;
+        if (_isDashing || _combat.isAttacking || Time.time - _lastDashTime < dashCooldown || _dashQueue.Count == 0) return;
         Vector3 nextDir = _dashQueue.Dequeue();
         ApplyDash(nextDir);
         CmdDash(nextDir);

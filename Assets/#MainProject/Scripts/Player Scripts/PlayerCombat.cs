@@ -3,6 +3,7 @@ using UnityEngine;
 using UnityEngine.UI; // Added for ShieldText
 using System.Collections;
 using System.Collections.Generic;
+using UnityEngine.SceneManagement;
 
 public class PlayerCombat : NetworkBehaviour
 {
@@ -28,12 +29,20 @@ public class PlayerCombat : NetworkBehaviour
     public SphereCollider weaponGloveLeft;
     public SphereCollider weaponGloveRight;
 
+    [Header("VFX Settings")]
+    public Renderer playerRenderer; // Drag your Character's SkinnedMeshRenderer here
+    public Material flashMaterial;  // Create a simple "Unlit/Color" material that is pure white
+    public Material _originalMaterial;
+
     // --- NEW: AUTO-FIND UI ---
     private void Start()
     {
         if (isLocalPlayer && ShieldText == null)
         {
             ShieldText = GameObject.Find("ShieldText")?.GetComponent<Text>();
+
+            //if (playerRenderer != null) _originalMaterial = playerRenderer.material;
+
         }
     }
 
@@ -145,7 +154,7 @@ public class PlayerCombat : NetworkBehaviour
         // 1. SHIELD RECHARGE RESET: Stop the current timer and restart it
         if (_rechargeCoroutine != null) StopCoroutine(_rechargeCoroutine);
         _rechargeCoroutine = StartCoroutine(ShieldRechargeRoutine());
-
+        StartCoroutine(FlashEffectRoutine());
         // 2. SHIELD MATH
         if (CurrentShield > 0)
         {
@@ -181,7 +190,7 @@ public class PlayerCombat : NetworkBehaviour
     private IEnumerator ShieldRechargeRoutine()
     {
         // Wait 3 seconds of taking no damage
-        yield return new WaitForSeconds(3f);
+        yield return new WaitForSeconds(6f);
 
         // Rapidly recharge the shield back to full
         while (CurrentShield < MaxShield && !IsDead)
@@ -209,6 +218,7 @@ public class PlayerCombat : NetworkBehaviour
 
             // 3. Start the Stun State
             StartCoroutine(HurtStunTimer());
+            
         }
     }
 
@@ -265,6 +275,41 @@ public class PlayerCombat : NetworkBehaviour
         // _attackQueue.Clear(); 
     }
 
-    [ClientRpc] void RpcKnockout() { IsDead = true; animator.SetTrigger("Knock out"); }
+    private IEnumerator FlashEffectRoutine()
+{
+    if (playerRenderer == null || flashMaterial == null) yield break;
+
+    // First Blink
+    playerRenderer.material = flashMaterial;
+    yield return new WaitForSeconds(0.1f);
+    playerRenderer.material = _originalMaterial;
+    
+    // Second Blink (makes it feel more like a 'flicker')
+    yield return new WaitForSeconds(0.05f);
+    playerRenderer.material = flashMaterial;
+    yield return new WaitForSeconds(0.1f);
+    playerRenderer.material = _originalMaterial;
+}
+
+[Server]
+private IEnumerator ServerRestartMatchRoutine()
+{
+    Debug.Log("Match Over. Restarting in 4 seconds...");
+    yield return new WaitForSeconds(4f);
+
+    // This tells all connected clients to reload the level scene
+    // It will reset health, positions, and the attack queue automatically.
+    NetworkManager.singleton.ServerChangeScene(SceneManager.GetActiveScene().name);
+}
+
+    [ClientRpc] 
+    void RpcKnockout() 
+    { IsDead = true; animator.SetTrigger("Knock out");
+    // ONLY the server should start the timer to restart the game
+    if (isServer) 
+    {
+        StartCoroutine(ServerRestartMatchRoutine());
+    }
+    }
 
 }

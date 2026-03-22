@@ -86,14 +86,13 @@ public class PlayerController : NetworkBehaviour
         }
     }
 
-   // Add this to PlayerController.cs
     [Command]
     public void CmdRhythmDash(Vector3 dir)
     {
-        // This triggers the dash on the server and syncs to all clients
         ApplyDash(dir); 
         RpcSyncDash(dir);
     }
+
     [Command] void CmdDash(Vector3 dir) { ApplyDash(dir); RpcSyncDash(dir); }
     [ClientRpc] void RpcSyncDash(Vector3 dir) { if (!isLocalPlayer) ApplyDash(dir); }
 
@@ -103,9 +102,21 @@ public class PlayerController : NetworkBehaviour
         _dashDirection = dir;
         _dashElapsed = 0f;
         _isDashing = true;
-    }
 
-    
+        // --- NEW: TRIGGER ANIMATIONS ---
+        if (_combat != null && _combat.animator != null)
+        {
+            // Vector3.left is (-1, 0, 0), Vector3.right is (1, 0, 0)
+            if (dir == Vector3.left)
+            {
+                _combat.animator.Play("MoveLeft");
+            }
+            else if (dir == Vector3.right)
+            {
+                _combat.animator.Play("MoveRight");
+            }
+        }
+    }
 
     public void ApplyDashExternal(Vector3 dir) { ApplyDash(dir); }
 
@@ -175,8 +186,7 @@ public class PlayerController : NetworkBehaviour
         CmdDash(nextDir);
     }
 
-    public void VoiceDashForward() { if (_dashQueue.Count < 4) _dashQueue.Enqueue(Vector3.forward); }
-    public void VoiceDashBack() { if (_dashQueue.Count < 4) _dashQueue.Enqueue(Vector3.back); }
+    // REMOVED: Forward and Back Voice triggers as requested
     public void VoiceDashLeft() { if (_dashQueue.Count < 4) _dashQueue.Enqueue(Vector3.left); }
     public void VoiceDashRight() { if (_dashQueue.Count < 4) _dashQueue.Enqueue(Vector3.right); }
 

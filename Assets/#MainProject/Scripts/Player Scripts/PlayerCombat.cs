@@ -20,6 +20,10 @@ public class PlayerCombat : NetworkBehaviour
     public SphereCollider weaponGloveLeft;
     public SphereCollider weaponGloveRight;
 
+    // 1. Add these variables to the top of PlayerCombat.cs
+    private struct RhythmAction { public string attack; public Vector3 dash; }
+    private List<RhythmAction> _comboBuffer = new List<RhythmAction>();
+
     [Header("VFX Settings")]
     public Renderer playerRenderer;
     public Material flashMaterial;
@@ -65,24 +69,65 @@ public class PlayerCombat : NetworkBehaviour
     }
 
     public void QueueRhythmMove(string attackTrigger, Vector3 dashDir)
+{
+    if (IsDead || IsHurting) return;
+
+    if (RhythmRoundManager.Instance.currentType == RoundType.SlowRhythm)
     {
-        // SLOW RHYTHM: Last command wipes the buffer entirely
-        _pendingAttackTrigger = attackTrigger;
-        _pendingDashDirection = dashDir;
-        Debug.Log($"<color=orange>BUFFER UPDATED: {attackTrigger} | {dashDir}</color>");
+        // SLOW RHYTHM: Support for one attack AND one movement in the same 4s pulse
+        if (!string.IsNullOrEmpty(attackTrigger)) _pendingAttackTrigger = attackTrigger;
+        if (dashDir != Vector3.zero) _pendingDashDirection = dashDir;
     }
-
-    public void ExecuteRhythmImpact()
+    else
     {
-        if (!string.IsNullOrEmpty(_pendingAttackTrigger)) 
-            StartCoroutine(PerformAttack(_pendingAttackTrigger));
-        
-        if (_pendingDashDirection != Vector3.zero) 
-            GetComponent<PlayerController>().CmdRhythmDash(_pendingDashDirection);
+        // FAST COMBO: Strictly limit to 4 moves per 8-second window
+        if (_comboBuffer.Count < 4)
+        {
+            _comboBuffer.Add(new RhythmAction { attack = attackTrigger, dash = dashDir });
+            Debug.Log($"<color=lime>Combo Slot {_comboBuffer.Count}/4: {attackTrigger}{dashDir}</color>");
+        }
+    }
+}
 
+public void ExecuteRhythmImpact()
+{
+    if (RhythmRoundManager.Instance.currentType == RoundType.SlowRhythm)
+    {
+        if (!string.IsNullOrEmpty(_pendingAttackTrigger)) StartCoroutine(PerformAttack(_pendingAttackTrigger));
+        if (_pendingDashDirection != Vector3.zero) GetComponent<PlayerController>().CmdRhythmDash(_pendingDashDirection);
+        
         _pendingAttackTrigger = "";
         _pendingDashDirection = Vector3.zero;
     }
+    else
+    {
+        // Execute the 4-move chain sequentially
+        StartCoroutine(PlayComboRoutine());
+    }
+}
+
+private IEnumerator PlayComboRoutine()
+{
+    foreach (var action in _comboBuffer)
+    {
+        // CRITICAL: Wait until the previous animation is fully finished
+        yield return new WaitUntil(() => isAttacking == false);
+
+        if (!string.IsNullOrEmpty(action.attack))
+        {
+            // yield return ensures we wait for the punch to finish before the next loop
+            yield return StartCoroutine(PerformAttack(action.attack));
+        }
+
+        if (action.dash != Vector3.zero)
+        {
+            GetComponent<PlayerController>().CmdRhythmDash(action.dash);
+            // Small pause for movement so it doesn't look jittery
+            yield return new WaitForSeconds(0.2f); 
+        }
+    }
+    _comboBuffer.Clear(); // Wipe for the next 8s window
+}
 
     public void StartAttackWindow() { isAttacking = true; }
     public void EndAttackWindow() { isAttacking = false; }
@@ -170,4 +215,72 @@ public class PlayerCombat : NetworkBehaviour
 
     [ClientRpc] void RpcKnockout() { IsDead = true; animator.SetTrigger("Knock out"); if (isServer) StartCoroutine(ServerRestartMatchRoutine()); }
     [Server] private IEnumerator ServerRestartMatchRoutine() { yield return new WaitForSeconds(4f); NetworkManager.singleton.ServerChangeScene(SceneManager.GetActiveScene().name); }
+
+
+    // Add this to your PlayerCombat.cs script
+
+private void OnGUI()
+{
+    // 1. Only show the UI for the person actually playing on this laptop
+    if (!isLocalPlayer) return;
+
+    // 2. Only show if a rhythm round is currently running
+    if (RhythmRoundManager.Instance == null || !RhythmRoundManager.Instance.isRoundActive) return;
+
+    // 3. Define the UI Area (Bottom Left)
+    float areaWidth = 300;
+    float areaHeight = 160;
+    GUILayout.BeginArea(new Rect(20, Screen.height - areaHeight - 20, areaWidth, areaHeight));
+
+    // Define a nice green style for the "Locked In" text
+    GUIStyle headerStyle = new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold, fontSize = 18 };
+    headerStyle.normal.textColor = Color.green;
+
+    // --- MODE 1: SLOW RHYTHM DISPLAY ---
+    if (RhythmRoundManager.Instance.currentType == RoundType.SlowRhythm)
+    {
+        GUILayout.Label("LOCKED ACTION:", headerStyle);
+        
+        string atkText = string.IsNullOrEmpty(_pendingAttackTrigger) ? "None" : _pendingAttackTrigger;
+        string dshText = (_pendingDashDirection == Vector3.zero) ? "None" : GetDirectionName(_pendingDashDirection);
+        
+        GUILayout.Label($"Attack: {atkText}");
+        GUILayout.Label($"Move:   {dshText}");
+    }
+    // --- MODE 2: FAST COMBO DISPLAY ---
+    else
+    {
+        GUILayout.Label($"COMBO CHAIN ({_comboBuffer.Count}/4):", headerStyle);
+        
+        for (int i = 0; i < _comboBuffer.Count; i++)
+        {
+            string atk = _comboBuffer[i].attack;
+            string dsh = (_comboBuffer[i].dash == Vector3.zero) ? "" : GetDirectionName(_comboBuffer[i].dash);
+            
+            // Format the display so it shows "1: Jab" or "2: Forward" etc.
+            string displayLine = (atk != "" && dsh != "") ? $"{atk} + {dsh}" : (atk != "" ? atk : dsh);
+            GUILayout.Label($"{i + 1}: {displayLine}");
+        }
+        
+        // Show empty slots if the combo isn't full yet
+        for (int i = _comboBuffer.Count; i < 4; i++)
+        {
+            GUI.color = new Color(1, 1, 1, 0.5f); // Make empty slots transparent
+            GUILayout.Label($"{i + 1}: [ Empty ]");
+            GUI.color = Color.white;
+        }
+    }
+
+    GUILayout.EndArea();
+}
+
+// Helper function to turn Vector3 coordinates into readable words
+private string GetDirectionName(Vector3 dir)
+{
+    if (dir == Vector3.forward) return "Forward";
+    if (dir == Vector3.back) return "Back";
+    if (dir == Vector3.left || dir == new Vector3(-1, 0, 0)) return "Left";
+    if (dir == Vector3.right || dir == new Vector3(1, 0, 0)) return "Right";
+    return dir.ToString();
+}
 }

@@ -28,63 +28,84 @@ public class VoiceCommandManager : MonoBehaviour
         }
     }
 
+   // Update HandlePartialResult in VoiceCommandManager.cs
     void HandlePartialResult(string jsonResult)
     {
         if (!Application.isFocused) return;
+
         string currentText = ParsePartialJson(jsonResult).ToLower().Trim();
         if (string.IsNullOrEmpty(currentText)) return;
 
-        string newSegment = currentText.StartsWith(_previousPartialText) 
-            ? currentText.Substring(_previousPartialText.Length).Trim() : currentText;
+        // Split into arrays to track word-by-word progress
+        string[] currentWords = currentText.Split(new[] { ' ' }, System.StringSplitOptions.RemoveEmptyEntries);
+        string[] previousWords = _previousPartialText.Split(new[] { ' ' }, System.StringSplitOptions.RemoveEmptyEntries);
 
-        _previousPartialText = currentText;
-        if (!string.IsNullOrEmpty(newSegment)) { ProcessWords(newSegment); if (InputText != null) InputText.text = currentText; }
+        // Only process if we have actually heard more words than before
+        if (currentWords.Length > previousWords.Length)
+        {
+            string newWords = "";
+            for (int i = previousWords.Length; i < currentWords.Length; i++)
+            {
+                newWords += currentWords[i] + " ";
+            }
+
+            _previousPartialText = currentText;
+
+            if (!string.IsNullOrEmpty(newWords.Trim())) 
+            { 
+                ProcessWords(newWords.Trim()); 
+                if (InputText != null) InputText.text = currentText; 
+            }
+        }
+        else if (currentWords.Length < previousWords.Length)
+        {
+            // Recognition reset or correction happened
+            _previousPartialText = currentText;
+        }
     }
 
     void HandleFinalResult(string jsonResult) => _previousPartialText = "";
 
     void ProcessWords(string segment)
+{
+    if (_myCombat.IsHurting || _myCombat.IsDead) return;
+    string lowerSegment = segment.ToLower().Trim();
+    bool isRhythm = RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive;
+
+    if (GetSimilarity(lowerSegment, "cancel") > 0.8f || lowerSegment == "stop") { _myCombat.RequestCancelAttack(); return; }
+
+    string[] words = lowerSegment.Split(' ');
+    foreach (string word in words)
     {
-        if (_myCombat.IsHurting || _myCombat.IsDead) return;
-        string lowerSegment = segment.ToLower().Trim();
-        bool isRhythm = RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive;
+        bool recognized = false;
+        float cost = 0f;
+        string cmdName = "";
+        string trigger = "";
+        Vector3 dashDir = Vector3.zero;
 
-        if (GetSimilarity(lowerSegment, "cancel") > 0.8f || lowerSegment == "stop") { _myCombat.RequestCancelAttack(); return; }
+        // COMBAT
+        if (GetSimilarity(word, "punch") > 0.72f) { cost = 1f; cmdName = "JAB"; trigger = "Jab"; recognized = true; }
+        else if (GetSimilarity(word, "cross") > 0.72f) { cost = 2f; cmdName = "CROSS"; trigger = "Cross"; recognized = true; }
+        else if (GetSimilarity(word, "hook") > 0.72f) { cost = 3f; cmdName = "HOOK"; trigger = "Hook"; recognized = true; }
+        
+        // MOVEMENT (Removed Forward and Back per request)
+        else if (GetSimilarity(word, "left") > 0.8f) { cost = 0.5f; cmdName = "LFT"; dashDir = Vector3.left; recognized = true; }
+        else if (GetSimilarity(word, "right") > 0.8f) { cost = 0.5f; cmdName = "RGT"; dashDir = Vector3.right; recognized = true; }
 
-        string[] words = lowerSegment.Split(' ');
-        foreach (string word in words)
+        if (recognized && _myEnergy.TryUseEnergy(cost))
         {
-            bool recognized = false;
-            float cost = 0f;
-            string cmdName = "";
-            string trigger = "";
-            Vector3 dashDir = Vector3.zero;
-
-            // COMBAT
-            if (GetSimilarity(word, "punch") > 0.72f) { cost = 1f; cmdName = "JAB"; trigger = "Jab"; recognized = true; }
-            else if (GetSimilarity(word, "cross") > 0.72f) { cost = 2f; cmdName = "CROSS"; trigger = "Cross"; recognized = true; }
-            else if (GetSimilarity(word, "hook") > 0.72f) { cost = 3f; cmdName = "HOOK"; trigger = "Hook"; recognized = true; }
-            
-            // MOVEMENT (Similarity updated for reliability)
-            else if (GetSimilarity(word, "forward") > 0.8f) { cost = 0.5f; cmdName = "FWD"; dashDir = Vector3.forward; recognized = true; }
-            else if (GetSimilarity(word, "back") > 0.8f) { cost = 0.5f; cmdName = "BCK"; dashDir = Vector3.back; recognized = true; }
-            else if (GetSimilarity(word, "left") > 0.8f) { cost = 0.5f; cmdName = "LFT"; dashDir = Vector3.left; recognized = true; }
-            else if (GetSimilarity(word, "right") > 0.8f) { cost = 0.5f; cmdName = "RGT"; dashDir = Vector3.right; recognized = true; }
-
-            if (recognized && _myEnergy.TryUseEnergy(cost))
+            if (isRhythm) { _myCombat.QueueRhythmMove(trigger, dashDir); LogExecution($"{cmdName} QUEUED"); }
+            else
             {
-                if (isRhythm) { _myCombat.QueueRhythmMove(trigger, dashDir); LogExecution($"{cmdName} QUEUED"); }
-                else
-                {
-                    if (dashDir != Vector3.zero) _myController.CmdRhythmDash(dashDir);
-                    else if (trigger == "Jab") _myCombat.VoiceAttackJab();
-                    else if (trigger == "Cross") _myCombat.VoiceAttackCross();
-                    else if (trigger == "Hook") _myCombat.VoiceAttackHook();
-                    LogExecution($"{cmdName} INSTANT");
-                }
+                if (dashDir != Vector3.zero) _myController.CmdRhythmDash(dashDir);
+                else if (trigger == "Jab") _myCombat.VoiceAttackJab();
+                else if (trigger == "Cross") _myCombat.VoiceAttackCross();
+                else if (trigger == "Hook") _myCombat.VoiceAttackHook();
+                LogExecution($"{cmdName} INSTANT");
             }
         }
     }
+}
 
     private float GetSimilarity(string s, string t) {
         if (s == t) return 1.0f;

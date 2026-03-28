@@ -72,7 +72,7 @@ public class VoiceCommandManager : MonoBehaviour
     string lowerSegment = segment.ToLower().Trim();
     bool isRhythm = RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive;
 
-    if (GetSimilarity(lowerSegment, "cancel") > 0.8f || lowerSegment == "stop") { _myCombat.RequestCancelAttack(); return; }
+    //if (GetSimilarity(lowerSegment, "cancel") > 0.8f || lowerSegment == "stop") { _myCombat.RequestCancelAttack(); return; }
 
     string[] words = lowerSegment.Split(' ');
     foreach (string word in words)

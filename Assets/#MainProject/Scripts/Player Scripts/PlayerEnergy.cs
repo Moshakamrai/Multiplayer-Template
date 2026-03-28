@@ -14,6 +14,8 @@ public class PlayerEnergy : NetworkBehaviour
     public Slider EnergySlider;
     public Text EnergyText;
 
+    private bool _wasRhythmActive = false;
+
     public float CurrentEnergy { get; private set; }
     private float _pauseTimer;
 
@@ -39,22 +41,47 @@ public class PlayerEnergy : NetworkBehaviour
     {
         if (!isLocalPlayer) return;
 
-        // 1. Handle the Pause Timer
-        if (_pauseTimer > 0)
+        bool isRhythmActive = RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive;
+
+        // 1. DYNAMIC STARTING ENERGY: Calculate and fill the pool right as the round starts
+        if (isRhythmActive && !_wasRhythmActive)
         {
-            _pauseTimer -= Time.deltaTime;
+            // Slow round = 6 inputs. Fast round = 12 inputs (3 pulses * 4 combo moves).
+            int totalInputs = (RhythmRoundManager.Instance.currentType == RoundType.SlowRhythm) ? 6 : 12;
+            
+            MaxEnergy = (totalInputs * 2) - 2;
+            CurrentEnergy = MaxEnergy;
+            
+            if (EnergySlider != null) EnergySlider.maxValue = MaxEnergy;
         }
-        else
+        _wasRhythmActive = isRhythmActive;
+
+        // 2. NO RECHARGE DURING ROUND: Only naturally regenerate when free-roaming
+        if (!isRhythmActive)
         {
-            // 2. Recharge Energy over time
-            if (CurrentEnergy < MaxEnergy)
+            if (_pauseTimer > 0)
             {
-                CurrentEnergy += RechargeRate * Time.deltaTime;
-                if (CurrentEnergy > MaxEnergy) CurrentEnergy = MaxEnergy;
+                _pauseTimer -= Time.deltaTime;
+            }
+            else
+            {
+                if (CurrentEnergy < MaxEnergy)
+                {
+                    CurrentEnergy += RechargeRate * Time.deltaTime;
+                    if (CurrentEnergy > MaxEnergy) CurrentEnergy = MaxEnergy;
+                }
             }
         }
 
         UpdateUI();
+    }
+
+    // Helper for successful dodges and guard breaks
+    public void AddBonusEnergy(float amount)
+    {
+        CurrentEnergy += amount;
+        if (CurrentEnergy > MaxEnergy) CurrentEnergy = MaxEnergy;
+        UpdateUI(); 
     }
 
     /// <summary>

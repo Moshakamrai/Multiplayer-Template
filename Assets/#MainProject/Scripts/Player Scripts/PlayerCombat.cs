@@ -44,6 +44,8 @@ public class PlayerCombat : NetworkBehaviour
     public void VoiceAttackHook() { if (isLocalPlayer && !IsDead) _attackQueue.Enqueue("Hook"); }
     public void VoiceAttackUppercut() { if (isLocalPlayer && !IsDead) _attackQueue.Enqueue("Uppercut"); }
 
+    public void VoiceAttackBlock() { if (isLocalPlayer && !IsDead) _attackQueue.Enqueue("Block"); }
+
     private void Update()
     {
         if (isLocalPlayer && ShieldText != null) ShieldText.text = CurrentShield.ToString();
@@ -57,15 +59,14 @@ public class PlayerCombat : NetworkBehaviour
     {
         isAttacking = true;
 
-        // IMMEDIATE LOCAL FEEDBACK: Trigger for the local player now
         if (isLocalPlayer && animator != null) 
         {
             animator.SetTrigger(trigger);
         }
 
-        int damageToSet = (trigger == "Cross") ? 15 : (trigger == "Hook") ? 25 : (trigger == "Uppercut") ? 30 : 10;
+        // UPDATED: Added Block handling (deals 0 damage)
+        int damageToSet = (trigger == "Hook") ? 25 : (trigger == "Cross") ? 15 : (trigger == "Jab") ? 10 : 0; 
 
-        // Send to server to sync with everyone else
         CmdTriggerAttack(trigger, damageToSet);
 
         yield return new WaitUntil(() => isAttacking == false);
@@ -187,6 +188,16 @@ public class PlayerCombat : NetworkBehaviour
         }
     }
 
+    [TargetRpc]
+    public void TargetAddEnergy(int amount)
+    {
+        // This securely awards the energy only to the specific client who earned it
+        if (isLocalPlayer)
+        {
+            GetComponent<PlayerEnergy>().AddBonusEnergy(amount);
+        }
+    }
+
 
     private IEnumerator PlayComboRoutine()
     {
@@ -298,6 +309,30 @@ public class PlayerCombat : NetworkBehaviour
             
             StartCoroutine(HurtStunTimer());
         }
+    }
+
+    // Checks if the player's queue is full so they don't waste energy
+    public bool HasOpenSlot(bool isMovement)
+    {
+        if (RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive)
+        {
+            if (RhythmRoundManager.Instance.currentType == RoundType.FastCombo)
+            {
+                // Max 4 moves in the echo round
+                return _comboBuffer.Count < 4; 
+            }
+            else 
+            {
+                // Slow rhythm: Only 1 attack and 1 movement allowed per beat
+                if (isMovement) return _pendingDashDirection == Vector3.zero;
+                else return string.IsNullOrEmpty(_pendingAttackTrigger);
+            }
+        }
+        
+        // In Free Roam, limit the attack queue so they don't spam 10 punches and drain their bar
+        if (!isMovement) return _attackQueue.Count < 2; 
+        
+        return true; 
     }
 
     private IEnumerator HurtStunTimer() 

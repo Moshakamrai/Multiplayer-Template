@@ -66,46 +66,68 @@ public class VoiceCommandManager : MonoBehaviour
 
     void HandleFinalResult(string jsonResult) => _previousPartialText = "";
 
-    void ProcessWords(string segment)
-{
-    if (_myCombat.IsHurting || _myCombat.IsDead) return;
-    string lowerSegment = segment.ToLower().Trim();
-    bool isRhythm = RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive;
-
-    //if (GetSimilarity(lowerSegment, "cancel") > 0.8f || lowerSegment == "stop") { _myCombat.RequestCancelAttack(); return; }
-
-    string[] words = lowerSegment.Split(' ');
-    foreach (string word in words)
+   void ProcessWords(string segment)
     {
-        bool recognized = false;
-        float cost = 0f;
-        string cmdName = "";
-        string trigger = "";
-        Vector3 dashDir = Vector3.zero;
+        if (_myCombat.IsHurting || _myCombat.IsDead) return;
+        string lowerSegment = segment.ToLower().Trim();
+        bool isRhythm = RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive;
 
-        // COMBAT
-        if (GetSimilarity(word, "punch") > 0.72f) { cost = 1f; cmdName = "JAB"; trigger = "Jab"; recognized = true; }
-        else if (GetSimilarity(word, "cross") > 0.72f) { cost = 2f; cmdName = "CROSS"; trigger = "Cross"; recognized = true; }
-        else if (GetSimilarity(word, "hook") > 0.72f) { cost = 3f; cmdName = "HOOK"; trigger = "Hook"; recognized = true; }
-        
-        // MOVEMENT (Removed Forward and Back per request)
-        else if (GetSimilarity(word, "left") > 0.8f) { cost = 0.5f; cmdName = "LFT"; dashDir = Vector3.left; recognized = true; }
-        else if (GetSimilarity(word, "right") > 0.8f) { cost = 0.5f; cmdName = "RGT"; dashDir = Vector3.right; recognized = true; }
-
-        if (recognized && _myEnergy.TryUseEnergy(cost))
+        string[] words = lowerSegment.Split(' ');
+        foreach (string word in words)
         {
-            if (isRhythm) { _myCombat.QueueRhythmMove(trigger, dashDir); LogExecution($"{cmdName} QUEUED"); }
-            else
+            bool recognized = false;
+            float cost = 0f;
+            string cmdName = "";
+            string trigger = "";
+            Vector3 dashDir = Vector3.zero;
+
+            // COMBAT & DEFENSE (Cost: 2)
+            if (GetSimilarity(word, "punch") > 0.72f) { cost = 2f; cmdName = "JAB"; trigger = "Jab"; recognized = true; }
+            else if (GetSimilarity(word, "cross") > 0.72f) { cost = 2f; cmdName = "CROSS"; trigger = "Cross"; recognized = true; }
+            else if (GetSimilarity(word, "hook") > 0.72f) { cost = 2f; cmdName = "HOOK"; trigger = "Hook"; recognized = true; }
+            else if (GetSimilarity(word, "block") > 0.72f || GetSimilarity(word, "guard") > 0.72f) { cost = 2f; cmdName = "BLOCK"; trigger = "Block"; recognized = true; }
+            
+            // MOVEMENT (Cost: 1)
+            else if (GetSimilarity(word, "left") > 0.8f) { cost = 1f; cmdName = "LFT"; dashDir = Vector3.left; recognized = true; }
+            else if (GetSimilarity(word, "right") > 0.8f) { cost = 1f; cmdName = "RGT"; dashDir = Vector3.right; recognized = true; }
+
+            if (recognized)
             {
-                if (dashDir != Vector3.zero) _myController.CmdRhythmDash(dashDir);
-                else if (trigger == "Jab") _myCombat.VoiceAttackJab();
-                else if (trigger == "Cross") _myCombat.VoiceAttackCross();
-                else if (trigger == "Hook") _myCombat.VoiceAttackHook();
-                LogExecution($"{cmdName} INSTANT");
+                bool isMovement = (dashDir != Vector3.zero);
+
+                // 1. CHECK BEFORE CHARGING: Do we have an open slot for this type of move?
+                if (_myCombat.HasOpenSlot(isMovement))
+                {
+                    // 2. NOW charge the energy
+                    if (_myEnergy.TryUseEnergy(cost))
+                    {
+                        if (isRhythm) 
+                        { 
+                            _myCombat.QueueRhythmMove(trigger, dashDir); 
+                            LogExecution($"{cmdName} QUEUED"); 
+                        }
+                        else
+                        {
+                            if (dashDir != Vector3.zero) _myController.CmdRhythmDash(dashDir);
+                            else if (trigger == "Jab") _myCombat.VoiceAttackJab();
+                            else if (trigger == "Cross") _myCombat.VoiceAttackCross();
+                            else if (trigger == "Hook") _myCombat.VoiceAttackHook();
+                            else if (trigger == "Block") _myCombat.VoiceAttackBlock(); 
+                            LogExecution($"{cmdName} INSTANT");
+                        }
+                    }
+                    else
+                    {
+                        LogExecution("NO ENERGY"); // Warns player they are gassed out
+                    }
+                }
+                else
+                {
+                    LogExecution("SLOTS FULL"); // Protects energy from spam
+                }
             }
         }
     }
-}
 
     private float GetSimilarity(string s, string t) {
         if (s == t) return 1.0f;

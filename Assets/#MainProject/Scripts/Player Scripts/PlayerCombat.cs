@@ -76,11 +76,20 @@ public class PlayerCombat : NetworkBehaviour
     {
         if (IsDead || IsHurting) return;
 
-        // Update local variables so the GUI shows the moves immediately
-        QueueLogic(attackTrigger, dashDir);
+        // PREVENT DOUBLE-INPUT FOR THE HOST:
+        // If we are a Remote Client, we update our local GUI instantly.
+        // If we are the Host, we SKIP THIS, because our local GUI *is* the server!
+        if (!isServer) 
+        {
+            QueueLogic(attackTrigger, dashDir);
+        }
 
-        // 2. CRITICAL: Tell the server what we just queued!
-        if (isLocalPlayer) CmdQueueRhythmMove(attackTrigger, dashDir);
+        // EVERYONE tells the Server to execute the move.
+        // For the Host, this will run the QueueLogic exactly once on the server side.
+        if (isLocalPlayer) 
+        {
+            CmdQueueRhythmMove(attackTrigger, dashDir);
+        }
     }
 
     [Command]
@@ -223,19 +232,33 @@ public class PlayerCombat : NetworkBehaviour
     public void TakeDamage(int damage)
     {
         if (IsDead) return;
-        if (_rechargeCoroutine != null) StopCoroutine(_rechargeCoroutine);
-        _rechargeCoroutine = StartCoroutine(ShieldRechargeRoutine());
+        
         StartCoroutine(FlashEffectRoutine());
 
-        if (CurrentShield > 0)
-        {
-            CurrentShield -= damage;
-            if (CurrentShield < 0) { CurrentHealth += CurrentShield; CurrentShield = 0; }
-        }
-        else { CurrentHealth -= damage; }
+        // 1. F**k the Shield. Pure health damage.
+        CurrentHealth -= damage;
 
-        if (CurrentHealth <= 0) RpcKnockout();
-        else if (CurrentShield == 0 || damage > 15) RpcTriggerHurt("Hurt " + Random.Range(1, 5));
+        // 2. Set the delay to match 50% of the attack animation 
+        // (Tune this float to perfectly match the moment the fist hits the face)
+        float impactDelay = 0.35f; 
+
+        if (CurrentHealth <= 0) 
+        {
+            StartCoroutine(DelayedKnockout(impactDelay));
+        }
+        else 
+        {
+            // Send the delay over the network so everyone syncs the impact
+            RpcTriggerHurt("Hurt " + Random.Range(1, 5), impactDelay);
+        }
+    }
+
+    // Helper for knocking out exactly on the beat impact
+    [Server]
+    private IEnumerator DelayedKnockout(float delay)
+    {
+        yield return new WaitForSeconds(delay);
+        RpcKnockout();
     }
 
     [Server] private IEnumerator ShieldRechargeRoutine()
@@ -248,23 +271,31 @@ public class PlayerCombat : NetworkBehaviour
 
 
 
-[ClientRpc]
-    void RpcTriggerHurt(string trigger)
+    [ClientRpc]
+    void RpcTriggerHurt(string trigger, float delay)
     {
+        // Start the delayed reaction locally
+        StartCoroutine(DelayedHurtRoutine(trigger, delay));
+    }
+
+    private IEnumerator DelayedHurtRoutine(string trigger, float delay)
+    {
+        // Wait for the exact moment the opponent's fist connects
+        yield return new WaitForSeconds(delay);
+
         if (animator) animator.SetTrigger(trigger);
         
         if (isLocalPlayer) 
         { 
-            // REMOVED: StopAllCoroutines() and _comboBuffer.Clear() 
-            // Now, getting hit doesn't permanently break your Fast Combo chain!
             _attackQueue.Clear(); 
             _pendingAttackTrigger = "";
             _pendingDashDirection = Vector3.zero;
 
             isAttacking = false; 
+            
+            // This violently snaps them out of whatever dash or attack they were doing
             GetComponent<PlayerController>().InterruptMovement();
             
-            // Start the much faster recovery timer
             StartCoroutine(HurtStunTimer());
         }
     }
@@ -272,7 +303,6 @@ public class PlayerCombat : NetworkBehaviour
     private IEnumerator HurtStunTimer() 
     { 
         IsHurting = true; 
-        // Reduced from 1.0f to 0.2f. This lets them flinch but immediately queue the next voice command.
         yield return new WaitForSeconds(0.2f); 
         IsHurting = false; 
     }

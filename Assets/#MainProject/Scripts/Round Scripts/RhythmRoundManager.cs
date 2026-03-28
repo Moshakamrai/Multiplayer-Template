@@ -128,9 +128,9 @@ public class RhythmRoundManager : NetworkBehaviour
         if (hits) defender.TakeDamage(damage);
     }
 
-    // Update this in RhythmRoundManager.cs
     private void ExecutePulseImpact()
     {
+        // Deterministic RPS resolution for multiplayer
         if (GameManager.players.Count >= 2) ResolveRhythmCombat();
 
         foreach (var player in GameManager.players)
@@ -138,17 +138,11 @@ public class RhythmRoundManager : NetworkBehaviour
             if (player != null) 
             {
                 PlayerCombat combat = player.GetComponent<PlayerCombat>();
-
-                // If it's the Host's player, run it normally
-                if (player.isServer && player.isLocalPlayer)
-                {
-                    combat.ExecuteRhythmImpact();
-                }
-                // If it's a Remote Client, tell them to trigger their own move
-                else
-                {
-                    combat.TargetTriggerRhythmImpact();
-                }
+                
+                // CRITICAL CLEANUP: The Server just calls this for EVERYONE now.
+                // The ExecuteRhythmImpact method safely grabs the parameters and 
+                // uses the TargetRpc to automatically send it to the correct owner!
+                combat.ExecuteRhythmImpact();
             }
         }
     }

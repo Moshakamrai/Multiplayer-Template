@@ -135,11 +135,14 @@ public class PlayerCombat : NetworkBehaviour
     [Server]
     public void ExecuteRhythmImpact()
     {
-        // 1. Tell the owner of this specific player object to execute their queued move locally.
-        // If it's the Host's character, it runs on the Host. If it's the Client's, it runs on the Client.
-        TargetTriggerRhythmImpact();
+        // 1. Capture the variables BEFORE clearing them so the Host doesn't overwrite its own memory
+        string attackToSend = _pendingAttackTrigger;
+        Vector3 dashToSend = _pendingDashDirection;
+
+        // 2. Tell the owner to execute using the safely captured variables
+        TargetTriggerRhythmImpact(attackToSend, dashToSend);
         
-        // 2. Clear the server's cache of the move so it doesn't fire twice
+        // 3. Clear the server's cache safely
         if (RhythmRoundManager.Instance.currentType == RoundType.SlowRhythm)
         {
             _pendingAttackTrigger = "";
@@ -148,31 +151,32 @@ public class PlayerCombat : NetworkBehaviour
     }
 
     [TargetRpc]
-    public void TargetTriggerRhythmImpact()
+    public void TargetTriggerRhythmImpact(string attack, Vector3 dash)
     {
         // This runs ONLY on the specific Client who owns this player
         if (RhythmRoundManager.Instance.currentType == RoundType.SlowRhythm)
         {
-            // 1. Trigger the Attack locally
-            if (!string.IsNullOrEmpty(_pendingAttackTrigger))
+            // 1. Trigger the Attack locally using the passed parameter
+            if (!string.IsNullOrEmpty(attack))
             {
-                StartCoroutine(PerformAttack(_pendingAttackTrigger));
-                _pendingAttackTrigger = "";
+                StartCoroutine(PerformAttack(attack));
             }
             
-            // 2. CRITICAL FIX: Trigger the queued Dash across the network
-            if (_pendingDashDirection != Vector3.zero)
+            // 2. Trigger the Dash locally using the passed parameter
+            if (dash != Vector3.zero)
             {
-                GetComponent<PlayerController>().CmdRhythmDash(_pendingDashDirection);
-                _pendingDashDirection = Vector3.zero; // Clear local cache
+                GetComponent<PlayerController>().CmdRhythmDash(dash);
             }
+
+            // Clean up the local UI Cache
+            _pendingAttackTrigger = "";
+            _pendingDashDirection = Vector3.zero; 
         }
         else
         {
             StartCoroutine(PlayComboRoutine());
         }
     }
-
 
 
     private IEnumerator PlayComboRoutine()
@@ -245,31 +249,32 @@ public class PlayerCombat : NetworkBehaviour
 
 
 [ClientRpc]
-void RpcTriggerHurt(string trigger)
-{
-    if (animator) animator.SetTrigger(trigger);
-    
-    if (isLocalPlayer) 
-    { 
-        StopAllCoroutines(); 
-        _attackQueue.Clear(); 
-        _comboBuffer.Clear(); 
-        _pendingAttackTrigger = "";
-        _pendingDashDirection = Vector3.zero;
-
-        isAttacking = false; 
-        GetComponent<PlayerController>().InterruptMovement();
-        StartCoroutine(HurtStunTimer());
-    }
-}
-
-    private IEnumerator HurtStunTimer() { IsHurting = true; yield return new WaitForSeconds(1f); IsHurting = false; }
-    
-    public void RequestCancelAttack()
+    void RpcTriggerHurt(string trigger)
     {
-        if (!isLocalPlayer || !isAttacking) return;
-        StopAllCoroutines(); isAttacking = false;
-        CmdNotifyCancel();
+        if (animator) animator.SetTrigger(trigger);
+        
+        if (isLocalPlayer) 
+        { 
+            // REMOVED: StopAllCoroutines() and _comboBuffer.Clear() 
+            // Now, getting hit doesn't permanently break your Fast Combo chain!
+            _attackQueue.Clear(); 
+            _pendingAttackTrigger = "";
+            _pendingDashDirection = Vector3.zero;
+
+            isAttacking = false; 
+            GetComponent<PlayerController>().InterruptMovement();
+            
+            // Start the much faster recovery timer
+            StartCoroutine(HurtStunTimer());
+        }
+    }
+
+    private IEnumerator HurtStunTimer() 
+    { 
+        IsHurting = true; 
+        // Reduced from 1.0f to 0.2f. This lets them flinch but immediately queue the next voice command.
+        yield return new WaitForSeconds(0.2f); 
+        IsHurting = false; 
     }
 
     [Command] void CmdNotifyCancel() => RpcSyncCancel();

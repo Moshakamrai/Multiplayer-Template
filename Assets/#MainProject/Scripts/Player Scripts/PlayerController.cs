@@ -28,6 +28,8 @@ public class PlayerController : NetworkBehaviour
     private float _dashElapsed;
     private float _velocityY;
 
+    public float LockOnPitch = 15f;
+
     private CapsuleCollider playerCollider;
 
     [Header("Lock-On Settings")]
@@ -93,8 +95,15 @@ public class PlayerController : NetworkBehaviour
         RpcSyncDash(dir);
     }
 
-    [Command] void CmdDash(Vector3 dir) { ApplyDash(dir); RpcSyncDash(dir); }
-    [ClientRpc] void RpcSyncDash(Vector3 dir) { if (!isLocalPlayer) ApplyDash(dir); }
+    [Command] 
+    void CmdDash(Vector3 dir) 
+    { 
+        ApplyDash(dir); 
+        RpcSyncDash(dir); 
+    }
+
+    // FIXED: Removed !isLocalPlayer so the character moves when the server tells it to
+    [ClientRpc] void RpcSyncDash(Vector3 dir) { ApplyDash(dir); }
 
     private void ApplyDash(Vector3 dir)
     {
@@ -103,18 +112,10 @@ public class PlayerController : NetworkBehaviour
         _dashElapsed = 0f;
         _isDashing = true;
 
-        // --- NEW: TRIGGER ANIMATIONS ---
         if (_combat != null && _combat.animator != null)
         {
-            // Vector3.left is (-1, 0, 0), Vector3.right is (1, 0, 0)
-            if (dir == Vector3.left)
-            {
-                _combat.animator.Play("MoveLeft");
-            }
-            else if (dir == Vector3.right)
-            {
-                _combat.animator.Play("MoveRight");
-            }
+            if (dir == Vector3.left) _combat.animator.Play("MoveLeft");
+            else if (dir == Vector3.right) _combat.animator.Play("MoveRight");
         }
     }
 
@@ -134,7 +135,7 @@ public class PlayerController : NetworkBehaviour
                     Quaternion targetRotation = Quaternion.LookRotation(directionToOpponent);
                     transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * LockOnSpeed);
                 }
-                _rotationYLocal = Mathf.Lerp(_rotationYLocal, 0f, Time.deltaTime * LockOnSpeed); 
+                _rotationYLocal = Mathf.Lerp(_rotationYLocal, LockOnPitch, Time.deltaTime * LockOnSpeed); 
             }
         }
         else
@@ -186,7 +187,6 @@ public class PlayerController : NetworkBehaviour
         CmdDash(nextDir);
     }
 
-    // REMOVED: Forward and Back Voice triggers as requested
     public void VoiceDashLeft() { if (_dashQueue.Count < 4) _dashQueue.Enqueue(Vector3.left); }
     public void VoiceDashRight() { if (_dashQueue.Count < 4) _dashQueue.Enqueue(Vector3.right); }
 

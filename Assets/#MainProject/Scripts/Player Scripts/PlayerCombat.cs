@@ -20,9 +20,9 @@ public class PlayerCombat : NetworkBehaviour
     public SphereCollider weaponGloveLeft;
     public SphereCollider weaponGloveRight;
 
-    // 1. Add these variables to the top of PlayerCombat.cs
-    private struct RhythmAction { public string attack; public Vector3 dash; }
-    private List<RhythmAction> _comboBuffer = new List<RhythmAction>();
+    // Must be public so RhythmRoundManager can access it
+    public struct RhythmAction { public string attack; public Vector3 dash; }
+    public List<RhythmAction> _comboBuffer = new List<RhythmAction>();
 
     [Header("VFX Settings")]
     public Renderer playerRenderer;
@@ -56,94 +56,147 @@ public class PlayerCombat : NetworkBehaviour
     private IEnumerator PerformAttack(string trigger)
     {
         isAttacking = true;
+
+        // IMMEDIATE LOCAL FEEDBACK: Trigger for the local player now
+        if (isLocalPlayer && animator != null) 
+        {
+            animator.SetTrigger(trigger);
+        }
+
         int damageToSet = (trigger == "Cross") ? 15 : (trigger == "Hook") ? 25 : (trigger == "Uppercut") ? 30 : 10;
 
-        weaponGloveLeft.GetComponent<HitboxProperties>().currentDamage = damageToSet;
-        weaponGloveRight.GetComponent<HitboxProperties>().currentDamage = damageToSet;
-
-        if (animator) animator.SetTrigger(trigger);
+        // Send to server to sync with everyone else
         CmdTriggerAttack(trigger, damageToSet);
 
         yield return new WaitUntil(() => isAttacking == false);
         yield return new WaitForSeconds(0.1f);
     }
-
+    // 1. The local script (VoiceCommandManager) calls this
     public void QueueRhythmMove(string attackTrigger, Vector3 dashDir)
-{
-    if (IsDead || IsHurting) return;
+    {
+        if (IsDead || IsHurting) return;
 
-    if (RhythmRoundManager.Instance.currentType == RoundType.SlowRhythm)
-    {
-        // SLOW RHYTHM: Support for one attack AND one movement in the same 4s pulse
-        if (!string.IsNullOrEmpty(attackTrigger)) _pendingAttackTrigger = attackTrigger;
-        if (dashDir != Vector3.zero) _pendingDashDirection = dashDir;
+        // Update local variables so the GUI shows the moves immediately
+        QueueLogic(attackTrigger, dashDir);
+
+        // 2. CRITICAL: Tell the server what we just queued!
+        if (isLocalPlayer) CmdQueueRhythmMove(attackTrigger, dashDir);
     }
-    else
+
+    [Command]
+    private void CmdQueueRhythmMove(string attack, Vector3 dash)
     {
-        // FAST COMBO: Strictly limit to 4 moves per 8-second window
-        if (_comboBuffer.Count < 4)
+        // This updates the server's version of the client's player
+        QueueLogic(attack, dash);
+    }
+
+    // Move the core logic into a shared private method
+    private void QueueLogic(string attackTrigger, Vector3 dashDir)
+    {
+        if (RhythmRoundManager.Instance.currentType == RoundType.SlowRhythm)
         {
-            _comboBuffer.Add(new RhythmAction { attack = attackTrigger, dash = dashDir });
-            Debug.Log($"<color=lime>Combo Slot {_comboBuffer.Count}/4: {attackTrigger}{dashDir}</color>");
+            if (!string.IsNullOrEmpty(attackTrigger)) { _pendingAttackTrigger = attackTrigger; _pendingDashDirection = Vector3.zero; }
+            if (dashDir != Vector3.zero) { _pendingDashDirection = dashDir; _pendingAttackTrigger = ""; }
+        }
+        else
+        {
+            if (_comboBuffer.Count < 4) _comboBuffer.Add(new RhythmAction { attack = attackTrigger, dash = dashDir });
         }
     }
-}
 
-public void ExecuteRhythmImpact()
-{
-    if (RhythmRoundManager.Instance.currentType == RoundType.SlowRhythm)
+    public RhythmAction GetLockedMove()
     {
-        if (!string.IsNullOrEmpty(_pendingAttackTrigger)) StartCoroutine(PerformAttack(_pendingAttackTrigger));
-        if (_pendingDashDirection != Vector3.zero) GetComponent<PlayerController>().CmdRhythmDash(_pendingDashDirection);
-        
-        _pendingAttackTrigger = "";
-        _pendingDashDirection = Vector3.zero;
-    }
-    else
-    {
-        // Execute the 4-move chain sequentially
-        StartCoroutine(PlayComboRoutine());
-    }
-}
-
-private IEnumerator PlayComboRoutine()
-{
-    foreach (var action in _comboBuffer)
-    {
-        // CRITICAL: Wait until the previous animation is fully finished
-        yield return new WaitUntil(() => isAttacking == false);
-
-        if (!string.IsNullOrEmpty(action.attack))
+        if (RhythmRoundManager.Instance.currentType == RoundType.SlowRhythm)
         {
-            // yield return ensures we wait for the punch to finish before the next loop
-            yield return StartCoroutine(PerformAttack(action.attack));
+            return new RhythmAction { attack = _pendingAttackTrigger, dash = _pendingDashDirection };
         }
 
-        if (action.dash != Vector3.zero)
-        {
-            GetComponent<PlayerController>().CmdRhythmDash(action.dash);
-            // Small pause for movement so it doesn't look jittery
-            yield return new WaitForSeconds(0.2f); 
-        }
+        // Return the first move of the combo for RPS resolution
+        // FIX: Added to _comboBuffer
+        return (_comboBuffer.Count > 0) 
+    ? _comboBuffer[0] 
+    : new RhythmAction { attack = "", dash = Vector3.zero };
     }
-    _comboBuffer.Clear(); // Wipe for the next 8s window
-}
-
-    public void StartAttackWindow() { isAttacking = true; }
-    public void EndAttackWindow() { isAttacking = false; }
 
     private void OnTriggerEnter(Collider other)
     {
+        if (RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive) return;
+
         if (!isServer || !other.CompareTag("Jabbed")) return;
         HitboxProperties hitbox = other.GetComponent<HitboxProperties>();
         if (hitbox == null || hitbox.owner.netId == this.netId) return;
 
         if (!IsDead && !IsHurting) 
         {
-            ParticlePoolManager.Instance.PlayParticle("Hit", other.transform.position);
             TakeDamage(hitbox.currentDamage);
         }
     }
+
+    [Server]
+    public void ExecuteRhythmImpact()
+    {
+        // 1. Tell the owner of this specific player object to execute their queued move locally.
+        // If it's the Host's character, it runs on the Host. If it's the Client's, it runs on the Client.
+        TargetTriggerRhythmImpact();
+        
+        // 2. Clear the server's cache of the move so it doesn't fire twice
+        if (RhythmRoundManager.Instance.currentType == RoundType.SlowRhythm)
+        {
+            _pendingAttackTrigger = "";
+            _pendingDashDirection = Vector3.zero;
+        }
+    }
+
+    [TargetRpc]
+    public void TargetTriggerRhythmImpact()
+    {
+        // This runs ONLY on the specific Client who owns this player
+        if (RhythmRoundManager.Instance.currentType == RoundType.SlowRhythm)
+        {
+            // 1. Trigger the Attack locally
+            if (!string.IsNullOrEmpty(_pendingAttackTrigger))
+            {
+                StartCoroutine(PerformAttack(_pendingAttackTrigger));
+                _pendingAttackTrigger = "";
+            }
+            
+            // 2. CRITICAL FIX: Trigger the queued Dash across the network
+            if (_pendingDashDirection != Vector3.zero)
+            {
+                GetComponent<PlayerController>().CmdRhythmDash(_pendingDashDirection);
+                _pendingDashDirection = Vector3.zero; // Clear local cache
+            }
+        }
+        else
+        {
+            StartCoroutine(PlayComboRoutine());
+        }
+    }
+
+
+
+    private IEnumerator PlayComboRoutine()
+    {
+        foreach (var action in _comboBuffer)
+        {
+            yield return new WaitUntil(() => isAttacking == false);
+
+            if (!string.IsNullOrEmpty(action.attack))
+            {
+                yield return StartCoroutine(PerformAttack(action.attack));
+            }
+
+            if (action.dash != Vector3.zero)
+            {
+                GetComponent<PlayerController>().CmdRhythmDash(action.dash);
+                yield return new WaitForSeconds(0.2f); 
+            }
+        }
+        _comboBuffer.Clear();
+    }
+
+    public void StartAttackWindow() { isAttacking = true; }
+    public void EndAttackWindow() { isAttacking = false; }
 
     [Command] void CmdTriggerAttack(string t, int damage) 
     { 
@@ -152,8 +205,15 @@ private IEnumerator PlayComboRoutine()
         RpcTriggerAttack(t); 
     }
 
-    [ClientRpc] void RpcTriggerAttack(string t) 
-    { if (!isLocalPlayer && animator != null) animator.SetTrigger(t); }
+    [ClientRpc] 
+    void RpcTriggerAttack(string t) 
+    { 
+        // IMPORTANT: If we are the local player, we already played the animation!
+        // This prevents the "double trigger" or stuttering.
+        if (isLocalPlayer) return; 
+    
+        if (animator != null) animator.SetTrigger(t); 
+    }
 
     [Server]
     public void TakeDamage(int damage)
@@ -180,27 +240,36 @@ private IEnumerator PlayComboRoutine()
         while (CurrentShield < MaxShield && !IsDead) { CurrentShield++; yield return new WaitForSeconds(0.05f); }
     }
 
-    [ClientRpc] void RpcTriggerHurt(string trigger)
-    {
-        if (animator) animator.SetTrigger(trigger);
-        if (isLocalPlayer) 
-        { 
-            StopAllCoroutines(); _attackQueue.Clear(); isAttacking = false; 
-            GetComponent<PlayerController>().InterruptMovement();
-            StartCoroutine(HurtStunTimer());
-        }
+    // Inside PlayerCombat.cs...
+
+
+
+[ClientRpc]
+void RpcTriggerHurt(string trigger)
+{
+    if (animator) animator.SetTrigger(trigger);
+    
+    if (isLocalPlayer) 
+    { 
+        StopAllCoroutines(); 
+        _attackQueue.Clear(); 
+        _comboBuffer.Clear(); 
+        _pendingAttackTrigger = "";
+        _pendingDashDirection = Vector3.zero;
+
+        isAttacking = false; 
+        GetComponent<PlayerController>().InterruptMovement();
+        StartCoroutine(HurtStunTimer());
     }
+}
 
     private IEnumerator HurtStunTimer() { IsHurting = true; yield return new WaitForSeconds(1f); IsHurting = false; }
     
     public void RequestCancelAttack()
     {
         if (!isLocalPlayer || !isAttacking) return;
-        if (!weaponGloveLeft.enabled && !weaponGloveRight.enabled)
-        {
-            StopAllCoroutines(); isAttacking = false;
-            CmdNotifyCancel();
-        }
+        StopAllCoroutines(); isAttacking = false;
+        CmdNotifyCancel();
     }
 
     [Command] void CmdNotifyCancel() => RpcSyncCancel();
@@ -216,71 +285,52 @@ private IEnumerator PlayComboRoutine()
     [ClientRpc] void RpcKnockout() { IsDead = true; animator.SetTrigger("Knock out"); if (isServer) StartCoroutine(ServerRestartMatchRoutine()); }
     [Server] private IEnumerator ServerRestartMatchRoutine() { yield return new WaitForSeconds(4f); NetworkManager.singleton.ServerChangeScene(SceneManager.GetActiveScene().name); }
 
-
-    // Add this to your PlayerCombat.cs script
-
-private void OnGUI()
-{
-    // 1. Only show the UI for the person actually playing on this laptop
-    if (!isLocalPlayer) return;
-
-    // 2. Only show if a rhythm round is currently running
-    if (RhythmRoundManager.Instance == null || !RhythmRoundManager.Instance.isRoundActive) return;
-
-    // 3. Define the UI Area (Bottom Left)
-    float areaWidth = 300;
-    float areaHeight = 160;
-    GUILayout.BeginArea(new Rect(20, Screen.height - areaHeight - 20, areaWidth, areaHeight));
-
-    // Define a nice green style for the "Locked In" text
-    GUIStyle headerStyle = new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold, fontSize = 18 };
-    headerStyle.normal.textColor = Color.green;
-
-    // --- MODE 1: SLOW RHYTHM DISPLAY ---
-    if (RhythmRoundManager.Instance.currentType == RoundType.SlowRhythm)
+    private void OnGUI()
     {
-        GUILayout.Label("LOCKED ACTION:", headerStyle);
-        
-        string atkText = string.IsNullOrEmpty(_pendingAttackTrigger) ? "None" : _pendingAttackTrigger;
-        string dshText = (_pendingDashDirection == Vector3.zero) ? "None" : GetDirectionName(_pendingDashDirection);
-        
-        GUILayout.Label($"Attack: {atkText}");
-        GUILayout.Label($"Move:   {dshText}");
-    }
-    // --- MODE 2: FAST COMBO DISPLAY ---
-    else
-    {
-        GUILayout.Label($"COMBO CHAIN ({_comboBuffer.Count}/4):", headerStyle);
-        
-        for (int i = 0; i < _comboBuffer.Count; i++)
+        if (!isLocalPlayer) return;
+        if (RhythmRoundManager.Instance == null || !RhythmRoundManager.Instance.isRoundActive) return;
+
+        GUILayout.BeginArea(new Rect(20, Screen.height - 180, 300, 160));
+        GUIStyle headerStyle = new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold, fontSize = 18 };
+        headerStyle.normal.textColor = Color.green;
+
+        if (RhythmRoundManager.Instance.currentType == RoundType.SlowRhythm)
         {
-            string atk = _comboBuffer[i].attack;
-            string dsh = (_comboBuffer[i].dash == Vector3.zero) ? "" : GetDirectionName(_comboBuffer[i].dash);
-            
-            // Format the display so it shows "1: Jab" or "2: Forward" etc.
-            string displayLine = (atk != "" && dsh != "") ? $"{atk} + {dsh}" : (atk != "" ? atk : dsh);
-            GUILayout.Label($"{i + 1}: {displayLine}");
+            GUILayout.Label("LOCKED ACTION:", headerStyle);
+            string atkText = string.IsNullOrEmpty(_pendingAttackTrigger) ? "None" : _pendingAttackTrigger;
+            string dshText = (_pendingDashDirection == Vector3.zero) ? "None" : GetDirectionName(_pendingDashDirection);
+            GUILayout.Label($"Attack: {atkText}");
+            GUILayout.Label($"Move:   {dshText}");
         }
-        
-        // Show empty slots if the combo isn't full yet
-        for (int i = _comboBuffer.Count; i < 4; i++)
+        else
         {
-            GUI.color = new Color(1, 1, 1, 0.5f); // Make empty slots transparent
-            GUILayout.Label($"{i + 1}: [ Empty ]");
-            GUI.color = Color.white;
+            GUILayout.Label($"COMBO CHAIN ({_comboBuffer.Count}/4):", headerStyle);
+            for (int i = 0; i < 4; i++)
+            {
+                if (i < _comboBuffer.Count)
+                {
+                    string atk = _comboBuffer[i].attack;
+                    string dsh = (_comboBuffer[i].dash == Vector3.zero) ? "" : GetDirectionName(_comboBuffer[i].dash);
+                    string displayLine = (atk != "" && dsh != "") ? $"{atk} + {dsh}" : (atk != "" ? atk : dsh);
+                    GUILayout.Label($"{i + 1}: {displayLine}");
+                }
+                else
+                {
+                    GUI.color = new Color(1, 1, 1, 0.5f);
+                    GUILayout.Label($"{i + 1}: [ Empty ]");
+                    GUI.color = Color.white;
+                }
+            }
         }
+        GUILayout.EndArea();
     }
 
-    GUILayout.EndArea();
-}
-
-// Helper function to turn Vector3 coordinates into readable words
-private string GetDirectionName(Vector3 dir)
-{
-    if (dir == Vector3.forward) return "Forward";
-    if (dir == Vector3.back) return "Back";
-    if (dir == Vector3.left || dir == new Vector3(-1, 0, 0)) return "Left";
-    if (dir == Vector3.right || dir == new Vector3(1, 0, 0)) return "Right";
-    return dir.ToString();
-}
+    private string GetDirectionName(Vector3 dir)
+    {
+        if (dir == Vector3.forward) return "Forward";
+        if (dir == Vector3.back) return "Back";
+        if (dir == Vector3.left || dir == new Vector3(-1, 0, 0)) return "Left";
+        if (dir == Vector3.right || dir == new Vector3(1, 0, 0)) return "Right";
+        return dir.ToString();
+    }
 }

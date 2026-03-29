@@ -1,93 +1,97 @@
 using Mirror;
 using UnityEngine;
+using System.Collections;
 using System.Collections.Generic;
 
-public enum RoundType { SlowRhythm, FastCombo }
+public enum RoundType { SlowRhythm, FastCombo, CustomTrack }
 
 public class RhythmRoundManager : NetworkBehaviour
 {
     public static RhythmRoundManager Instance;
-    public AudioSource musicSource; 
     
     [SyncVar] public RoundType currentType = RoundType.SlowRhythm;
-    [SyncVar(hook = nameof(OnRoundStateChanged))]
-    public bool isRoundActive = false;
-
+    [SyncVar(hook = nameof(OnRoundStateChanged))] public bool isRoundActive = false;
     [SyncVar] private double _startTime; 
+
     private int _lastPulseExecuted = 0;
 
-    // --- NEW: Combat Log Variables ---
-    private struct CombatLogEntry
-    {
-        public string p1Name; public string p1Move; public int p1State;
-        public string p2Name; public string p2Move; public int p2State;
-        public float timestamp;
-    }
+    // --- Custom Track Variables ---
+    private List<float> _upcomingImpacts = new List<float>();
+
+    private struct CombatLogEntry { public string p1Name; public string p1Move; public int p1State; public string p2Name; public string p2Move; public int p2State; public float timestamp; }
     private List<CombatLogEntry> combatLogs = new List<CombatLogEntry>();
 
     private void Awake() { if (Instance == null) Instance = this; }
 
-    // --- MULTIPLAYER START COMMANDS ---
-    [Server]
-    public void StartSlowRound()
+    // --- THE SMART HELPER ---
+    public bool IsSingleMoveMode()
     {
-        if (isRoundActive) return;
-        currentType = RoundType.SlowRhythm;
-        SetupRound();
+        // Custom Tracks are now pure Action Mode. Every single beat is an individual devastating execution!
+        if (currentType == RoundType.SlowRhythm || currentType == RoundType.CustomTrack) return true;
+        return false;
+    }
+
+    [Server] public void StartSlowRound() { if (isRoundActive) return; currentType = RoundType.SlowRhythm; SetupRound(); }
+    [Server] public void StartFastRound() { if (isRoundActive) return; currentType = RoundType.FastCombo; SetupRound(); }
+    
+    [Server] 
+    public void StartCustomRound() 
+    { 
+        if (isRoundActive || !BeatAnalyzer.Instance.isAnalyzed) return; 
+        currentType = RoundType.CustomTrack; 
+        
+        // Grab EVERY single chonky beat the analyzer found!
+        _upcomingImpacts = BeatAnalyzer.Instance.GetAllActionTriggers();
+        
+        BeatAnalyzer.Instance.audioSource.Stop();
+        BeatAnalyzer.Instance.audioSource.time = 0f;
+        BeatAnalyzer.Instance.audioSource.Play();
+        
+        SetupRound(); 
     }
 
     [Server]
-    public void StartFastRound()
-    {
-        if (isRoundActive) return;
-        currentType = RoundType.FastCombo;
-        SetupRound();
-    }
+    private void SetupRound() { _startTime = NetworkTime.time + 1.0; _lastPulseExecuted = 0; isRoundActive = true; }
 
     [Server]
-    private void SetupRound()
-    {
-        // 1.0s delay ensures clients have time to receive the SyncVar update
-        _startTime = NetworkTime.time + 1.0; 
-        _lastPulseExecuted = 0;
-        isRoundActive = true;
-    }
-
-    [Server]
-    public void StopRound()
-    {
-        isRoundActive = false;
-        _startTime = 0;
-    }
+    public void StopRound() { isRoundActive = false; _startTime = 0; _upcomingImpacts.Clear(); }
 
     private void Update()
     {
-        // NEW: Clean up old combat logs (they fade out after 4 seconds)
-        if (combatLogs.Count > 0)
-        {
-            combatLogs.RemoveAll(log => Time.time - log.timestamp > 4f);
-        }
+        if (combatLogs.Count > 0) combatLogs.RemoveAll(log => Time.time - log.timestamp > 4f);
 
         if (!isRoundActive || _startTime == 0) return;
         double elapsed = NetworkTime.time - _startTime;
         if (elapsed < 0) return;
 
-        // Deterministic timing based on mode
-        float interval = (currentType == RoundType.FastCombo) ? 8.0f : 4.0f;
-        int maxPulses = (currentType == RoundType.FastCombo) ? 3 : 6;
-
         if (isServer)
         {
-            for (int i = 1; i <= maxPulses; i++)
+            if (currentType == RoundType.CustomTrack)
             {
-                float impactTime = i * interval;
-                if (elapsed >= impactTime && _lastPulseExecuted < i)
+                float trackTime = BeatAnalyzer.Instance.audioSource.time;
+
+                // --- DIRECT BEAT SYNC ---
+                // Exactly when the song hits the projected timestamp, boom!
+                if (_upcomingImpacts.Count > 0 && trackTime >= _upcomingImpacts[0])
                 {
-                    _lastPulseExecuted = i;
+                    _upcomingImpacts.RemoveAt(0); 
                     ExecutePulseImpact();
+                    RpcTriggerHitStop(); // Cinematic Slow-Mo!
                 }
+
+                if (!BeatAnalyzer.Instance.audioSource.isPlaying) StopRound();
             }
-            if (elapsed >= (interval * maxPulses) + 0.1f) isRoundActive = false;
+            else
+            {
+                float interval = (currentType == RoundType.FastCombo) ? 8.0f : 4.0f;
+                int maxPulses = (currentType == RoundType.FastCombo) ? 3 : 6;
+                for (int i = 1; i <= maxPulses; i++)
+                {
+                    float impactTime = i * interval;
+                    if (elapsed >= impactTime && _lastPulseExecuted < i) { _lastPulseExecuted = i; ExecutePulseImpact(); }
+                }
+                if (elapsed >= (interval * maxPulses) + 0.1f) StopRound();
+            }
         }
     }
 
@@ -97,72 +101,38 @@ public class RhythmRoundManager : NetworkBehaviour
         var playerList = new List<PlayerController>(GameManager.players);
         if (playerList.Count < 2) return;
 
-        PlayerController pc1 = playerList[0];
-        PlayerController pc2 = playerList[1];
-        PlayerCombat p1 = pc1.GetComponent<PlayerCombat>();
-        PlayerCombat p2 = pc2.GetComponent<PlayerCombat>();
+        PlayerController pc1 = playerList[0]; PlayerController pc2 = playerList[1];
+        PlayerCombat p1 = pc1.GetComponent<PlayerCombat>(); PlayerCombat p2 = pc2.GetComponent<PlayerCombat>();
+        var m1 = p1.GetLockedMove(); var m2 = p2.GetLockedMove();
 
-        var m1 = p1.GetLockedMove();
-        var m2 = p2.GetLockedMove();
-
-        // 1. UPDATED INTERRUPTION CHECK: Jab beats Cross/Hook. Cross beats Hook.
-        bool p1Interrupted = (m2.attack == "Jab" && (m1.attack == "Cross" || m1.attack == "Hook")) || 
-                             (m2.attack == "Cross" && m1.attack == "Hook");
-        bool p2Interrupted = (m1.attack == "Jab" && (m2.attack == "Cross" || m2.attack == "Hook")) || 
-                             (m1.attack == "Cross" && m2.attack == "Hook");
+        bool p1Interrupted = (m2.attack == "Jab" && (m1.attack == "Cross" || m1.attack == "Hook")) || (m2.attack == "Cross" && m1.attack == "Hook");
+        bool p2Interrupted = (m1.attack == "Jab" && (m2.attack == "Cross" || m2.attack == "Hook")) || (m1.attack == "Cross" && m2.attack == "Hook");
 
         if (p1Interrupted) p1.TakeDamage(5); 
         if (p2Interrupted) p2.TakeDamage(5);
 
-        // 2. RESOLVE DAMAGE & CAPTURE RESULT (1 = Hit, -1 = Dodged/Missed, 0 = Neutral/Block)
         int p1Result = ProcessDamage(p1, m1, p2, m2, p1Interrupted);
         int p2Result = ProcessDamage(p2, m2, p1, m1, p2Interrupted);
 
-        // 3. EVALUATE LOG STATES: 1 (Green/Win), -1 (Red/Loss), 0 (White/Neutral)
-        int p1State = 0;
-        if (p1Interrupted || p2Result == 1) p1State = -1; // Got interrupted or hit by P2 -> Lost trade
-        else if (p1Result == 1 || p2Result == -1) p1State = 1; // Landed hit or successfully dodged P2 -> Won trade
+        int p1State = 0; if (p1Interrupted || p2Result == 1) p1State = -1; else if (p1Result == 1 || p2Result == -1) p1State = 1; 
+        int p2State = 0; if (p2Interrupted || p1Result == 1) p2State = -1; else if (p2Result == 1 || p1Result == -1) p2State = 1; 
 
-        int p2State = 0;
-        if (p2Interrupted || p1Result == 1) p2State = -1; 
-        else if (p2Result == 1 || p1Result == -1) p2State = 1; 
-
-        // 4. SEND TO UI LOG
-        string p1MoveStr = FormatMove(m1);
-        string p2MoveStr = FormatMove(m2);
-        RpcLogCombatTrade(pc1.PlayerName, p1MoveStr, p1State, pc2.PlayerName, p2MoveStr, p2State);
+        RpcLogCombatTrade(pc1.PlayerName, FormatMove(m1), p1State, pc2.PlayerName, FormatMove(m2), p2State);
     }
 
     [Server]
     private int ProcessDamage(PlayerCombat attacker, PlayerCombat.RhythmAction move, PlayerCombat defender, PlayerCombat.RhythmAction defMove, bool isInterrupted)
     {
         if (isInterrupted || string.IsNullOrEmpty(move.attack) || move.attack == "Block") return 0;
-
-        bool hits = false;
-        int damage = 0;
-
+        bool hits = false; int damage = 0;
         if (move.attack == "Jab") { damage = 10; hits = (defMove.dash == Vector3.zero && defMove.attack != "Block"); }
         else if (move.attack == "Cross") { damage = 15; hits = (defMove.attack != "Block"); }
         else if (move.attack == "Hook") { damage = 25; hits = (defMove.dash == Vector3.zero); }
 
-        if (hits) 
-        {
-            defender.TakeDamage(damage);
-            if (move.attack == "Hook") attacker.TargetAddEnergy(2);
-            return 1; // Attacker won the trade
-        }
-        else 
-        {
-            if (defMove.dash != Vector3.zero) 
-            {
-                defender.TargetAddEnergy(1);
-                return -1; // Defender won by dodging
-            }
-            return 0; // Neutral (Blocked)
-        }
+        if (hits) { defender.TakeDamage(damage); if (move.attack == "Hook") attacker.TargetAddEnergy(2); return 1; }
+        else { if (defMove.dash != Vector3.zero) { defender.TargetAddEnergy(1); return -1; } return 0; }
     }
 
-    // Helper to turn the invisible Vector3 data into clean English words for the UI
     private string FormatMove(PlayerCombat.RhythmAction move)
     {
         if (!string.IsNullOrEmpty(move.attack)) return move.attack;
@@ -172,44 +142,68 @@ public class RhythmRoundManager : NetworkBehaviour
     }
 
     [ClientRpc]
-    private void RpcLogCombatTrade(string p1Name, string p1Move, int p1State, string p2Name, string p2Move, int p2State)
+    private void RpcLogCombatTrade(string p1Name, string p1Move, int p1State, string p2Name, string p2Move, int p2State) { combatLogs.Add(new CombatLogEntry { p1Name = string.IsNullOrEmpty(p1Name) ? "Player 1" : p1Name, p1Move = p1Move, p1State = p1State, p2Name = string.IsNullOrEmpty(p2Name) ? "Player 2" : p2Name, p2Move = p2Move, p2State = p2State, timestamp = Time.time }); }
+
+    private void ExecutePulseImpact() { if (GameManager.players.Count >= 2) ResolveRhythmCombat(); foreach (var player in GameManager.players) { if (player != null) player.GetComponent<PlayerCombat>().ExecuteRhythmImpact(); } }
+
+    // --- NEW: THE CINEMATIC HIT-STOP EFFECT ---
+    [ClientRpc]
+    private void RpcTriggerHitStop()
     {
-        // Add the newest trade to the log (Client side)
-        combatLogs.Add(new CombatLogEntry {
-            p1Name = string.IsNullOrEmpty(p1Name) ? "Player 1" : p1Name, p1Move = p1Move, p1State = p1State,
-            p2Name = string.IsNullOrEmpty(p2Name) ? "Player 2" : p2Name, p2Move = p2Move, p2State = p2State,
-            timestamp = Time.time
-        });
+        StartCoroutine(HitStopRoutine());
     }
 
-    private void ExecutePulseImpact()
+    private IEnumerator HitStopRoutine()
     {
-        if (GameManager.players.Count >= 2) ResolveRhythmCombat();
+        // Drop the physics and animation speed to a visceral 5% crawl
+        Time.timeScale = 0.05f; 
+        
+        // Wait for 0.06 real-world seconds (independent of the slowed timescale)
+        yield return new WaitForSecondsRealtime(0.06f); 
+        
+        // Snap back to brutal full speed
+        Time.timeScale = 1.0f; 
+    }
 
-        foreach (var player in GameManager.players)
+    void OnRoundStateChanged(bool oldVal, bool newVal) 
+    { 
+        if (BeatAnalyzer.Instance != null && BeatAnalyzer.Instance.audioSource != null && currentType != RoundType.CustomTrack) 
         {
-            if (player != null) player.GetComponent<PlayerCombat>().ExecuteRhythmImpact();
+            if (newVal) BeatAnalyzer.Instance.audioSource.Play(); else BeatAnalyzer.Instance.audioSource.Stop(); 
         }
-    }
-
-    void OnRoundStateChanged(bool oldVal, bool newVal)
-    {
-        if (newVal && musicSource != null) musicSource.Play();
-        else if (musicSource != null) musicSource.Stop();
     }
 
     private void OnGUI()
     {
-        // Host Controls
         if (NetworkServer.active && isServer)
         {
             GUILayout.BeginArea(new Rect(10, 10, 220, 300));
             if (!isRoundActive)
             {
                 GUI.color = Color.cyan;
-                if (GUILayout.Button("START SLOW ROUND", GUILayout.Height(60))) StartSlowRound();
+                if (GUILayout.Button("START SLOW ROUND", GUILayout.Height(40))) StartSlowRound();
                 GUI.color = Color.magenta;
-                if (GUILayout.Button("START FAST ROUND", GUILayout.Height(60))) StartFastRound();
+                if (GUILayout.Button("START FAST ROUND", GUILayout.Height(40))) StartFastRound();
+                
+                GUILayout.Space(10);
+                
+                // The Custom Analyzer UI
+                if (!BeatAnalyzer.Instance.isAnalyzing && !BeatAnalyzer.Instance.isAnalyzed)
+                {
+                    GUI.color = Color.yellow;
+                    if (GUILayout.Button("ANALYZE CUSTOM TRACK", GUILayout.Height(60))) BeatAnalyzer.Instance.StartAnalysis();
+                }
+                else if (BeatAnalyzer.Instance.isAnalyzing)
+                {
+                    GUI.color = Color.gray;
+                    float prog = (BeatAnalyzer.Instance.audioSource.time / BeatAnalyzer.Instance.audioSource.clip.length) * 100f;
+                    GUILayout.Box($"ANALYZING... {prog.ToString("F0")}%", GUILayout.Height(60));
+                }
+                else if (BeatAnalyzer.Instance.isAnalyzed)
+                {
+                    GUI.color = Color.green;
+                    if (GUILayout.Button("START CUSTOM ROUND", GUILayout.Height(60))) StartCustomRound();
+                }
                 GUI.color = Color.white;
             }
             else
@@ -220,67 +214,60 @@ public class RhythmRoundManager : NetworkBehaviour
             GUILayout.EndArea();
         }
 
-        // Rhythm Timer
         if (isRoundActive && _startTime != 0)
         {
             float elapsed = (float)(NetworkTime.time - _startTime);
-            float interval = (currentType == RoundType.FastCombo) ? 8.0f : 4.0f;
             GUIStyle style = new GUIStyle(GUI.skin.box) { fontSize = 24, alignment = TextAnchor.MiddleCenter };
 
             if (elapsed < 0)
             {
-                style.normal.textColor = Color.yellow;
-                GUI.Box(new Rect(Screen.width / 2 - 100, 50, 200, 70), "READY?", style);
+                style.normal.textColor = Color.yellow; GUI.Box(new Rect(Screen.width / 2 - 100, 50, 200, 70), "READY?", style);
             }
             else
             {
-                float timer = elapsed % interval;
-                style.normal.textColor = (timer > (interval - 1.5f)) ? Color.red : Color.white;
-                GUI.Box(new Rect(Screen.width / 2 - 100, 50, 200, 70), $"WINDOW\n{timer.ToString("F1")}s / {interval}s", style);
+                // --- DYNAMIC UI COUNTDOWN ---
+                if (currentType == RoundType.CustomTrack)
+                {
+                    if (_upcomingImpacts.Count > 0)
+                    {
+                        float trackTime = BeatAnalyzer.Instance.audioSource.time;
+                        float timeToNextBeat = _upcomingImpacts[0] - trackTime; // Assuming _upcomingImpacts is a List<float>
+                        
+                        style.normal.textColor = (timeToNextBeat < 1.0f) ? Color.red : Color.cyan;
+                        GUI.Box(new Rect(Screen.width / 2 - 100, 50, 200, 70), $"NEXT DROP\n{timeToNextBeat.ToString("F1")}s", style);
+                    }
+                    else
+                    {
+                        GUI.Box(new Rect(Screen.width / 2 - 100, 50, 200, 70), "FINISHING...", style);
+                    }
+                }
+                else
+                {
+                    float interval = (currentType == RoundType.FastCombo) ? 8.0f : 4.0f; float timer = elapsed % interval;
+                    style.normal.textColor = (timer > (interval - 1.5f)) ? Color.red : Color.white;
+                    GUI.Box(new Rect(Screen.width / 2 - 100, 50, 200, 70), $"WINDOW\n{timer.ToString("F1")}s / {interval}s", style);
+                }
             }
         }
 
-        // --- NEW: Combat Log UI (Right Side) ---
+        // Combat Log (Same as before)
         if (combatLogs.Count > 0)
         {
-            // Positioned dynamically on the right side of the screen
             GUILayout.BeginArea(new Rect(Screen.width - 420, 100, 400, 400));
-            
             GUIStyle logStyle = new GUIStyle(GUI.skin.label) { fontSize = 16, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
             GUIStyle boxStyle = new GUIStyle(GUI.skin.box);
-            
-            GUILayout.Label("COMBAT LOG", logStyle);
-            GUILayout.Space(5);
-
+            GUILayout.Label("COMBAT LOG", logStyle); GUILayout.Space(5);
             foreach (var log in combatLogs)
             {
                 GUILayout.BeginHorizontal(boxStyle);
-                
-                // P1 Segment
-                logStyle.normal.textColor = GetStateColor(log.p1State);
-                GUILayout.Label($"{log.p1Name}: {log.p1Move}", logStyle, GUILayout.Width(170));
-                
-                // VS text
-                logStyle.normal.textColor = Color.white;
-                GUILayout.Label(" vs ", logStyle, GUILayout.Width(40));
-                
-                // P2 Segment
-                logStyle.normal.textColor = GetStateColor(log.p2State);
-                GUILayout.Label($"{log.p2Name}: {log.p2Move}", logStyle, GUILayout.Width(170));
-                
-                GUILayout.EndHorizontal();
-                GUILayout.Space(2);
+                logStyle.normal.textColor = GetStateColor(log.p1State); GUILayout.Label($"{log.p1Name}: {log.p1Move}", logStyle, GUILayout.Width(170));
+                logStyle.normal.textColor = Color.white; GUILayout.Label(" vs ", logStyle, GUILayout.Width(40));
+                logStyle.normal.textColor = GetStateColor(log.p2State); GUILayout.Label($"{log.p2Name}: {log.p2Move}", logStyle, GUILayout.Width(170));
+                GUILayout.EndHorizontal(); GUILayout.Space(2);
             }
-            GUILayout.EndArea();
-            GUI.color = Color.white; // Reset safety
+            GUILayout.EndArea(); GUI.color = Color.white; 
         }
     }
 
-    // Assigns the Green/Red/White colors based on the winning logic
-    private Color GetStateColor(int state)
-    {
-        if (state == 1) return Color.green; // Won the trade
-        if (state == -1) return Color.red;  // Lost the trade
-        return Color.white;                 // Blocked/Tied
-    }
+    private Color GetStateColor(int state) { if (state == 1) return Color.green; if (state == -1) return Color.red; return Color.white; }
 }

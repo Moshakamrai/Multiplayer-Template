@@ -5,7 +5,7 @@ using UnityEngine;
 public class BeatAnalyzer : MonoBehaviour
 {
     public static BeatAnalyzer Instance;
-    private AudioSource _audioSource;
+    public AudioSource audioSource;
 
     [Header("FFT Settings")]
     private const int SAMPLE_SIZE = 1024;
@@ -18,48 +18,62 @@ public class BeatAnalyzer : MonoBehaviour
     public float snareMin = 2000f;
     public float snareMax = 5000f;
 
-    [Header("Strict Filtering (TUNE THESE)")]
-    [Tooltip("How much higher than the average noise a peak must be (Try 2.0 to 3.0)")]
-    public float thresholdMultiplier = 2.5f; 
-    
-    [Tooltip("The absolute minimum strength to even be considered a beat (Kills hi-hats)")]
-    public float minBeatStrength = 0.20f; 
-    
-    [Tooltip("Minimum time between beats. 0.45s = approx 130 BPM max speed.")]
-    public float beatCooldown = 0.45f;
+    [Header("Strict Filtering")]
+    public float thresholdMultiplier = 3.0f; 
+    public float minBeatStrength = 0.35f; 
+    public float beatCooldown = 0.85f;
 
     private int _thresholdWindowSize = 50; 
     private Queue<float> _fluxHistory = new Queue<float>();
     private float _previousEnergy = 0f;
-    private float _clipStartTime = 0f;
+    
+    // --- NEW: State Machine Variables ---
+    public bool isAnalyzed = false;
+    public bool isAnalyzing = false;
 
-    public struct BeatData 
-    {
-        public float time;
-        public float strength;
-    }
+    public struct BeatData { public float time; public float strength; }
     private List<BeatData> _rawScrapedBeats = new List<BeatData>();
 
     void Awake() { if (Instance == null) Instance = this; }
 
     void Start()
     {
-        _audioSource = GetComponent<AudioSource>();
+        audioSource = GetComponent<AudioSource>();
         _sampleRate = AudioSettings.outputSampleRate; 
         for (int i = 0; i < _thresholdWindowSize; i++) _fluxHistory.Enqueue(0f);
     }
 
+    // Called by the "ANALYZE TRACK" UI Button
+    public void StartAnalysis()
+    {
+        _rawScrapedBeats.Clear();
+        isAnalyzing = true;
+        isAnalyzed = false;
+        
+        audioSource.Stop();
+        audioSource.time = 0f;
+        audioSource.Play();
+    }
+
     void Update()
     {
-        if (!_audioSource.isPlaying) return;
-        if (_clipStartTime == 0f) _clipStartTime = Time.time;
+        if (isAnalyzing)
+        {
+            if (!audioSource.isPlaying)
+            {
+                isAnalyzing = false;
+                isAnalyzed = true;
+                Debug.Log($"<color=cyan>ANALYSIS COMPLETE:</color> Found {_rawScrapedBeats.Count} beats ready for combat!");
+                return;
+            }
 
-        AnalyzeSpectrum();
+            AnalyzeSpectrum();
+        }
     }
 
     private void AnalyzeSpectrum()
     {
-        _audioSource.GetSpectrumData(_spectrum, 0, FFTWindow.BlackmanHarris);
+        audioSource.GetSpectrumData(_spectrum, 0, FFTWindow.BlackmanHarris);
 
         float currentEnergy = CalculateBandEnergy(bassMin, bassMax) + CalculateBandEnergy(snareMin, snareMax);
         float flux = Mathf.Max(0f, currentEnergy - _previousEnergy);
@@ -74,10 +88,9 @@ public class BeatAnalyzer : MonoBehaviour
 
         float dynamicThreshold = averageFlux * thresholdMultiplier;
 
-        // NEW: Enforcing the strict absolute noise floor (minBeatStrength)
         if (flux > dynamicThreshold && flux > minBeatStrength) 
         {
-            float timestamp = Time.time - _clipStartTime;
+            float timestamp = audioSource.time; // Use exact track time for flawless sync
             RegisterRawBeat(timestamp, flux);
         }
     }
@@ -94,47 +107,22 @@ public class BeatAnalyzer : MonoBehaviour
 
     private void RegisterRawBeat(float time, float strength)
     {
-        // 4-Second Silence Rule (Intro Phase)
         if (time < 4.0f) return;
 
-        // NEW: Enforcing the vocal-friendly cooldown spacing
         if (_rawScrapedBeats.Count > 0 && time - _rawScrapedBeats[_rawScrapedBeats.Count - 1].time < beatCooldown) 
-        {
             return;
-        }
 
         _rawScrapedBeats.Add(new BeatData { time = time, strength = strength });
-        
-        Debug.Log($"<color=green>CHONKY BEAT LOCKED!</color> Time: {time.ToString("F2")}s | Strength: {strength.ToString("F3")}");
     }
 
-    public List<float> GenerateActionTriggers(float listeningWindowStart, float windowDuration)
+    // NEW: Grabs every single filtered beat to use as an instant execution trigger
+    public List<float> GetAllActionTriggers()
     {
-        float windowEnd = listeningWindowStart + windowDuration;
-        int maxActions = Mathf.FloorToInt(windowDuration / 2.0f); 
-
-        List<BeatData> validBeats = new List<BeatData>();
+        List<float> finalizedActionTimestamps = new List<float>();
         foreach (var b in _rawScrapedBeats)
         {
-            if (b.time >= listeningWindowStart && b.time < windowEnd) validBeats.Add(b);
+            finalizedActionTimestamps.Add(b.time);
         }
-
-        validBeats.Sort((a, b) => b.strength.CompareTo(a.strength));
-
-        if (validBeats.Count > maxActions)
-        {
-            validBeats.RemoveRange(maxActions, validBeats.Count - maxActions);
-        }
-
-        validBeats.Sort((a, b) => a.time.CompareTo(b.time));
-
-        List<float> finalizedActionTimestamps = new List<float>();
-        foreach (var b in validBeats)
-        {
-            float futureHitTime = b.time + windowDuration;
-            finalizedActionTimestamps.Add(futureHitTime);
-        }
-
         return finalizedActionTimestamps;
     }
 }

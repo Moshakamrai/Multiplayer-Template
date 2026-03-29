@@ -12,17 +12,21 @@ public class RhythmRoundManager : NetworkBehaviour
     [SyncVar] public RoundType currentType = RoundType.SlowRhythm;
     [SyncVar(hook = nameof(OnRoundStateChanged))] public bool isRoundActive = false;
     
-    // NEW: Syncing the Dynamic Combo lengths
     [SyncVar] public int currentComboCount = 1;
     [SyncVar] public bool customIsCombo = false; 
 
     [SyncVar] private double _startTime; 
     private int _lastPulseExecuted = 0;
 
-    private List<float> _upcomingImpacts = new List<float>();
-    private List<int> _clusterSizes = new List<int>(); // Maps perfectly to _upcomingImpacts
+    // --- NEW: Animation Sync ---
+    [Header("Animation Sync")]
+    public float windUpTime = 0.53f; // The time it takes for a 1.4x speed punch to connect
+    private bool _isWindUpFired = false;
 
-    private struct CombatLogEntry { public string p1Name; public string p1Move; public int p1State; public string p2Name; public string p2Move; public int p2State; public float timestamp; }
+    private List<float> _upcomingImpacts = new List<float>();
+    private List<int> _clusterSizes = new List<int>(); 
+
+    private struct CombatLogEntry { public string p1Name; public string p1Move; public int p1State; public int p1Damage; public string p2Name; public string p2Move; public int p2State; public int p2Damage; }
     private List<CombatLogEntry> combatLogs = new List<CombatLogEntry>();
 
     private void Awake() { if (Instance == null) Instance = this; }
@@ -46,10 +50,10 @@ public class RhythmRoundManager : NetworkBehaviour
         List<float> allBeats = BeatAnalyzer.Instance.GetAllActionTriggers();
         _upcomingImpacts.Clear();
         _clusterSizes.Clear();
+        _isWindUpFired = false;
         
         int tempComboSize = 1;
 
-        // 1. Group the clustered beats (INCREASED to 2.0s gap to link more beats into Combos)
         for (int i = 0; i < allBeats.Count; i++)
         {
             if (i == 0) { _upcomingImpacts.Add(allBeats[i]); tempComboSize = 1; }
@@ -66,12 +70,9 @@ public class RhythmRoundManager : NetworkBehaviour
         }
         if (allBeats.Count > 0) _clusterSizes.Add(tempComboSize);
 
-        // 2. Prep-Time Math Rule (DECREASED from 2.0s to 1.2s per hit for faster gameplay)
         for (int i = 0; i < _upcomingImpacts.Count; i++)
         {
             float prepTime = (i == 0) ? _upcomingImpacts[i] : (_upcomingImpacts[i] - _upcomingImpacts[i - 1]);
-            
-            // Now you only need 1.2 seconds of warning per combo hit!
             float reqPrep = _clusterSizes[i] * 1.2f; 
             
             if (prepTime < reqPrep && _clusterSizes[i] > 1)
@@ -95,13 +96,20 @@ public class RhythmRoundManager : NetworkBehaviour
         SetupRound(); 
     }
 
-    [Server] private void SetupRound() { _startTime = NetworkTime.time + 1.0; _lastPulseExecuted = 0; isRoundActive = true; }
+    [Server] private void SetupRound() 
+    { 
+        _startTime = NetworkTime.time + 1.0; 
+        _lastPulseExecuted = 0; 
+        isRoundActive = true; 
+        RpcClearLogs(); 
+    }
+    
     [Server] public void StopRound() { isRoundActive = false; _startTime = 0; _upcomingImpacts.Clear(); }
+
+    [ClientRpc] private void RpcClearLogs() { combatLogs.Clear(); }
 
     private void Update()
     {
-        if (combatLogs.Count > 0) combatLogs.RemoveAll(log => Time.time - log.timestamp > 4f);
-
         if (!isRoundActive || _startTime == 0) return;
         double elapsed = NetworkTime.time - _startTime;
         if (elapsed < 0) return;
@@ -112,19 +120,37 @@ public class RhythmRoundManager : NetworkBehaviour
             {
                 float trackTime = BeatAnalyzer.Instance.audioSource.time;
 
-                if (_upcomingImpacts.Count > 0 && trackTime >= _upcomingImpacts[0])
+                if (_upcomingImpacts.Count > 0)
                 {
-                    _upcomingImpacts.RemoveAt(0); 
-                    _clusterSizes.RemoveAt(0);
+                    float targetBeat = _upcomingImpacts[0];
 
-                    ExecutePulseImpact();
-                    RpcTriggerHitStop(); 
-
-                    // Queue up the next dynamic mode instantly
-                    if (_upcomingImpacts.Count > 0) 
+                    // --- PHASE 1: THE WIND UP ---
+                    // Fire animations 0.5s early so the fist connects right on the bass kick
+                    if (!_isWindUpFired && trackTime >= targetBeat - windUpTime)
                     {
-                        currentComboCount = _clusterSizes[0];
-                        customIsCombo = (currentComboCount > 1);
+                        _isWindUpFired = true;
+                        foreach (var player in GameManager.players) 
+                        { 
+                            if (player != null) player.GetComponent<PlayerCombat>().ExecuteRhythmWindUp(); 
+                        }
+                    }
+
+                    // --- PHASE 2: THE IMPACT ---
+                    // Crunches the damage math exactly on the beat!
+                    if (trackTime >= targetBeat)
+                    {
+                        _isWindUpFired = false;
+                        _upcomingImpacts.RemoveAt(0); 
+                        _clusterSizes.RemoveAt(0);
+
+                        ExecutePulseImpact();
+                        RpcTriggerHitStop(); 
+
+                        if (_upcomingImpacts.Count > 0) 
+                        {
+                            currentComboCount = _clusterSizes[0];
+                            customIsCombo = (currentComboCount > 1);
+                        }
                     }
                 }
 
@@ -152,31 +178,45 @@ public class RhythmRoundManager : NetworkBehaviour
 
         PlayerController pc1 = playerList[0]; PlayerController pc2 = playerList[1];
         PlayerCombat p1 = pc1.GetComponent<PlayerCombat>(); PlayerCombat p2 = pc2.GetComponent<PlayerCombat>();
-        var m1 = p1.GetLockedMove(); var m2 = p2.GetLockedMove();
+        
+        // Peek at the moves to calculate damage
+        var m1 = p1.PeekNextMove(); 
+        var m2 = p2.PeekNextMove();
 
         bool p1Interrupted = (m2.attack == "Jab" && (m1.attack == "Cross" || m1.attack == "Hook")) || (m2.attack == "Cross" && m1.attack == "Hook");
         bool p2Interrupted = (m1.attack == "Jab" && (m2.attack == "Cross" || m2.attack == "Hook")) || (m1.attack == "Cross" && m2.attack == "Hook");
 
-        if (p1Interrupted) p1.TakeDamage(5); if (p2Interrupted) p2.TakeDamage(5);
+        int p1DamageTaken = 0;
+        int p2DamageTaken = 0;
 
-        int p1Result = ProcessDamage(p1, m1, p2, m2, p1Interrupted); int p2Result = ProcessDamage(p2, m2, p1, m1, p2Interrupted);
+        if (p1Interrupted) { p1.TakeDamage(5); p1DamageTaken += 5; } 
+        if (p2Interrupted) { p2.TakeDamage(5); p2DamageTaken += 5; }
+
+        int p1Result = ProcessDamage(p1, m1, p2, m2, p1Interrupted, out int dmgToP2); 
+        int p2Result = ProcessDamage(p2, m2, p1, m1, p2Interrupted, out int dmgToP1);
+
+        p2DamageTaken += dmgToP2;
+        p1DamageTaken += dmgToP1;
+
         int p1State = 0; if (p1Interrupted || p2Result == 1) p1State = -1; else if (p1Result == 1 || p2Result == -1) p1State = 1; 
         int p2State = 0; if (p2Interrupted || p1Result == 1) p2State = -1; else if (p2Result == 1 || p1Result == -1) p2State = 1; 
 
-        RpcLogCombatTrade(pc1.PlayerName, FormatMove(m1), p1State, pc2.PlayerName, FormatMove(m2), p2State);
+        RpcLogCombatTrade(pc1.PlayerName, FormatMove(m1), p1State, p1DamageTaken, pc2.PlayerName, FormatMove(m2), p2State, p2DamageTaken);
     }
 
     [Server]
-    private int ProcessDamage(PlayerCombat attacker, PlayerCombat.RhythmAction move, PlayerCombat defender, PlayerCombat.RhythmAction defMove, bool isInterrupted)
+    private int ProcessDamage(PlayerCombat attacker, PlayerCombat.RhythmAction move, PlayerCombat defender, PlayerCombat.RhythmAction defMove, bool isInterrupted, out int damageDealt)
     {
+        damageDealt = 0;
         if (isInterrupted || string.IsNullOrEmpty(move.attack) || move.attack == "Block") return 0;
-        bool hits = false; int damage = 0;
-        if (move.attack == "Jab") { damage = 10; hits = (defMove.dash == Vector3.zero && defMove.attack != "Block"); }
-        else if (move.attack == "Cross") { damage = 15; hits = (defMove.attack != "Block"); }
-        else if (move.attack == "Hook") { damage = 25; hits = (defMove.dash == Vector3.zero); }
+        
+        bool hits = false; 
+        if (move.attack == "Jab") { damageDealt = 10; hits = (defMove.dash == Vector3.zero && defMove.attack != "Block"); }
+        else if (move.attack == "Cross") { damageDealt = 15; hits = (defMove.attack != "Block"); }
+        else if (move.attack == "Hook") { damageDealt = 25; hits = (defMove.dash == Vector3.zero); }
 
-        if (hits) { defender.TakeDamage(damage); if (move.attack == "Hook") attacker.TargetAddEnergy(2); return 1; }
-        else { if (defMove.dash != Vector3.zero) { defender.TargetAddEnergy(1); return -1; } return 0; }
+        if (hits) { defender.TakeDamage(damageDealt); if (move.attack == "Hook") attacker.TargetAddEnergy(2); return 1; }
+        else { damageDealt = 0; if (defMove.dash != Vector3.zero) { defender.TargetAddEnergy(1); return -1; } return 0; }
     }
 
     private string FormatMove(PlayerCombat.RhythmAction move)
@@ -187,8 +227,25 @@ public class RhythmRoundManager : NetworkBehaviour
         return "Idle";
     }
 
-    [ClientRpc] private void RpcLogCombatTrade(string p1Name, string p1Move, int p1State, string p2Name, string p2Move, int p2State) { combatLogs.Add(new CombatLogEntry { p1Name = string.IsNullOrEmpty(p1Name) ? "Player 1" : p1Name, p1Move = p1Move, p1State = p1State, p2Name = string.IsNullOrEmpty(p2Name) ? "Player 2" : p2Name, p2Move = p2Move, p2State = p2State, timestamp = Time.time }); }
-    private void ExecutePulseImpact() { if (GameManager.players.Count >= 2) ResolveRhythmCombat(); foreach (var player in GameManager.players) { if (player != null) player.GetComponent<PlayerCombat>().ExecuteRhythmImpact(); } }
+    [ClientRpc] 
+    private void RpcLogCombatTrade(string p1Name, string p1Move, int p1State, int p1Dmg, string p2Name, string p2Move, int p2State, int p2Dmg) 
+    { 
+        combatLogs.Add(new CombatLogEntry { 
+            p1Name = string.IsNullOrEmpty(p1Name) ? "Player 1" : p1Name, p1Move = p1Move, p1State = p1State, p1Damage = p1Dmg,
+            p2Name = string.IsNullOrEmpty(p2Name) ? "Player 2" : p2Name, p2Move = p2Move, p2State = p2State, p2Damage = p2Dmg
+        }); 
+    }
+    
+    private void ExecutePulseImpact() 
+    { 
+        if (GameManager.players.Count >= 2) ResolveRhythmCombat(); 
+        
+        // Safely discard the move from the queue now that damage is calculated
+        foreach (var player in GameManager.players) 
+        { 
+            if (player != null) player.GetComponent<PlayerCombat>().ConsumeNextMove(); 
+        } 
+    }
 
     [ClientRpc] private void RpcTriggerHitStop() { StartCoroutine(HitStopRoutine()); }
     private IEnumerator HitStopRoutine() { Time.timeScale = 0.05f; yield return new WaitForSecondsRealtime(0.06f); Time.timeScale = 1.0f; }
@@ -219,6 +276,19 @@ public class RhythmRoundManager : NetworkBehaviour
             GUILayout.EndArea();
         }
 
+        GUILayout.BeginArea(new Rect(10, Screen.height / 2 - 100, 250, 200));
+        foreach (var p in GameManager.players)
+        {
+            if (p != null)
+            {
+                PlayerCombat pc = p.GetComponent<PlayerCombat>();
+                GUIStyle healthStyle = new GUIStyle(GUI.skin.box) { fontSize = 18, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleLeft };
+                healthStyle.normal.textColor = pc.CurrentHealth <= 30 ? Color.red : Color.green; 
+                GUILayout.Label($"{p.PlayerName} Health: {pc.CurrentHealth}", healthStyle, GUILayout.Height(40));
+            }
+        }
+        GUILayout.EndArea();
+
         if (isRoundActive && _startTime != 0)
         {
             float elapsed = (float)(NetworkTime.time - _startTime);
@@ -236,30 +306,42 @@ public class RhythmRoundManager : NetworkBehaviour
                         
                         style.normal.textColor = (timeToNextBeat < 1.0f) ? Color.red : Color.cyan;
                         string modeText = customIsCombo ? $"CHAIN MODE ({currentComboCount}x)" : "SINGLE MODE";
-                        GUI.Box(new Rect(Screen.width / 2 - 100, 50, 200, 70), $"{modeText}\nNEXT DROP\n{timeToNextBeat.ToString("F1")}s", style);
+                        GUI.Box(new Rect(Screen.width / 2 - 125, 50, 250, 120), $"{modeText}\nNEXT DROP\n{timeToNextBeat.ToString("F1")}s", style);
                     }
-                    else { GUI.Box(new Rect(Screen.width / 2 - 100, 50, 200, 70), "FINISHING...", style); }
+                    else { GUI.Box(new Rect(Screen.width / 2 - 125, 50, 250, 70), "FINISHING...", style); }
                 }
                 else
                 {
                     float interval = (currentType == RoundType.FastCombo) ? 8.0f : 4.0f; float timer = elapsed % interval;
                     style.normal.textColor = (timer > (interval - 1.5f)) ? Color.red : Color.white;
-                    GUI.Box(new Rect(Screen.width / 2 - 100, 50, 200, 70), $"WINDOW\n{timer.ToString("F1")}s / {interval}s", style);
+                    GUI.Box(new Rect(Screen.width / 2 - 125, 50, 250, 100), $"WINDOW\n{timer.ToString("F1")}s / {interval}s", style);
                 }
             }
         }
 
         if (combatLogs.Count > 0)
         {
-            GUILayout.BeginArea(new Rect(Screen.width - 420, 100, 400, 400));
-            GUIStyle logStyle = new GUIStyle(GUI.skin.label) { fontSize = 16, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter }; GUIStyle boxStyle = new GUIStyle(GUI.skin.box);
+            GUILayout.BeginArea(new Rect(Screen.width - 550, 100, 530, 600)); 
+            GUIStyle logStyle = new GUIStyle(GUI.skin.label) { fontSize = 16, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter }; 
+            GUIStyle boxStyle = new GUIStyle(GUI.skin.box);
             GUILayout.Label("COMBAT LOG", logStyle); GUILayout.Space(5);
+            
             foreach (var log in combatLogs)
             {
                 GUILayout.BeginHorizontal(boxStyle);
-                logStyle.normal.textColor = GetStateColor(log.p1State); GUILayout.Label($"{log.p1Name}: {log.p1Move}", logStyle, GUILayout.Width(170));
-                logStyle.normal.textColor = Color.white; GUILayout.Label(" vs ", logStyle, GUILayout.Width(40));
-                logStyle.normal.textColor = GetStateColor(log.p2State); GUILayout.Label($"{log.p2Name}: {log.p2Move}", logStyle, GUILayout.Width(170));
+                
+                string p1DmgStr = log.p1Damage > 0 ? $" (-{log.p1Damage} HP)" : "";
+                string p2DmgStr = log.p2Damage > 0 ? $" (-{log.p2Damage} HP)" : "";
+
+                logStyle.normal.textColor = GetStateColor(log.p1State); 
+                GUILayout.Label($"{log.p1Name}: {log.p1Move}{p1DmgStr}", logStyle, GUILayout.Width(230));
+                
+                logStyle.normal.textColor = Color.white; 
+                GUILayout.Label(" vs ", logStyle, GUILayout.Width(40));
+                
+                logStyle.normal.textColor = GetStateColor(log.p2State); 
+                GUILayout.Label($"{log.p2Name}: {log.p2Move}{p2DmgStr}", logStyle, GUILayout.Width(230));
+                
                 GUILayout.EndHorizontal(); GUILayout.Space(2);
             }
             GUILayout.EndArea(); GUI.color = Color.white; 

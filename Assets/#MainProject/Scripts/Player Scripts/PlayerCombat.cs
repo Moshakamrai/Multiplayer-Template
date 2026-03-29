@@ -30,7 +30,6 @@ public class PlayerCombat : NetworkBehaviour
 
     private string _pendingAttackTrigger = "";
     private Vector3 _pendingDashDirection = Vector3.zero;
-    private Coroutine _rechargeCoroutine; 
 
     private void Start()
     {
@@ -40,7 +39,6 @@ public class PlayerCombat : NetworkBehaviour
     public void VoiceAttackJab() { if (isLocalPlayer && !IsDead) _attackQueue.Enqueue("Jab"); }
     public void VoiceAttackCross() { if (isLocalPlayer && !IsDead) _attackQueue.Enqueue("Cross"); }
     public void VoiceAttackHook() { if (isLocalPlayer && !IsDead) _attackQueue.Enqueue("Hook"); }
-    public void VoiceAttackUppercut() { if (isLocalPlayer && !IsDead) _attackQueue.Enqueue("Uppercut"); }
     public void VoiceAttackBlock() { if (isLocalPlayer && !IsDead) _attackQueue.Enqueue("Block"); }
 
     private void Update()
@@ -81,13 +79,13 @@ public class PlayerCombat : NetworkBehaviour
         }
         else
         {
-            // DYNAMIC SLOT CHECK
             if (_comboBuffer.Count < RhythmRoundManager.Instance.currentComboCount) 
                 _comboBuffer.Add(new RhythmAction { attack = attackTrigger, dash = dashDir });
         }
     }
 
-    public RhythmAction GetLockedMove()
+    // --- NEW: THE PEEK AND CONSUME SYSTEM ---
+    public RhythmAction PeekNextMove()
     {
         if (RhythmRoundManager.Instance.IsSingleMoveMode())
             return new RhythmAction { attack = _pendingAttackTrigger, dash = _pendingDashDirection };
@@ -95,70 +93,36 @@ public class PlayerCombat : NetworkBehaviour
         return (_comboBuffer.Count > 0) ? _comboBuffer[0] : new RhythmAction { attack = "", dash = Vector3.zero };
     }
 
-    private void OnTriggerEnter(Collider other)
-    {
-        if (RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive) return;
-        if (!isServer || !other.CompareTag("Jabbed")) return;
-        
-        HitboxProperties hitbox = other.GetComponent<HitboxProperties>();
-        if (hitbox == null || hitbox.owner.netId == this.netId) return;
-
-        if (!IsDead && !IsHurting) TakeDamage(hitbox.currentDamage);
-    }
-
     [Server]
-    public void ExecuteRhythmImpact()
+    public void ConsumeNextMove()
     {
-        string attackToSend = _pendingAttackTrigger;
-        Vector3 dashToSend = _pendingDashDirection;
-
-        TargetTriggerRhythmImpact(attackToSend, dashToSend);
-        
         if (RhythmRoundManager.Instance.IsSingleMoveMode())
         {
             _pendingAttackTrigger = "";
             _pendingDashDirection = Vector3.zero;
         }
+        else if (_comboBuffer.Count > 0)
+        {
+            _comboBuffer.RemoveAt(0);
+        }
+    }
+
+    // --- PHASE 1: THE WIND UP (Fired exactly 0.5s early) ---
+    [Server]
+    public void ExecuteRhythmWindUp()
+    {
+        var move = PeekNextMove();
+        TargetTriggerRhythmWindUp(move.attack, move.dash);
     }
 
     [TargetRpc]
-    public void TargetTriggerRhythmImpact(string attack, Vector3 dash)
+    public void TargetTriggerRhythmWindUp(string attack, Vector3 dash)
     {
-        if (RhythmRoundManager.Instance.IsSingleMoveMode())
-        {
-            if (!string.IsNullOrEmpty(attack)) StartCoroutine(PerformAttack(attack));
-            if (dash != Vector3.zero) GetComponent<PlayerController>().CmdRhythmDash(dash);
-
-            _pendingAttackTrigger = "";
-            _pendingDashDirection = Vector3.zero; 
-        }
-        else
-        {
-            StartCoroutine(PlayComboRoutine());
-        }
+        if (!string.IsNullOrEmpty(attack)) StartCoroutine(PerformAttack(attack));
+        if (dash != Vector3.zero) GetComponent<PlayerController>().CmdRhythmDash(dash);
     }
 
     [TargetRpc] public void TargetAddEnergy(int amount) { if (isLocalPlayer) GetComponent<PlayerEnergy>().AddBonusEnergy(amount); }
-
-    private IEnumerator PlayComboRoutine()
-    {
-        // FIX: Create a local copy to prevent the "Collection was modified" Error
-        List<RhythmAction> actionsToPlay = new List<RhythmAction>(_comboBuffer);
-        _comboBuffer.Clear();
-
-        foreach (var action in actionsToPlay)
-        {
-            yield return new WaitUntil(() => isAttacking == false);
-
-            if (!string.IsNullOrEmpty(action.attack)) yield return StartCoroutine(PerformAttack(action.attack));
-
-            if (action.dash != Vector3.zero)
-            {
-                GetComponent<PlayerController>().CmdRhythmDash(action.dash);
-                yield return new WaitForSeconds(0.2f); 
-            }
-        }
-    }
 
     public void StartAttackWindow() { isAttacking = true; }
     public void EndAttackWindow() { isAttacking = false; }
@@ -173,14 +137,15 @@ public class PlayerCombat : NetworkBehaviour
         if (IsDead) return;
         StartCoroutine(FlashEffectRoutine());
         CurrentHealth -= damage;
-        float impactDelay = 0.35f; 
+        
+        // FIXED: Delay is now 0! The hit happens instantly on the beat!
+        float impactDelay = 0.0f; 
 
         if (CurrentHealth <= 0) StartCoroutine(DelayedKnockout(impactDelay));
         else RpcTriggerHurt("Hurt " + Random.Range(1, 5), impactDelay);
     }
 
     [Server] private IEnumerator DelayedKnockout(float delay) { yield return new WaitForSeconds(delay); RpcKnockout(); }
-    [Server] private IEnumerator ShieldRechargeRoutine() { yield return new WaitForSeconds(6f); while (CurrentShield < MaxShield && !IsDead) { CurrentShield++; yield return new WaitForSeconds(0.05f); } }
 
     [ClientRpc] void RpcTriggerHurt(string trigger, float delay) { StartCoroutine(DelayedHurtRoutine(trigger, delay)); }
 
@@ -204,7 +169,7 @@ public class PlayerCombat : NetworkBehaviour
         if (RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive)
         {
             if (!RhythmRoundManager.Instance.IsSingleMoveMode())
-                return _comboBuffer.Count < RhythmRoundManager.Instance.currentComboCount; // DYNAMIC LIMIT
+                return _comboBuffer.Count < RhythmRoundManager.Instance.currentComboCount; 
             else 
             {
                 if (isMovement) return _pendingDashDirection == Vector3.zero;
@@ -230,8 +195,9 @@ public class PlayerCombat : NetworkBehaviour
         if (!isLocalPlayer) return;
         if (RhythmRoundManager.Instance == null || !RhythmRoundManager.Instance.isRoundActive) return;
 
-        GUILayout.BeginArea(new Rect(20, Screen.height - 180, 300, 160));
-        GUIStyle headerStyle = new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold, fontSize = 18 };
+        GUILayout.BeginArea(new Rect(20, Screen.height - 300, 350, 280));
+        GUIStyle headerStyle = new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold, fontSize = 20 };
+        GUIStyle itemStyle = new GUIStyle(GUI.skin.label) { fontSize = 18 };
         headerStyle.normal.textColor = Color.green;
 
         if (RhythmRoundManager.Instance.IsSingleMoveMode())
@@ -239,12 +205,11 @@ public class PlayerCombat : NetworkBehaviour
             GUILayout.Label("LOCKED ACTION:", headerStyle);
             string atkText = string.IsNullOrEmpty(_pendingAttackTrigger) ? "None" : _pendingAttackTrigger;
             string dshText = (_pendingDashDirection == Vector3.zero) ? "None" : GetDirectionName(_pendingDashDirection);
-            GUILayout.Label($"Attack: {atkText}");
-            GUILayout.Label($"Move:   {dshText}");
+            GUILayout.Label($"Attack: {atkText}", itemStyle);
+            GUILayout.Label($"Move:   {dshText}", itemStyle);
         }
         else
         {
-            // DYNAMIC GHOST UI
             int maxSlots = RhythmRoundManager.Instance.currentComboCount;
             GUILayout.Label($"CHAIN COMMAND ({_comboBuffer.Count}/{maxSlots}):", headerStyle);
             
@@ -255,12 +220,12 @@ public class PlayerCombat : NetworkBehaviour
                     string atk = _comboBuffer[i].attack;
                     string dsh = (_comboBuffer[i].dash == Vector3.zero) ? "" : GetDirectionName(_comboBuffer[i].dash);
                     string displayLine = (atk != "" && dsh != "") ? $"{atk} + {dsh}" : (atk != "" ? atk : dsh);
-                    GUILayout.Label($"{i + 1}: {displayLine}");
+                    GUILayout.Label($"{i + 1}: {displayLine}", itemStyle);
                 }
                 else
                 {
                     GUI.color = new Color(1, 1, 1, 0.5f);
-                    GUILayout.Label($"{i + 1}: [ Empty ]");
+                    GUILayout.Label($"{i + 1}: [ Empty ]", itemStyle);
                     GUI.color = Color.white;
                 }
             }

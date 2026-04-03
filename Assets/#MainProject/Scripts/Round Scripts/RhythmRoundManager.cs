@@ -16,15 +16,19 @@ public class RhythmRoundManager : NetworkBehaviour
     [SyncVar] public bool customIsCombo = false; 
 
     [SyncVar] private double _startTime; 
-    private int _lastPulseExecuted = 0;
 
-    // --- NEW: Animation Sync ---
     [Header("Animation Sync")]
-    public float windUpTime = 0.53f; // The time it takes for a 1.4x speed punch to connect
+    public float windUpTime = 0.53f; 
+    
+    public bool IsWindUpActive { get { return _isWindUpFired; } }
     private bool _isWindUpFired = false;
 
+    // We now use this exact same list for ALL 3 game modes!
     private List<float> _upcomingImpacts = new List<float>();
     private List<int> _clusterSizes = new List<int>(); 
+    
+    // NEW: Tracks the very last beat to know when to cleanly end standard rounds
+    private float _finalStandardBeat = 0f; 
 
     private struct CombatLogEntry { public string p1Name; public string p1Move; public int p1State; public int p1Damage; public string p2Name; public string p2Move; public int p2State; public int p2Damage; }
     private List<CombatLogEntry> combatLogs = new List<CombatLogEntry>();
@@ -38,8 +42,57 @@ public class RhythmRoundManager : NetworkBehaviour
         return false;
     }
 
-    [Server] public void StartSlowRound() { if (isRoundActive) return; currentType = RoundType.SlowRhythm; currentComboCount = 1; customIsCombo = false; SetupRound(); }
-    [Server] public void StartFastRound() { if (isRoundActive) return; currentType = RoundType.FastCombo; currentComboCount = 4; customIsCombo = true; SetupRound(); }
+    [Server] 
+    public void StartSlowRound() 
+    { 
+        if (isRoundActive) return; 
+        currentType = RoundType.SlowRhythm; 
+        currentComboCount = 1; 
+        customIsCombo = false; 
+        
+        _upcomingImpacts.Clear();
+        _clusterSizes.Clear();
+        _isWindUpFired = false;
+
+        // Automatically map out 6 punches, exactly 4 seconds apart
+        for (int i = 1; i <= 6; i++) 
+        {
+            float t = i * 4.0f;
+            _upcomingImpacts.Add(t);
+            _finalStandardBeat = t;
+        }
+        
+        SetupRound(); 
+    }
+
+    [Server] 
+    public void StartFastRound() 
+    { 
+        if (isRoundActive) return; 
+        currentType = RoundType.FastCombo; 
+        currentComboCount = 4; 
+        customIsCombo = true; 
+        
+        _upcomingImpacts.Clear();
+        _clusterSizes.Clear();
+        _isWindUpFired = false;
+
+        // Map out 3 windows (8s, 16s, 24s). 
+        for (int i = 1; i <= 3; i++)
+        {
+            float baseTime = i * 8.0f;
+            for (int j = 0; j < 4; j++) 
+            {
+                // INCREASED FROM 0.6f TO 1.2f!
+                // Now the animations have exactly 1.2 seconds to finish before the next punch fires.
+                float t = baseTime + (j * 1.2f);
+                _upcomingImpacts.Add(t);
+                _finalStandardBeat = t;
+            }
+        }
+        
+        SetupRound(); 
+    }
     
     [Server] 
     public void StartCustomRound() 
@@ -99,12 +152,11 @@ public class RhythmRoundManager : NetworkBehaviour
     [Server] private void SetupRound() 
     { 
         _startTime = NetworkTime.time + 1.0; 
-        _lastPulseExecuted = 0; 
         isRoundActive = true; 
         RpcClearLogs(); 
     }
     
-    [Server] public void StopRound() { isRoundActive = false; _startTime = 0; _upcomingImpacts.Clear(); }
+    [Server] public void StopRound() { isRoundActive = false; _startTime = 0; _upcomingImpacts.Clear(); _isWindUpFired = false; }
 
     [ClientRpc] private void RpcClearLogs() { combatLogs.Clear(); }
 
@@ -116,56 +168,51 @@ public class RhythmRoundManager : NetworkBehaviour
 
         if (isServer)
         {
-            if (currentType == RoundType.CustomTrack)
+            // THE UNIFIED TIME ENGINE: Custom uses track time, Standard uses pure math time
+            float currentTime = (currentType == RoundType.CustomTrack) ? BeatAnalyzer.Instance.audioSource.time : (float)elapsed;
+
+            if (_upcomingImpacts.Count > 0)
             {
-                float trackTime = BeatAnalyzer.Instance.audioSource.time;
+                float targetBeat = _upcomingImpacts[0];
 
-                if (_upcomingImpacts.Count > 0)
+                // --- PHASE 1: THE WIND UP ---
+                if (!_isWindUpFired && currentTime >= targetBeat - windUpTime)
                 {
-                    float targetBeat = _upcomingImpacts[0];
-
-                    // --- PHASE 1: THE WIND UP ---
-                    // Fire animations 0.5s early so the fist connects right on the bass kick
-                    if (!_isWindUpFired && trackTime >= targetBeat - windUpTime)
-                    {
-                        _isWindUpFired = true;
-                        foreach (var player in GameManager.players) 
-                        { 
-                            if (player != null) player.GetComponent<PlayerCombat>().ExecuteRhythmWindUp(); 
-                        }
-                    }
-
-                    // --- PHASE 2: THE IMPACT ---
-                    // Crunches the damage math exactly on the beat!
-                    if (trackTime >= targetBeat)
-                    {
-                        _isWindUpFired = false;
-                        _upcomingImpacts.RemoveAt(0); 
-                        _clusterSizes.RemoveAt(0);
-
-                        ExecutePulseImpact();
-                        RpcTriggerHitStop(); 
-
-                        if (_upcomingImpacts.Count > 0) 
-                        {
-                            currentComboCount = _clusterSizes[0];
-                            customIsCombo = (currentComboCount > 1);
-                        }
-                    }
+                    _isWindUpFired = true;
+                    foreach (var player in GameManager.players) { if (player != null) player.GetComponent<PlayerCombat>().ExecuteRhythmWindUp(); }
                 }
 
-                if (!BeatAnalyzer.Instance.audioSource.isPlaying) StopRound();
+                // --- PHASE 2: THE IMPACT ---
+                if (currentTime >= targetBeat)
+                {
+                    _isWindUpFired = false;
+                    _upcomingImpacts.RemoveAt(0); 
+                    
+                    if (_clusterSizes.Count > 0) _clusterSizes.RemoveAt(0); 
+
+                    ExecutePulseImpact();
+                    RpcTriggerHitStop(); 
+
+                    // Only dynamically scale the UI if it's a Custom Track, otherwise leave it locked at 4
+                    if (currentType == RoundType.CustomTrack && _upcomingImpacts.Count > 0) 
+                    {
+                        currentComboCount = _clusterSizes[0];
+                        customIsCombo = (currentComboCount > 1);
+                    }
+                }
             }
             else
             {
-                float interval = (currentType == RoundType.FastCombo) ? 8.0f : 4.0f;
-                int maxPulses = (currentType == RoundType.FastCombo) ? 3 : 6;
-                for (int i = 1; i <= maxPulses; i++)
+                // Graceful Round Ending
+                if (currentType == RoundType.CustomTrack)
                 {
-                    float impactTime = i * interval;
-                    if (elapsed >= impactTime && _lastPulseExecuted < i) { _lastPulseExecuted = i; ExecutePulseImpact(); }
+                    if (!BeatAnalyzer.Instance.audioSource.isPlaying) StopRound();
                 }
-                if (elapsed >= (interval * maxPulses) + 0.1f) StopRound();
+                else
+                {
+                    // For standard modes, give the final hit 1.5s to finish animating before cutting the round
+                    if (currentTime >= _finalStandardBeat + 1.5f) StopRound();
+                }
             }
         }
     }
@@ -179,7 +226,6 @@ public class RhythmRoundManager : NetworkBehaviour
         PlayerController pc1 = playerList[0]; PlayerController pc2 = playerList[1];
         PlayerCombat p1 = pc1.GetComponent<PlayerCombat>(); PlayerCombat p2 = pc2.GetComponent<PlayerCombat>();
         
-        // Peek at the moves to calculate damage
         var m1 = p1.PeekNextMove(); 
         var m2 = p2.PeekNextMove();
 
@@ -239,12 +285,7 @@ public class RhythmRoundManager : NetworkBehaviour
     private void ExecutePulseImpact() 
     { 
         if (GameManager.players.Count >= 2) ResolveRhythmCombat(); 
-        
-        // Safely discard the move from the queue now that damage is calculated
-        foreach (var player in GameManager.players) 
-        { 
-            if (player != null) player.GetComponent<PlayerCombat>().ConsumeNextMove(); 
-        } 
+        foreach (var player in GameManager.players) { if (player != null) player.GetComponent<PlayerCombat>().ConsumeNextMove(); } 
     }
 
     [ClientRpc] private void RpcTriggerHitStop() { StartCoroutine(HitStopRoutine()); }
@@ -329,19 +370,11 @@ public class RhythmRoundManager : NetworkBehaviour
             foreach (var log in combatLogs)
             {
                 GUILayout.BeginHorizontal(boxStyle);
-                
                 string p1DmgStr = log.p1Damage > 0 ? $" (-{log.p1Damage} HP)" : "";
                 string p2DmgStr = log.p2Damage > 0 ? $" (-{log.p2Damage} HP)" : "";
-
-                logStyle.normal.textColor = GetStateColor(log.p1State); 
-                GUILayout.Label($"{log.p1Name}: {log.p1Move}{p1DmgStr}", logStyle, GUILayout.Width(230));
-                
-                logStyle.normal.textColor = Color.white; 
-                GUILayout.Label(" vs ", logStyle, GUILayout.Width(40));
-                
-                logStyle.normal.textColor = GetStateColor(log.p2State); 
-                GUILayout.Label($"{log.p2Name}: {log.p2Move}{p2DmgStr}", logStyle, GUILayout.Width(230));
-                
+                logStyle.normal.textColor = GetStateColor(log.p1State); GUILayout.Label($"{log.p1Name}: {log.p1Move}{p1DmgStr}", logStyle, GUILayout.Width(230));
+                logStyle.normal.textColor = Color.white; GUILayout.Label(" vs ", logStyle, GUILayout.Width(40));
+                logStyle.normal.textColor = GetStateColor(log.p2State); GUILayout.Label($"{log.p2Name}: {log.p2Move}{p2DmgStr}", logStyle, GUILayout.Width(230));
                 GUILayout.EndHorizontal(); GUILayout.Space(2);
             }
             GUILayout.EndArea(); GUI.color = Color.white; 

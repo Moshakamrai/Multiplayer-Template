@@ -1091,7 +1091,7 @@ Light:
   serializedVersion: 10
   m_Type: 1
   m_Shape: 0
-  m_Color: {r: 1, g: 1, b: 1, a: 1}
+  m_Color: {r: 1, g: 0.9044462, b: 0.4669811, a: 1}
   m_Intensity: 1
   m_Range: 10
   m_SpotAngle: 30
@@ -1580,6 +1580,14 @@ PrefabInstance:
       value: Camera
       objectReference: {fileID: 0}
     - target: {fileID: 3671046889408114882, guid: 9cf435a5868c11f47b4678aebc2f324b, type: 3}
+      propertyPath: field of view
+      value: 60.000004
+      objectReference: {fileID: 0}
+    - target: {fileID: 3671046889408114882, guid: 9cf435a5868c11f47b4678aebc2f324b, type: 3}
+      propertyPath: m_FocalLength
+      value: 20.78461
+      objectReference: {fileID: 0}
+    - target: {fileID: 3671046889408114882, guid: 9cf435a5868c11f47b4678aebc2f324b, type: 3}
       propertyPath: m_BackGroundColor.a
       value: 1
       objectReference: {fileID: 0}
@@ -1594,6 +1602,14 @@ PrefabInstance:
     - target: {fileID: 3671046889408114882, guid: 9cf435a5868c11f47b4678aebc2f324b, type: 3}
       propertyPath: m_BackGroundColor.r
       value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 3671046889408114882, guid: 9cf435a5868c11f47b4678aebc2f324b, type: 3}
+      propertyPath: m_projectionMatrixMode
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 3671046889408114908, guid: 9cf435a5868c11f47b4678aebc2f324b, type: 3}
+      propertyPath: m_RendererIndex
+      value: -1
       objectReference: {fileID: 0}
     - target: {fileID: 3671046889408114909, guid: 9cf435a5868c11f47b4678aebc2f324b, type: 3}
       propertyPath: m_RootOrder
@@ -1799,7 +1815,7 @@ PrefabInstance:
     - target: {fileID: 2984976270258637181, guid: f0794d77fdd34d9438e1b7e255827741, type: 3}
       propertyPath: m_audioClip
       value: 
-      objectReference: {fileID: 8300000, guid: 18c990cf21cdc4542821576afb229a64, type: 3}
+      objectReference: {fileID: 8300000, guid: 6e54e070d51e98a4d8ffe840e50ed7f6, type: 3}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -2225,6 +2241,55 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 41f84591ce72545258ea98cb7518d8b9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+--- !u!1 &1771424217
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1771424219}
+  - component: {fileID: 1771424218}
+  m_Layer: 0
+  m_Name: Post Processing
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1771424218
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1771424217}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 172515602e62fb746b5d573b38a5fe58, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  m_IsGlobal: 1
+  priority: 0
+  blendDistance: 0
+  weight: 1
+  sharedProfile: {fileID: 11400000, guid: b398c89679057d0488c061be175c568e, type: 2}
+--- !u!4 &1771424219
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1771424217}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 1.4169275, y: 0.95065004, z: -6.5160694}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1778747594
 GameObject:
   m_ObjectHideFlags: 0
@@ -2823,6 +2888,10 @@ PrefabInstance:
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: 1401232485327495269, guid: 71e4c918a4b69db4285f1c609a310ed5, type: 3}
+      propertyPath: m_Materials.Array.data[2]
+      value: 
+      objectReference: {fileID: 2100000, guid: 3d3500213aedcc14ea811282397aa203, type: 2}
     - target: {fileID: 4870615848235143289, guid: 71e4c918a4b69db4285f1c609a310ed5, type: 3}
       propertyPath: m_Name
       value: ENV
@@ -2849,3 +2918,4 @@ SceneRoots:
   - {fileID: 1835843191}
   - {fileID: 298810259}
   - {fileID: 1411567815}
+  - {fileID: 1771424219}

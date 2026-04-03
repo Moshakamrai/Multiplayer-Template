@@ -52,12 +52,17 @@ public class PlayerCombat : NetworkBehaviour
     private IEnumerator PerformAttack(string trigger)
     {
         isAttacking = true;
-        if (isLocalPlayer && animator != null) animator.SetTrigger(trigger);
+        
+        if (isLocalPlayer && animator != null) 
+        {
+            // Instead of SetTrigger, this forces the animator to instantly restart the punch!
+            animator.Play(trigger, 0, 0f); 
+        }
 
         int damageToSet = (trigger == "Hook") ? 25 : (trigger == "Cross") ? 15 : (trigger == "Jab") ? 10 : 0; 
         CmdTriggerAttack(trigger, damageToSet);
 
-        yield return new WaitUntil(() => isAttacking == false);
+        // We remove the WaitUntil dead-lock so rapid-fire beats don't get stuck
         yield return new WaitForSeconds(0.1f);
     }
 
@@ -68,7 +73,23 @@ public class PlayerCombat : NetworkBehaviour
         if (isLocalPlayer) CmdQueueRhythmMove(attackTrigger, dashDir);
     }
 
-    [Command] private void CmdQueueRhythmMove(string attack, Vector3 dash) { QueueLogic(attack, dash); }
+    [Command] 
+    private void CmdQueueRhythmMove(string attack, Vector3 dash) 
+    { 
+        QueueLogic(attack, dash); 
+        
+        // --- THE LATECOMER FIX ---
+        // If Vosk took too long and the Wind-Up train already left the station, 
+        // instantly force the animation to play so we don't miss the beat!
+        if (RhythmRoundManager.Instance.IsWindUpActive)
+        {
+            bool isCurrentBeat = RhythmRoundManager.Instance.IsSingleMoveMode() || _comboBuffer.Count == 1;
+            if (isCurrentBeat) 
+            {
+                TargetTriggerRhythmWindUp(attack, dash);
+            }
+        }
+    }
 
     private void QueueLogic(string attackTrigger, Vector3 dashDir)
     {

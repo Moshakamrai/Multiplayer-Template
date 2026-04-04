@@ -69,8 +69,18 @@ public class PlayerCombat : NetworkBehaviour
     public void QueueRhythmMove(string attackTrigger, Vector3 dashDir)
     {
         if (IsDead || IsHurting) return;
-        if (!isServer) QueueLogic(attackTrigger, dashDir);
-        if (isLocalPlayer) CmdQueueRhythmMove(attackTrigger, dashDir);
+    
+        // 1. If we are the Server (Bot) or the Local Player, update the logic buffer immediately
+        if (isServer || isLocalPlayer) 
+        {
+            QueueLogic(attackTrigger, dashDir);
+        }
+    
+        // 2. Only human clients need to send the Command to the server
+        if (isLocalPlayer && !isServer) 
+        {
+            CmdQueueRhythmMove(attackTrigger, dashDir);
+        }
     }
 
     [Command] 
@@ -130,18 +140,75 @@ public class PlayerCombat : NetworkBehaviour
 
     // --- PHASE 1: THE WIND UP (Fired exactly 0.5s early) ---
     [Server]
-    public void ExecuteRhythmWindUp()
+public void ExecuteRhythmWindUp()
+{
+    var move = PeekNextMove();
+    
+    // IF BOT: connectionToClient is null. Execute immediately on Server.
+    if (connectionToClient == null) 
     {
-        var move = PeekNextMove();
+        ExecuteMoveEffect(move.attack, move.dash);
+    }
+    else 
+    {
+        // IF PLAYER: Send the RPC like normal
         TargetTriggerRhythmWindUp(move.attack, move.dash);
+    }
+}
+
+    // NEW: Shared logic for both Bot (Server) and Player (Client)
+    private void HandleRhythmAnimationLogic(string attack, Vector3 dash)
+    {
+        if (!string.IsNullOrEmpty(attack)) 
+        {
+            if (animator != null) animator.Play(attack, 0, 0f);
+            // Only run the damage coroutine if it's a local player or a bot on the server
+            if (isLocalPlayer || (isServer && connectionToClient == null)) 
+                StartCoroutine(PerformAttack(attack));
+        }
+
+        if (dash != Vector3.zero) 
+        {
+            GetComponent<PlayerController>().ApplyDashExternal(dash);
+        }
     }
 
     [TargetRpc]
-    public void TargetTriggerRhythmWindUp(string attack, Vector3 dash)
+public void TargetTriggerRhythmWindUp(string attack, Vector3 dash)
+{
+    // KEEP your existing logic for human players
+    ExecuteMoveEffect(attack, dash);
+
+    // Re-insert your specific combo/timing fixes if they were in the original
+    if (RhythmRoundManager.Instance.IsWindUpActive)
     {
-        if (!string.IsNullOrEmpty(attack)) StartCoroutine(PerformAttack(attack));
-        if (dash != Vector3.zero) GetComponent<PlayerController>().CmdRhythmDash(dash);
+        // This ensures multiplayer clients stay in sync if Vosk is slow
+        bool isCurrentBeat = RhythmRoundManager.Instance.IsSingleMoveMode() || _comboBuffer.Count == 1;
+        if (!isCurrentBeat) return; 
     }
+}
+
+    // This handles the actual animation and damage logic without worrying about Network Authority
+private void ExecuteMoveEffect(string attack, Vector3 dash)
+{
+    if (!string.IsNullOrEmpty(attack)) 
+    {
+        if (animator != null) animator.Play(attack, 0, 0f); // 1-frame snap
+        
+        // IMPORTANT: Start the damage/hitbox coroutine
+        // For Bots, we run it on the server. For Players, we run it on their client.
+        if (isLocalPlayer || (isServer && connectionToClient == null)) 
+        {
+            StartCoroutine(PerformAttack(attack));
+        }
+    }
+    
+    if (dash != Vector3.zero) 
+    {
+        // Use the existing ApplyDashExternal you have in PlayerController
+        GetComponent<PlayerController>().ApplyDashExternal(dash);
+    }
+}
 
     [TargetRpc] public void TargetAddEnergy(int amount) { if (isLocalPlayer) GetComponent<PlayerEnergy>().AddBonusEnergy(amount); }
 

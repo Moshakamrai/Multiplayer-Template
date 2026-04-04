@@ -33,6 +33,10 @@ public class RhythmRoundManager : NetworkBehaviour
     private struct CombatLogEntry { public string p1Name; public string p1Move; public int p1State; public int p1Damage; public string p2Name; public string p2Move; public int p2State; public int p2Damage; }
     private List<CombatLogEntry> combatLogs = new List<CombatLogEntry>();
 
+    [Header("Single Player Settings")]
+    public GameObject botPrefab; // Drag your Bot Prefab here in the Inspector
+    private GameObject _activeBot;
+
     private void Awake() { if (Instance == null) Instance = this; }
 
     public bool IsSingleMoveMode()
@@ -53,13 +57,14 @@ public class RhythmRoundManager : NetworkBehaviour
         _upcomingImpacts.Clear();
         _clusterSizes.Clear();
         _isWindUpFired = false;
-
-        // Automatically map out 6 punches, exactly 4 seconds apart
-        for (int i = 1; i <= 6; i++) 
+    
+        // We want 90 seconds total. 
+        // At 4-second intervals, i <= 22 gives us 88 seconds.
+        for (int i = 1; i <= 22; i++) 
         {
             float t = i * 4.0f;
             _upcomingImpacts.Add(t);
-            _finalStandardBeat = t;
+            _finalStandardBeat = t; // This ensures the round doesn't cut off early
         }
         
         SetupRound(); 
@@ -175,11 +180,25 @@ public class RhythmRoundManager : NetworkBehaviour
             {
                 float targetBeat = _upcomingImpacts[0];
 
+                
                 // --- PHASE 1: THE WIND UP ---
                 if (!_isWindUpFired && currentTime >= targetBeat - windUpTime)
                 {
                     _isWindUpFired = true;
-                    foreach (var player in GameManager.players) { if (player != null) player.GetComponent<PlayerCombat>().ExecuteRhythmWindUp(); }
+                    foreach (var player in GameManager.players) 
+                    { 
+                        if (player != null) 
+                        {
+                            // NEW: Check if this player is a Bot and force it to decide
+                            BotController bot = player.GetComponent<BotController>();
+                            if (bot != null) 
+                            {
+                                bot.ThinkNextMove(); // This populates the _comboBuffer or _pendingAttack
+                            }
+
+                            player.GetComponent<PlayerCombat>().ExecuteRhythmWindUp(); 
+                        }
+                    }
                 }
 
                 // --- PHASE 2: THE IMPACT ---
@@ -261,7 +280,24 @@ public class RhythmRoundManager : NetworkBehaviour
         else if (move.attack == "Cross") { damageDealt = 15; hits = (defMove.attack != "Block"); }
         else if (move.attack == "Hook") { damageDealt = 25; hits = (defMove.dash == Vector3.zero); }
 
-        if (hits) { defender.TakeDamage(damageDealt); if (move.attack == "Hook") attacker.TargetAddEnergy(2); return 1; }
+        if (hits) 
+        { 
+            defender.TakeDamage(damageDealt); 
+            if (move.attack == "Hook") 
+            {
+                // Check if the attacker is a Bot (no connection)
+                if (attacker.connectionToClient != null) 
+                {
+                    attacker.TargetAddEnergy(2);
+                }
+                else 
+                {
+                    // Give energy directly to the Bot's script on the server
+                    attacker.GetComponent<PlayerEnergy>().AddBonusEnergy(2); 
+                }
+            }
+            return 1;
+        }
         else { damageDealt = 0; if (defMove.dash != Vector3.zero) { defender.TargetAddEnergy(1); return -1; } return 0; }
     }
 
@@ -382,4 +418,21 @@ public class RhythmRoundManager : NetworkBehaviour
     }
 
     private Color GetStateColor(int state) { if (state == 1) return Color.green; if (state == -1) return Color.red; return Color.white; }
+    [Server]
+    private void EnsureBotExists()
+    {
+        // Check if there is only 1 player (the host)
+        if (GameManager.players.Count == 1 && _activeBot == null)
+        {
+            // Spawn the bot at a position opposite to the player
+            Vector3 spawnPos = new Vector3(0, 0, 5); // Adjust based on your arena
+            _activeBot = Instantiate(botPrefab, spawnPos, Quaternion.identity);
+
+            // Spawn it on the network so everyone sees it
+            NetworkServer.Spawn(_activeBot);
+
+            // Force the bot to be 'Ready' so the match can proceed
+            _activeBot.GetComponent<PlayerController>().SetReadyCmd(true);
+        }
+    }
 }

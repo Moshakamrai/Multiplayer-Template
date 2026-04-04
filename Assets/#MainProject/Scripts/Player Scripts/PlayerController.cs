@@ -62,11 +62,17 @@ public class PlayerController : NetworkBehaviour
     }
 
     private void Update()
-    {
-        if (!isLocalPlayer || _combat.IsDead || _combat.IsHurting) return;
-        ProcessDashQueue();
-        Movement();
-    }
+{
+    // Allow the code to run if:
+    // 1. It's the human playing (isLocalPlayer)
+    // 2. OR it's the Bot running on the Server (isServer && !isLocalPlayer)
+    bool isBotOnServer = isServer && !isLocalPlayer;
+    
+    if (!(isLocalPlayer || isBotOnServer) || _combat.IsDead || _combat.IsHurting) return;
+
+    ProcessDashQueue();
+    Movement();
+}
 
     private void FixedUpdate()
     {
@@ -124,6 +130,8 @@ public class PlayerController : NetworkBehaviour
     private void Movement()
     {
         PlayerController opponent = GetOpponent();
+    
+        // 1. Handle Rotation and Aiming
         if (opponent != null)
         {
             if (!_combat.isAttacking) 
@@ -133,20 +141,37 @@ public class PlayerController : NetworkBehaviour
                 if (directionToOpponent != Vector3.zero)
                 {
                     Quaternion targetRotation = Quaternion.LookRotation(directionToOpponent);
+                    // Both Local Player and Server (Bot) can rotate to face the opponent
                     transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * LockOnSpeed);
                 }
-                _rotationYLocal = Mathf.Lerp(_rotationYLocal, LockOnPitch, Time.deltaTime * LockOnSpeed); 
+    
+                // Only update the vertical pitch calculation if we are the local player
+                if (isLocalPlayer)
+                {
+                    _rotationYLocal = Mathf.Lerp(_rotationYLocal, LockOnPitch, Time.deltaTime * LockOnSpeed);
+                }
             }
         }
-        else
+        else if (isLocalPlayer) // Manual mouse rotation only for the human player
         {
             transform.Rotate(0, GameManager.Look.x * GameManager.Sensitivity * Time.deltaTime, 0);
             _rotationYLocal = Mathf.Clamp(_rotationYLocal + -GameManager.Look.y * GameManager.Sensitivity * Time.deltaTime, -90, 90);
         }
-
-        if (NetworkClient.ready) UpdateLookRotationCmd(_rotationYLocal);
-        cameraPosition.localRotation = Quaternion.Euler(_rotationYLocal, 0, 0);
-
+    
+        // 2. Networking and Camera (Authority Fix)
+        // ONLY the local player should send rotation commands to the server
+        if (isLocalPlayer && NetworkClient.ready) 
+        {
+            UpdateLookRotationCmd(_rotationYLocal);
+        }
+    
+        // Only rotate the camera holder if it is actually assigned in the inspector (Reference Fix)
+        if (cameraPosition != null)
+        {
+            cameraPosition.localRotation = Quaternion.Euler(_rotationYLocal, 0, 0);
+        }
+    
+        // 3. Dash Execution
         if (_isDashing)
         {
             _characterController.Move(transform.TransformDirection(_dashDirection) * (dashDistance / dashDuration) * Time.deltaTime);
@@ -155,8 +180,12 @@ public class PlayerController : NetworkBehaviour
             if (_dashElapsed >= dashDuration) _isDashing = false;
             return;
         }
-        else { playerCollider.enabled = true; }
-
+        else 
+        { 
+            playerCollider.enabled = true; 
+        }
+    
+        // 4. Auto-Spacing Logic
         Vector3 autoSpacingVelocity = Vector3.zero;
         if (opponent != null && !_isDashing && !_combat.isAttacking && !_combat.IsHurting)
         {
@@ -170,14 +199,30 @@ public class PlayerController : NetworkBehaviour
                 autoSpacingVelocity = dirToOpponent * moveDir * SpacingSpeed;
             }
         }
-
+    
+        // 5. Visual Cleanup
+        if (isLocalPlayer)
+        {
+            // Hide the mesh for the local player so you don't see the inside of the head
+            var renderer = GetComponentInChildren<SkinnedMeshRenderer>();
+            if (renderer != null && renderer.enabled) 
+            {
+                renderer.enabled = false;
+            }
+        }
+    
+        // 6. Final Movement Calculation
         _velocityY += Physics.gravity.y * Time.deltaTime;
-        Vector3 targetVelocity = (GameManager.Move.y * transform.forward + GameManager.Move.x * transform.right) * GameManager.Speed;
+        
+        // Only get human input if this is the local player
+        Vector3 inputMovement = isLocalPlayer ? (GameManager.Move.y * transform.forward + GameManager.Move.x * transform.right) : Vector3.zero;
+        
+        Vector3 targetVelocity = inputMovement * GameManager.Speed;
         targetVelocity += autoSpacingVelocity;
         targetVelocity.y = _velocityY;
+        
         _characterController.Move(targetVelocity * Time.deltaTime);
     }
-
     public void InterruptMovement() { _dashQueue.Clear(); _isDashing = false; }
     private void ProcessDashQueue()
     {

@@ -441,12 +441,18 @@ public override void Start()
         
         Transform camTransform = _cam.transform;
         
-        // Set to the local player if there is one.
         if (CameraPosition != null)
         {
             camTransform.position = CameraPosition.position;
             camTransform.rotation = CameraPosition.rotation;
-            _cam.fieldOfView = 80;
+            _cam.fieldOfView = 90; // Wider for First Person
+        
+            // NEW: Hide our own body so we don't see our neck/shoulders
+            if (localPlayer != null)
+            {
+                // Assuming your mesh is a child or referenced in PlayerCombat
+                localPlayer.GetComponentInChildren<SkinnedMeshRenderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.ShadowsOnly;
+            }
         }
 
         transform.position = camTransform.position;

@@ -25,7 +25,7 @@ public class BotController : NetworkBehaviour
         string attack = "";
         Vector3 dash = Vector3.zero;
 
-        // Simple Logic: 70% Attack, 20% Dodge, 10% Block
+        // 1. Determine Action (70% Attack, 20% Dodge, 10% Block)
         if (decision < 0.7f)
         {
             float atkType = Random.value;
@@ -33,16 +33,15 @@ public class BotController : NetworkBehaviour
             else if (atkType < 0.8f) attack = "Cross";
             else attack = "Hook";
         }
-        else if (decision < 0.9f)
-        {
-            dash = (Random.value > 0.5f) ? Vector3.left : Vector3.right;
-        }
-        else
-        {
-            attack = "Block";
-        }
+        else if (decision < 0.9f) dash = (Random.value > 0.5f) ? Vector3.left : Vector3.right;
+        else attack = "Block";
 
-        // We inject directly into the combat buffer
+        // 2. Simulate Random Vocal Timing
+        // The bot picks a random 'spike' time between 0.0s and 0.4s before the beat.
+        float targetBeat = RhythmRoundManager.Instance.GetNextBeatTime();
+        float randomDelay = Random.Range(0.01f, 0.4f); 
+        _combat.lastVocalSpikeTime = targetBeat - randomDelay;
+
         _combat.QueueRhythmMove(attack, dash);
     }
 }

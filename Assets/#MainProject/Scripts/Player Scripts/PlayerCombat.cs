@@ -37,6 +37,8 @@ public class PlayerCombat : NetworkBehaviour
 
     private VoiceCommandManager _vcm;
 
+    [SyncVar] public float lastVocalSpikeTime = -1f; // Timestamp of the loudest peak
+
     private void Start()
     {
         if (isLocalPlayer && ShieldText == null) ShieldText = GameObject.Find("ShieldText")?.GetComponent<Text>();
@@ -68,9 +70,12 @@ public class PlayerCombat : NetworkBehaviour
 
     private void CheckLocalParryTiming()
     {
-        if (_pendingAttackTrigger != "ParryIntent") return;
+        string currentMove = _pendingAttackTrigger;
+        bool isDashing = (_pendingDashDirection != Vector3.zero);
+        
+        // Exit if no action is queued
+        if (string.IsNullOrEmpty(currentMove) && !isDashing) return;
 
-        // Using your new public variable for the VoiceProcessor
         if (vp == null || _vcm == null || RhythmRoundManager.Instance == null) return;
 
         float currentVol = vp.CurrentRawVolume;
@@ -80,23 +85,33 @@ public class PlayerCombat : NetworkBehaviour
         float currentTime = RhythmRoundManager.Instance.GetCurrentTrackTime();
         float timeUntilImpact = nextBeat - currentTime;
 
-        // THE TIGHT WINDOW: 0.3s before the beat.
-        // This is where it gets tactical—no more early shouting!
-        bool isInsideTightWindow = timeUntilImpact > 0 && timeUntilImpact <= 0.3f;
         bool vocalSpike = currentVol >= threshold;
 
-        if (isInsideTightWindow && vocalSpike)
+        // --- APPLY YOUR CUSTOM WINDOWS ---
+        float window = 0.3f; // Default for Attacks
+        if (currentMove == "ParryIntent") window = 0.2f;
+        else if (currentMove == "Block") window = 0.4f;
+        else if (isDashing) window = 0.3f; 
+
+        bool isInsideWindow = timeUntilImpact > 0 && timeUntilImpact <= window;
+
+        if (vocalSpike && isInsideWindow)
         {
-            Debug.Log($"<color=green>ELITE PARRY!</color> Timed at {timeUntilImpact:F2}s.");
-            CmdConfirmSuccessfulParry();
-            _pendingAttackTrigger = "Parry"; 
-        }
-        else if (vocalSpike && timeUntilImpact > 0.3f)
-        {
-            // Optional: Feedback for being too early
-            Debug.Log($"<color=red>TOO EARLY:</color> {timeUntilImpact:F2}s left. Wait for the 0.3s window!");
+            // Record the spike for the server to calculate damage/success
+            CmdRegisterVocalSpike(currentTime); 
+            
+            if (currentMove == "ParryIntent") 
+            {
+                CmdConfirmSuccessfulParry();
+                _pendingAttackTrigger = "Parry"; 
+            }
+            
+            Debug.Log($"<color=green>VOCAL SUCCESS:</color> {currentMove} triggered within {window}s window.");
         }
     }
+
+    [Command]
+    void CmdRegisterVocalSpike(float time) { lastVocalSpikeTime = time; }
 
     [Command]
     void CmdConfirmSuccessfulParry()

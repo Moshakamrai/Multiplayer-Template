@@ -248,86 +248,73 @@ public class PlayerCombat : NetworkBehaviour
 
     private void OnGUI()
     {
-        // 1. SECURITY CHECK: Only show for your own player
         if (!isLocalPlayer) return;
         
-        // --- NEW: PARRY MONITOR (Bottom Right) ---
-        // This MUST show up if you have a VoiceProcessor component attached
-        
+        // --- 1. BOT/OPPONENT HEALTH GUI (Top Middle) ---
+        PlayerController opponent = GetComponent<PlayerController>().GetOpponent();
+        if (opponent != null)
+        {
+            PlayerCombat oppCombat = opponent.GetComponent<PlayerCombat>();
+            if (oppCombat != null)
+            {
+                // Centering the health bar at the top
+                float barWidth = 400f;
+                float barHeight = 40f;
+                float posX = (Screen.width / 2) - (barWidth / 2);
+                float posY = 20f;
+
+                // Dark background for the bar
+                GUI.Box(new Rect(posX, posY, barWidth, barHeight), "");
+                
+                // Red foreground for the health
+                float healthPercent = (float)oppCombat.CurrentHealth / 100f;
+                GUI.color = Color.red;
+                GUI.Box(new Rect(posX + 5, posY + 5, (barWidth - 10) * healthPercent, barHeight - 10), "");
+                
+                // Text label for name and HP
+                GUI.color = Color.white;
+                GUIStyle nameStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 16 };
+                string oppName = string.IsNullOrEmpty(opponent.PlayerName) ? "BOT UNIT" : opponent.PlayerName;
+                GUI.Label(new Rect(posX, posY, barWidth, barHeight), $"{oppName}: {oppCombat.CurrentHealth} HP", nameStyle);
+            }
+        }
+
+        // --- 2. VOLUME DEBUGGER (Bottom Right) ---
         if (vp != null)
         {
             float vol = vp.CurrentRawVolume;
             float thr = (_vcm != null) ? _vcm.parryVolumeThreshold : 0.4f;
-            
-            // Fixed screen coordinates for the bottom right corner
-            float width = 280f;
-            float height = 150f;
-            float posX = Screen.width - width - 20f;
-            float posY = Screen.height - height - 20f;
+            float width = 260f; float height = 140f;
+            float pX = Screen.width - width - 20f; float pY = Screen.height - height - 20f;
 
-            // DRAWING A SOLID NEON BORDER BOX (To ensure visibility on black)
-            GUI.color = Color.magenta;
-            GUI.Box(new Rect(posX - 2, posY - 2, width + 4, height + 4), ""); 
-            GUI.color = Color.black;
-            GUI.Box(new Rect(posX, posY, width, height), ""); // Solid background
-            
-            GUILayout.BeginArea(new Rect(posX + 15f, posY + 15f, width - 30f, height - 30f));
-            
-            // Switch color based on spike detection
-            GUI.color = (vol >= thr) ? Color.green : Color.yellow;
-            
-            GUILayout.Label("<b>[ PARRY MIC MONITOR ]</b>");
-            
-            // Visual slider for real-time debugging
-            GUILayout.HorizontalSlider(vol, 0f, 1f, GUILayout.Width(220));
-            
-            GUIStyle textStyle = new GUIStyle(GUI.skin.label) { fontSize = 15, fontStyle = FontStyle.Bold };
-            GUILayout.Label($"MIC VOL: {vol:F3}", textStyle);
-            GUILayout.Label($"TARGET : {thr:F3}", textStyle);
-
-            if (vol >= thr) 
-            {
-                GUI.color = Color.green;
-                GUILayout.Label("<b>>>> SPIKE DETECTED <<<</b>");
-            }
-            
+            GUI.Box(new Rect(pX, pY, width, height), ""); 
+            GUILayout.BeginArea(new Rect(pX + 10f, pY + 10f, width - 20f, height - 20f));
+            GUI.color = vol >= thr ? Color.green : Color.yellow;
+            GUILayout.Label("<b>--- MIC MONITOR ---</b>");
+            GUILayout.HorizontalSlider(vol, 0f, 1f, GUILayout.Width(200));
+            GUILayout.Label($"VOL: {vol:F3} / THR: {thr:F3}");
+            if (vol >= thr) GUILayout.Label("<color=green>!!! SPIKE DETECTED !!!</color>");
             GUILayout.EndArea();
-            GUI.color = Color.white; // Resetting global GUI color
+            GUI.color = Color.white; 
         }
 
-        // --- COMBAT QUEUE (Bottom Left) ---
-        if (RhythmRoundManager.Instance == null || !RhythmRoundManager.Instance.isRoundActive) return;
-
-        GUILayout.BeginArea(new Rect(20, Screen.height - 300, 350, 280));
-        GUIStyle headerStyle = new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold, fontSize = 20 };
-        headerStyle.normal.textColor = Color.green;
-
-        if (RhythmRoundManager.Instance.IsSingleMoveMode())
+        // --- 3. COMBAT QUEUE (Bottom Left) ---
+        if (RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive)
         {
-            GUILayout.Label("LOCKED ACTION:", headerStyle);
-            string atkText = string.IsNullOrEmpty(_pendingAttackTrigger) ? "None" : _pendingAttackTrigger;
-            
-            // This turns Cyan when you say "Parry"
-            if (atkText == "ParryIntent") GUI.color = Color.cyan;
-            GUILayout.Label($"Attack: {atkText}", new GUIStyle(GUI.skin.label) { fontSize = 18 });
-            GUI.color = Color.white;
-        }
-        else
-        {
-            // Chain Command display logic
-            int maxSlots = RhythmRoundManager.Instance.currentComboCount;
-            GUILayout.Label($"CHAIN ({_comboBuffer.Count}/{maxSlots})", headerStyle);
-            for (int i = 0; i < maxSlots; i++)
+            GUILayout.BeginArea(new Rect(20, Screen.height - 300, 350, 280));
+            GUIStyle headerStyle = new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold, fontSize = 20 };
+            headerStyle.normal.textColor = Color.green;
+
+            if (RhythmRoundManager.Instance.IsSingleMoveMode())
             {
-                if (i < _comboBuffer.Count)
-                {
-                    string move = _comboBuffer[i].attack != "" ? _comboBuffer[i].attack : GetDirectionName(_comboBuffer[i].dash);
-                    GUILayout.Label($"{i + 1}: {move}");
-                }
-                else GUILayout.Label($"{i + 1}: [ Empty ]");
+                GUILayout.Label("LOCKED ACTION:", headerStyle);
+                string atk = string.IsNullOrEmpty(_pendingAttackTrigger) ? "None" : _pendingAttackTrigger;
+                if (atk == "ParryIntent") GUI.color = Color.cyan;
+                GUILayout.Label($"Attack: {atk}", new GUIStyle(GUI.skin.label) { fontSize = 18 });
+                GUI.color = Color.white;
             }
+            GUILayout.EndArea();
         }
-        GUILayout.EndArea();
     }
 
     private string GetDirectionName(Vector3 dir)

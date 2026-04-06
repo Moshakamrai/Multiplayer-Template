@@ -12,10 +12,12 @@ public class PlayerCombat : NetworkBehaviour
     public int MaxShield = 25;
     public Text ShieldText;
     public Animator animator;
-    public bool isAttacking = false; 
+    public bool isAttacking = false;
     public bool IsDead { get; private set; }
     public bool IsHurting { get; private set; }
-    
+
+    [SyncVar] public bool IsParryActive = false;
+
     private Queue<string> _attackQueue = new Queue<string>();
     public SphereCollider weaponGloveLeft;
     public SphereCollider weaponGloveRight;
@@ -31,9 +33,12 @@ public class PlayerCombat : NetworkBehaviour
     private string _pendingAttackTrigger = "";
     private Vector3 _pendingDashDirection = Vector3.zero;
 
+    private VoiceCommandManager _vcm;
+
     private void Start()
     {
         if (isLocalPlayer && ShieldText == null) ShieldText = GameObject.Find("ShieldText")?.GetComponent<Text>();
+        _vcm = GetComponent<VoiceCommandManager>();
     }
 
     public void VoiceAttackJab() { if (isLocalPlayer && !IsDead) _attackQueue.Enqueue("Jab"); }
@@ -44,60 +49,79 @@ public class PlayerCombat : NetworkBehaviour
     private void Update()
     {
         if (isLocalPlayer && ShieldText != null) ShieldText.text = CurrentShield.ToString();
-        if (!isLocalPlayer || IsDead || IsHurting) return;
 
+        // Local Parry Spike Check: Only runs for the local player
+        if (isLocalPlayer && !IsDead && !IsHurting)
+        {
+            CheckLocalParryTiming();
+        }
+
+        if (!isLocalPlayer || IsDead || IsHurting) return;
         if (!isAttacking && _attackQueue.Count > 0) StartCoroutine(PerformAttack(_attackQueue.Dequeue()));
+    }
+
+    // --- RESTORED ANIMATION EVENT FUNCTIONS ---
+    public void StartAttackWindow() { isAttacking = true; }
+    public void EndAttackWindow() { isAttacking = false; }
+
+    private void CheckLocalParryTiming()
+    {
+        // ONLY run if the player has actually said "Parry"
+        if (_pendingAttackTrigger == "ParryIntent")
+        {
+            bool isWindUp = RhythmRoundManager.Instance.IsWindUpActive;
+            bool vocalSpike = _vcm != null && _vcm.IsVocalSpikeDetected();
+
+            // Optional: Keep this for debugging until it works, then remove it
+            Debug.Log($"Parry Attempt: WindUp={isWindUp}, Spike={vocalSpike}");
+
+            if (isWindUp && vocalSpike)
+            {
+                CmdConfirmSuccessfulParry();
+                _pendingAttackTrigger = "Parry"; // Lock it in
+            }
+        }
+    }
+
+    [Command]
+    void CmdConfirmSuccessfulParry()
+    {
+        IsParryActive = true;
+        if (animator != null) animator.SetTrigger("Parry");
+        // Briefly keep parry active for the impact frame
+        StartCoroutine(ResetParryFlag());
+    }
+
+    IEnumerator ResetParryFlag()
+    {
+        yield return new WaitForSeconds(0.2f);
+        IsParryActive = false;
     }
 
     private IEnumerator PerformAttack(string trigger)
     {
         isAttacking = true;
-        
-        if (isLocalPlayer && animator != null) 
-        {
-            // Instead of SetTrigger, this forces the animator to instantly restart the punch!
-            animator.Play(trigger, 0, 0f); 
-        }
-
-        int damageToSet = (trigger == "Hook") ? 25 : (trigger == "Cross") ? 15 : (trigger == "Jab") ? 10 : 0; 
+        if (isLocalPlayer && animator != null) animator.Play(trigger, 0, 0f);
+        int damageToSet = (trigger == "Hook") ? 25 : (trigger == "Cross") ? 15 : (trigger == "Jab") ? 10 : 0;
         CmdTriggerAttack(trigger, damageToSet);
-
-        // We remove the WaitUntil dead-lock so rapid-fire beats don't get stuck
         yield return new WaitForSeconds(0.1f);
     }
 
     public void QueueRhythmMove(string attackTrigger, Vector3 dashDir)
     {
         if (IsDead || IsHurting) return;
-    
-        // 1. If we are the Server (Bot) or the Local Player, update the logic buffer immediately
-        if (isServer || isLocalPlayer) 
-        {
-            QueueLogic(attackTrigger, dashDir);
-        }
-    
-        // 2. Only human clients need to send the Command to the server
-        if (isLocalPlayer && !isServer) 
-        {
-            CmdQueueRhythmMove(attackTrigger, dashDir);
-        }
+        if (isServer || isLocalPlayer) QueueLogic(attackTrigger, dashDir);
+        if (isLocalPlayer && !isServer) CmdQueueRhythmMove(attackTrigger, dashDir);
     }
 
-    [Command] 
-    private void CmdQueueRhythmMove(string attack, Vector3 dash) 
-    { 
-        QueueLogic(attack, dash); 
-        
-        // --- THE LATECOMER FIX ---
-        // If Vosk took too long and the Wind-Up train already left the station, 
-        // instantly force the animation to play so we don't miss the beat!
+    [Command]
+    private void CmdQueueRhythmMove(string attack, Vector3 dash)
+    {
+        QueueLogic(attack, dash);
         if (RhythmRoundManager.Instance.IsWindUpActive)
         {
             bool isCurrentBeat = RhythmRoundManager.Instance.IsSingleMoveMode() || _comboBuffer.Count == 1;
-            if (isCurrentBeat) 
-            {
-                TargetTriggerRhythmWindUp(attack, dash);
-            }
+            if (isCurrentBeat) TargetTriggerRhythmWindUp(attack, dash);
         }
     }
 
@@ -108,115 +132,54 @@ public class PlayerCombat : NetworkBehaviour
             if (!string.IsNullOrEmpty(attackTrigger)) { _pendingAttackTrigger = attackTrigger; _pendingDashDirection = Vector3.zero; }
             if (dashDir != Vector3.zero) { _pendingDashDirection = dashDir; _pendingAttackTrigger = ""; }
         }
-        else
-        {
-            if (_comboBuffer.Count < RhythmRoundManager.Instance.currentComboCount) 
-                _comboBuffer.Add(new RhythmAction { attack = attackTrigger, dash = dashDir });
-        }
+        else if (_comboBuffer.Count < RhythmRoundManager.Instance.currentComboCount)
+            _comboBuffer.Add(new RhythmAction { attack = attackTrigger, dash = dashDir });
     }
 
-    // --- NEW: THE PEEK AND CONSUME SYSTEM ---
     public RhythmAction PeekNextMove()
     {
-        if (RhythmRoundManager.Instance.IsSingleMoveMode())
-            return new RhythmAction { attack = _pendingAttackTrigger, dash = _pendingDashDirection };
-
+        if (RhythmRoundManager.Instance.IsSingleMoveMode()) return new RhythmAction { attack = _pendingAttackTrigger, dash = _pendingDashDirection };
         return (_comboBuffer.Count > 0) ? _comboBuffer[0] : new RhythmAction { attack = "", dash = Vector3.zero };
     }
 
     [Server]
     public void ConsumeNextMove()
     {
-        if (RhythmRoundManager.Instance.IsSingleMoveMode())
-        {
-            _pendingAttackTrigger = "";
-            _pendingDashDirection = Vector3.zero;
-        }
-        else if (_comboBuffer.Count > 0)
-        {
-            _comboBuffer.RemoveAt(0);
-        }
+        if (RhythmRoundManager.Instance.IsSingleMoveMode()) { _pendingAttackTrigger = ""; _pendingDashDirection = Vector3.zero; }
+        else if (_comboBuffer.Count > 0) _comboBuffer.RemoveAt(0);
     }
 
-    // --- PHASE 1: THE WIND UP (Fired exactly 0.5s early) ---
     [Server]
-public void ExecuteRhythmWindUp()
-{
-    var move = PeekNextMove();
-    
-    // IF BOT: connectionToClient is null. Execute immediately on Server.
-    if (connectionToClient == null) 
+    public void ExecuteRhythmWindUp()
     {
-        ExecuteMoveEffect(move.attack, move.dash);
-    }
-    else 
-    {
-        // IF PLAYER: Send the RPC like normal
-        TargetTriggerRhythmWindUp(move.attack, move.dash);
-    }
-}
-
-    // NEW: Shared logic for both Bot (Server) and Player (Client)
-    private void HandleRhythmAnimationLogic(string attack, Vector3 dash)
-    {
-        if (!string.IsNullOrEmpty(attack)) 
-        {
-            if (animator != null) animator.Play(attack, 0, 0f);
-            // Only run the damage coroutine if it's a local player or a bot on the server
-            if (isLocalPlayer || (isServer && connectionToClient == null)) 
-                StartCoroutine(PerformAttack(attack));
-        }
-
-        if (dash != Vector3.zero) 
-        {
-            GetComponent<PlayerController>().ApplyDashExternal(dash);
-        }
+        var move = PeekNextMove();
+        if (connectionToClient == null) ExecuteMoveEffect(move.attack, move.dash);
+        else TargetTriggerRhythmWindUp(move.attack, move.dash);
     }
 
     [TargetRpc]
-public void TargetTriggerRhythmWindUp(string attack, Vector3 dash)
-{
-    // KEEP your existing logic for human players
-    ExecuteMoveEffect(attack, dash);
-
-    // Re-insert your specific combo/timing fixes if they were in the original
-    if (RhythmRoundManager.Instance.IsWindUpActive)
+    public void TargetTriggerRhythmWindUp(string attack, Vector3 dash)
     {
-        // This ensures multiplayer clients stay in sync if Vosk is slow
-        bool isCurrentBeat = RhythmRoundManager.Instance.IsSingleMoveMode() || _comboBuffer.Count == 1;
-        if (!isCurrentBeat) return; 
-    }
-}
-
-    // This handles the actual animation and damage logic without worrying about Network Authority
-private void ExecuteMoveEffect(string attack, Vector3 dash)
-{
-    if (!string.IsNullOrEmpty(attack)) 
-    {
-        if (animator != null) animator.Play(attack, 0, 0f); // 1-frame snap
-        
-        // IMPORTANT: Start the damage/hitbox coroutine
-        // For Bots, we run it on the server. For Players, we run it on their client.
-        if (isLocalPlayer || (isServer && connectionToClient == null)) 
+        ExecuteMoveEffect(attack, dash);
+        if (RhythmRoundManager.Instance.IsWindUpActive)
         {
-            StartCoroutine(PerformAttack(attack));
+            bool isCurrentBeat = RhythmRoundManager.Instance.IsSingleMoveMode() || _comboBuffer.Count == 1;
+            if (!isCurrentBeat) return;
         }
     }
-    
-    if (dash != Vector3.zero) 
+
+    private void ExecuteMoveEffect(string attack, Vector3 dash)
     {
-        // Use the existing ApplyDashExternal you have in PlayerController
-        GetComponent<PlayerController>().ApplyDashExternal(dash);
+        if (!string.IsNullOrEmpty(attack))
+        {
+            if (animator != null) animator.Play(attack, 0, 0f);
+            if (isLocalPlayer || (isServer && connectionToClient == null)) StartCoroutine(PerformAttack(attack));
+        }
+        if (dash != Vector3.zero) GetComponent<PlayerController>().ApplyDashExternal(dash);
     }
-}
 
     [TargetRpc] public void TargetAddEnergy(int amount) { if (isLocalPlayer) GetComponent<PlayerEnergy>().AddBonusEnergy(amount); }
-
-    public void StartAttackWindow() { isAttacking = true; }
-    public void EndAttackWindow() { isAttacking = false; }
-
     [Command] void CmdTriggerAttack(string t, int damage) { weaponGloveLeft.GetComponent<HitboxProperties>().currentDamage = damage; weaponGloveRight.GetComponent<HitboxProperties>().currentDamage = damage; RpcTriggerAttack(t); }
-
     [ClientRpc] void RpcTriggerAttack(string t) { if (isLocalPlayer) return; if (animator != null) animator.SetTrigger(t); }
 
     [Server]
@@ -225,57 +188,33 @@ private void ExecuteMoveEffect(string attack, Vector3 dash)
         if (IsDead) return;
         StartCoroutine(FlashEffectRoutine());
         CurrentHealth -= damage;
-        
-        // FIXED: Delay is now 0! The hit happens instantly on the beat!
-        float impactDelay = 0.0f; 
-
-        if (CurrentHealth <= 0) StartCoroutine(DelayedKnockout(impactDelay));
-        else RpcTriggerHurt("Hurt " + Random.Range(1, 5), impactDelay);
+        if (CurrentHealth <= 0) StartCoroutine(DelayedKnockout(0f));
+        else RpcTriggerHurt("Hurt " + Random.Range(1, 5), 0f);
     }
 
     [Server] private IEnumerator DelayedKnockout(float delay) { yield return new WaitForSeconds(delay); RpcKnockout(); }
-
     [ClientRpc] void RpcTriggerHurt(string trigger, float delay) { StartCoroutine(DelayedHurtRoutine(trigger, delay)); }
 
     private IEnumerator DelayedHurtRoutine(string trigger, float delay)
     {
         yield return new WaitForSeconds(delay);
         if (animator) animator.SetTrigger(trigger);
-        if (isLocalPlayer) 
-        { 
-            _attackQueue.Clear(); 
-            _pendingAttackTrigger = "";
-            _pendingDashDirection = Vector3.zero;
-            isAttacking = false; 
-            GetComponent<PlayerController>().InterruptMovement();
-            StartCoroutine(HurtStunTimer());
-        }
+        if (isLocalPlayer) { _attackQueue.Clear(); _pendingAttackTrigger = ""; _pendingDashDirection = Vector3.zero; isAttacking = false; GetComponent<PlayerController>().InterruptMovement(); StartCoroutine(HurtStunTimer()); }
     }
 
     public bool HasOpenSlot(bool isMovement)
     {
         if (RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive)
         {
-            if (!RhythmRoundManager.Instance.IsSingleMoveMode())
-                return _comboBuffer.Count < RhythmRoundManager.Instance.currentComboCount; 
-            else 
-            {
-                if (isMovement) return _pendingDashDirection == Vector3.zero;
-                else return string.IsNullOrEmpty(_pendingAttackTrigger);
-            }
+            if (!RhythmRoundManager.Instance.IsSingleMoveMode()) return _comboBuffer.Count < RhythmRoundManager.Instance.currentComboCount;
+            return isMovement ? _pendingDashDirection == Vector3.zero : string.IsNullOrEmpty(_pendingAttackTrigger);
         }
-        if (!isMovement) return _attackQueue.Count < 2; 
-        return true; 
+        return isMovement || _attackQueue.Count < 2;
     }
 
     private IEnumerator HurtStunTimer() { IsHurting = true; yield return new WaitForSeconds(0.2f); IsHurting = false; }
-
-    [Command] void CmdNotifyCancel() => RpcSyncCancel();
-    [ClientRpc] void RpcSyncCancel() { if (animator != null) animator.SetTrigger("Cancel"); isAttacking = false; }
-
     private IEnumerator FlashEffectRoutine() { if (playerRenderer == null || flashMaterial == null) yield break; playerRenderer.material = flashMaterial; yield return new WaitForSeconds(0.1f); playerRenderer.material = _originalMaterial; }
-
-    [ClientRpc] void RpcKnockout() { IsDead = true; animator.SetTrigger("Knock out"); if (isServer) StartCoroutine(ServerRestartMatchRoutine()); }
+    [ClientRpc] void RpcKnockout() { IsDead = true; if (animator != null) animator.SetTrigger("Knock out"); if (isServer) StartCoroutine(ServerRestartMatchRoutine()); }
     [Server] private IEnumerator ServerRestartMatchRoutine() { yield return new WaitForSeconds(4f); NetworkManager.singleton.ServerChangeScene(SceneManager.GetActiveScene().name); }
 
     private void OnGUI()
@@ -300,7 +239,7 @@ private void ExecuteMoveEffect(string attack, Vector3 dash)
         {
             int maxSlots = RhythmRoundManager.Instance.currentComboCount;
             GUILayout.Label($"CHAIN COMMAND ({_comboBuffer.Count}/{maxSlots}):", headerStyle);
-            
+
             for (int i = 0; i < maxSlots; i++)
             {
                 if (i < _comboBuffer.Count)

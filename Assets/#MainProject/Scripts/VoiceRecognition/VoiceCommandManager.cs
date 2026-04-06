@@ -5,12 +5,15 @@ using UnityEngine.UI;
 public class VoiceCommandManager : MonoBehaviour
 {
     public VoskSpeechToText VoskInstance;
-    public Text InputText; 
+    public Text InputText;
     public Text OutputText;
     private string _previousPartialText = "";
-    private PlayerController _myController; 
-    private PlayerCombat _myCombat;         
-    private PlayerEnergy _myEnergy; 
+    private PlayerController _myController;
+    private PlayerCombat _myCombat;
+    private PlayerEnergy _myEnergy;
+
+    [Header("Parry Settings")]
+    public float parryVolumeThreshold = 0.4f; // Adjust this in Inspector
 
     void Start()
     {
@@ -24,11 +27,11 @@ public class VoiceCommandManager : MonoBehaviour
         {
             VoskInstance.OnPartialResult += HandlePartialResult;
             VoskInstance.OnTranscriptionResult += HandleFinalResult;
-            VoskInstance.StartRecordingManual(); 
+            VoskInstance.StartRecordingManual();
         }
     }
 
-   // Update HandlePartialResult in VoiceCommandManager.cs
+    // Update HandlePartialResult in VoiceCommandManager.cs
     void HandlePartialResult(string jsonResult)
     {
         if (!Application.isFocused) return;
@@ -51,10 +54,10 @@ public class VoiceCommandManager : MonoBehaviour
 
             _previousPartialText = currentText;
 
-            if (!string.IsNullOrEmpty(newWords.Trim())) 
-            { 
-                ProcessWords(newWords.Trim()); 
-                if (InputText != null) InputText.text = currentText; 
+            if (!string.IsNullOrEmpty(newWords.Trim()))
+            {
+                ProcessWords(newWords.Trim());
+                if (InputText != null) InputText.text = currentText;
             }
         }
         else if (currentWords.Length < previousWords.Length)
@@ -66,7 +69,7 @@ public class VoiceCommandManager : MonoBehaviour
 
     void HandleFinalResult(string jsonResult) => _previousPartialText = "";
 
-   void ProcessWords(string segment)
+    void ProcessWords(string segment)
     {
         if (_myCombat.IsHurting || _myCombat.IsDead) return;
         string lowerSegment = segment.ToLower().Trim();
@@ -81,62 +84,63 @@ public class VoiceCommandManager : MonoBehaviour
             string trigger = "";
             Vector3 dashDir = Vector3.zero;
 
-            // COMBAT & DEFENSE (Cost: 2)
+            // COMBAT & DEFENSE
             if (GetSimilarity(word, "punch") > 0.72f) { cost = 2f; cmdName = "JAB"; trigger = "Jab"; recognized = true; }
             else if (GetSimilarity(word, "cross") > 0.72f) { cost = 2f; cmdName = "CROSS"; trigger = "Cross"; recognized = true; }
             else if (GetSimilarity(word, "hook") > 0.72f) { cost = 2f; cmdName = "HOOK"; trigger = "Hook"; recognized = true; }
             else if (GetSimilarity(word, "block") > 0.72f || GetSimilarity(word, "guard") > 0.72f) { cost = 2f; cmdName = "BLOCK"; trigger = "Block"; recognized = true; }
-            
-            // MOVEMENT (Cost: 1)
+
+            // MOVED PARRY HERE: Ensure it sets 'ParryIntent' for the GUI
+            else if (GetSimilarity(word, "parry") > 0.72f)
+            {
+                cost = 3f;
+                cmdName = "PARRY";
+                trigger = "ParryIntent"; // GUI looks for this string
+                recognized = true;
+            }
+
+            // MOVEMENT
             else if (GetSimilarity(word, "left") > 0.8f) { cost = 1f; cmdName = "LFT"; dashDir = Vector3.left; recognized = true; }
             else if (GetSimilarity(word, "right") > 0.8f) { cost = 1f; cmdName = "RGT"; dashDir = Vector3.right; recognized = true; }
 
             if (recognized)
             {
                 bool isMovement = (dashDir != Vector3.zero);
-
-                // 1. CHECK BEFORE CHARGING: Do we have an open slot for this type of move?
                 if (_myCombat.HasOpenSlot(isMovement))
                 {
-                    // 2. NOW charge the energy
                     if (_myEnergy.TryUseEnergy(cost))
                     {
-                        if (isRhythm) 
-                        { 
-                            _myCombat.QueueRhythmMove(trigger, dashDir); 
-                            LogExecution($"{cmdName} QUEUED"); 
+                        if (isRhythm)
+                        {
+                            _myCombat.QueueRhythmMove(trigger, dashDir); // Sends 'ParryIntent'
+                            LogExecution($"{cmdName} QUEUED");
                         }
                         else
                         {
                             if (dashDir != Vector3.zero) _myController.CmdRhythmDash(dashDir);
+                            else if (trigger == "ParryIntent") _myCombat.animator.Play("Parry", 0, 0f);
                             else if (trigger == "Jab") _myCombat.VoiceAttackJab();
                             else if (trigger == "Cross") _myCombat.VoiceAttackCross();
                             else if (trigger == "Hook") _myCombat.VoiceAttackHook();
-                            else if (trigger == "Block") _myCombat.VoiceAttackBlock(); 
+                            else if (trigger == "Block") _myCombat.VoiceAttackBlock();
                             LogExecution($"{cmdName} INSTANT");
                         }
                     }
-                    else
-                    {
-                        LogExecution("NO ENERGY"); // Warns player they are gassed out
-                    }
-                }
-                else
-                {
-                    LogExecution("SLOTS FULL"); // Protects energy from spam
                 }
             }
         }
     }
 
-    private float GetSimilarity(string s, string t) {
+    private float GetSimilarity(string s, string t)
+    {
         if (s == t) return 1.0f;
         int d = LevenshteinDistance(s, t);
         int m = Mathf.Max(s.Length, t.Length);
         return 1.0f - ((float)d / m);
     }
 
-    private int LevenshteinDistance(string s, string t) {
+    private int LevenshteinDistance(string s, string t)
+    {
         int n = s.Length, m = t.Length;
         int[,] d = new int[n + 1, m + 1];
         for (int i = 0; i <= n; d[i, 0] = i++) ;
@@ -147,7 +151,8 @@ public class VoiceCommandManager : MonoBehaviour
         return d[n, m];
     }
 
-    private string ParsePartialJson(string j) {
+    private string ParsePartialJson(string j)
+    {
         int s = j.IndexOf("partial\" : \"");
         if (s == -1) return "";
         s += 12; int e = j.LastIndexOf("\"");
@@ -155,4 +160,15 @@ public class VoiceCommandManager : MonoBehaviour
     }
 
     private void LogExecution(string c) { if (OutputText != null) OutputText.text = "EXEC: " + c; }
+
+    public bool IsVocalSpikeDetected()
+    {
+        // Access the actual instance of VoiceProcessor
+        VoiceProcessor vp = GetComponent<VoiceProcessor>();
+        if (vp != null && vp.IsRecording)
+        {
+            return vp.CurrentRawVolume >= parryVolumeThreshold;
+        }
+        return false;
+    }
 }

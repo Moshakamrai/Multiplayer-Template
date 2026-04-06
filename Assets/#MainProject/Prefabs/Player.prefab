@@ -789,6 +789,7 @@ MonoBehaviour:
   ShieldText: {fileID: 1856066874330144664}
   animator: {fileID: 7078697320674753406}
   isAttacking: 0
+  IsParryActive: 0
   weaponGloveLeft: {fileID: 4246265404567632835}
   weaponGloveRight: {fileID: 6838551958696098282}
   playerRenderer: {fileID: 3044968905943147932}
@@ -830,6 +831,7 @@ MonoBehaviour:
   VoskInstance: {fileID: 8869197606853308541}
   InputText: {fileID: 9000886226906405309}
   OutputText: {fileID: 4065655095339251321}
+  parryVolumeThreshold: 0.4
 --- !u!95 &1151712140726684061
 Animator:
   serializedVersion: 5

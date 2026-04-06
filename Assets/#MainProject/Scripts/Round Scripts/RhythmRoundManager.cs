@@ -279,30 +279,38 @@ public class RhythmRoundManager : NetworkBehaviour
         damageDealt = 0;
         if (isInterrupted || string.IsNullOrEmpty(move.attack) || move.attack == "Block") return 0;
 
+        // --- VOCAL PARRY REFLECTION ---
+        if (defender.IsParryActive)
+        {
+            int reflectDmg = (move.attack == "Hook") ? 25 : (move.attack == "Cross") ? 15 : 10;
+            attacker.TakeDamage(reflectDmg);
+            damageDealt = 0;
+            return -1;
+        }
+
         bool hits = false;
-        if (move.attack == "Jab") { damageDealt = 10; hits = (defMove.dash == Vector3.zero && defMove.attack != "Block"); }
-        else if (move.attack == "Cross") { damageDealt = 15; hits = (defMove.attack != "Block"); }
-        else if (move.attack == "Hook") { damageDealt = 25; hits = (defMove.dash == Vector3.zero); }
+        int potentialDmg = (move.attack == "Hook") ? 25 : (move.attack == "Cross") ? 15 : 10;
+
+        if (move.attack == "Jab") hits = (defMove.dash == Vector3.zero && defMove.attack != "Block");
+        else if (move.attack == "Cross") hits = (defMove.attack != "Block");
+        else if (move.attack == "Hook") hits = (defMove.dash == Vector3.zero);
 
         if (hits)
         {
+            damageDealt = potentialDmg;
             defender.TakeDamage(damageDealt);
             if (move.attack == "Hook")
             {
-                // Check if the attacker is a Bot (no connection)
-                if (attacker.connectionToClient != null)
-                {
-                    attacker.TargetAddEnergy(2);
-                }
-                else
-                {
-                    // Give energy directly to the Bot's script on the server
-                    attacker.GetComponent<PlayerEnergy>().AddBonusEnergy(2);
-                }
+                if (attacker.connectionToClient != null) attacker.TargetAddEnergy(2);
+                else attacker.GetComponent<PlayerEnergy>().AddBonusEnergy(2);
             }
             return 1;
         }
-        else { damageDealt = 0; if (defMove.dash != Vector3.zero) { defender.TargetAddEnergy(1); return -1; } return 0; }
+        else
+        {
+            if (defMove.dash != Vector3.zero) { defender.TargetAddEnergy(1); return -1; }
+            return 0;
+        }
     }
 
     private string FormatMove(PlayerCombat.RhythmAction move)

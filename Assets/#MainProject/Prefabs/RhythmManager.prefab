@@ -48,10 +48,12 @@ MonoBehaviour:
   syncDirection: 0
   syncMode: 0
   syncInterval: 0
-  musicSource: {fileID: 0}
-  bpm: 100
   currentType: 0
   isRoundActive: 0
+  currentComboCount: 1
+  customIsCombo: 0
+  windUpTime: 0.53
+  botPrefab: {fileID: 1196059692255734455, guid: dc9524f97a588bd46a65d405200b9a0b, type: 3}
 --- !u!114 &9075757414588888488
 MonoBehaviour:
   m_ObjectHideFlags: 0

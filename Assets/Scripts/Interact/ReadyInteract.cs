@@ -10,7 +10,7 @@ namespace Interact
         /// </summary>
         public override void Interact()
         {
-            GameManager.localPlayer.SetReadyCmd(!GameManager.localPlayer.Ready);
+            GameManager.localPlayer.SetReady(!GameManager.localPlayer.Ready);
         }
     }
 }

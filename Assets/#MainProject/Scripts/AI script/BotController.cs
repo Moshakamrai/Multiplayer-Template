@@ -6,12 +6,14 @@ public class BotController : NetworkBehaviour
     private PlayerCombat _combat;
     private PlayerController _controller;
 
+    // Replace your Start function
     void Start()
     {
         _combat = GetComponent<PlayerCombat>();
         _controller = GetComponent<PlayerController>();
 
-        if (isServer) _controller.SetReadyCmd(true);
+        // Call the new public wrapper to avoid authority and protection errors
+        if (isServer) _controller.SetReady(true);
     }
 
     [Server]

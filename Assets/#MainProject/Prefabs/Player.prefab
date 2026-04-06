@@ -795,6 +795,7 @@ MonoBehaviour:
   playerRenderer: {fileID: 3044968905943147932}
   flashMaterial: {fileID: 2100000, guid: 53ba7b32d17e498438356150ba39ed0f, type: 2}
   _originalMaterial: {fileID: 2100000, guid: d3b488fade9d5bf48b05a6346500e4c7, type: 2}
+  vp: {fileID: 3402618379187400785}
 --- !u!114 &8845738990167672434
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2086,6 +2087,17 @@ Transform:
   m_CorrespondingSourceObject: {fileID: 6620315551739267069, guid: 361ada4cc66a08d44aa3a66fe90d4a9e, type: 3}
   m_PrefabInstance: {fileID: 8902419165618262865}
   m_PrefabAsset: {fileID: 0}
+--- !u!114 &3402618379187400785 stripped
+MonoBehaviour:
+  m_CorrespondingSourceObject: {fileID: 6103283987627664128, guid: 361ada4cc66a08d44aa3a66fe90d4a9e, type: 3}
+  m_PrefabInstance: {fileID: 8902419165618262865}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cf39116cc6db44d47b2eaf534e0f6682, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!114 &4065655095339251321 stripped
 MonoBehaviour:
   m_CorrespondingSourceObject: {fileID: 4893060754103444776, guid: 361ada4cc66a08d44aa3a66fe90d4a9e, type: 3}

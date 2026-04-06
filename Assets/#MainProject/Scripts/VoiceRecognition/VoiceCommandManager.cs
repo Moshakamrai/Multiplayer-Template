@@ -79,41 +79,37 @@ public class VoiceCommandManager : MonoBehaviour
         foreach (string word in words)
         {
             bool recognized = false;
-            float cost = 0f;
+            float cost = 0f; // Default is 0
             string cmdName = "";
             string trigger = "";
             Vector3 dashDir = Vector3.zero;
 
-            // COMBAT & DEFENSE
-            if (GetSimilarity(word, "punch") > 0.72f) { cost = 2f; cmdName = "JAB"; trigger = "Jab"; recognized = true; }
-            else if (GetSimilarity(word, "cross") > 0.72f) { cost = 2f; cmdName = "CROSS"; trigger = "Cross"; recognized = true; }
-            else if (GetSimilarity(word, "hook") > 0.72f) { cost = 2f; cmdName = "HOOK"; trigger = "Hook"; recognized = true; }
-            else if (GetSimilarity(word, "block") > 0.72f || GetSimilarity(word, "guard") > 0.72f) { cost = 2f; cmdName = "BLOCK"; trigger = "Block"; recognized = true; }
-
-            // MOVED PARRY HERE: Ensure it sets 'ParryIntent' for the GUI
-            else if (GetSimilarity(word, "parry") > 0.72f)
-            {
-                cost = 3f;
-                cmdName = "PARRY";
-                trigger = "ParryIntent"; // GUI looks for this string
-                recognized = true;
-            }
-
-            // MOVEMENT
-            else if (GetSimilarity(word, "left") > 0.8f) { cost = 1f; cmdName = "LFT"; dashDir = Vector3.left; recognized = true; }
-            else if (GetSimilarity(word, "right") > 0.8f) { cost = 1f; cmdName = "RGT"; dashDir = Vector3.right; recognized = true; }
+            // 1. RECOGNITION LOGIC (Keeping the structure but we will ignore 'cost' later)
+            if (GetSimilarity(word, "punch") > 0.72f) { cmdName = "JAB"; trigger = "Jab"; recognized = true; }
+            else if (GetSimilarity(word, "cross") > 0.72f) { cmdName = "CROSS"; trigger = "Cross"; recognized = true; }
+            else if (GetSimilarity(word, "hook") > 0.72f) { cmdName = "HOOK"; trigger = "Hook"; recognized = true; }
+            else if (GetSimilarity(word, "block") > 0.72f || GetSimilarity(word, "guard") > 0.72f) { cmdName = "BLOCK"; trigger = "Block"; recognized = true; }
+            else if (GetSimilarity(word, "parry") > 0.72f) { cmdName = "PARRY"; trigger = "ParryIntent"; recognized = true; }
+            else if (GetSimilarity(word, "left") > 0.8f) { cmdName = "LFT"; dashDir = Vector3.left; recognized = true; }
+            else if (GetSimilarity(word, "right") > 0.8f) { cmdName = "RGT"; dashDir = Vector3.right; recognized = true; }
 
             if (recognized)
             {
+                // FORCE COST TO ZERO FOR DEBUGGING/TESTING
+                cost = 0f; 
+
                 bool isMovement = (dashDir != Vector3.zero);
+
+                // Still check for open slots so you can't break the rhythm queue
                 if (_myCombat.HasOpenSlot(isMovement))
                 {
+                    // This will now always return true and consume 0 energy
                     if (_myEnergy.TryUseEnergy(cost))
                     {
                         if (isRhythm)
                         {
-                            _myCombat.QueueRhythmMove(trigger, dashDir); // Sends 'ParryIntent'
-                            LogExecution($"{cmdName} QUEUED");
+                            _myCombat.QueueRhythmMove(trigger, dashDir);
+                            LogExecution($"{cmdName} FREE");
                         }
                         else
                         {
@@ -123,9 +119,13 @@ public class VoiceCommandManager : MonoBehaviour
                             else if (trigger == "Cross") _myCombat.VoiceAttackCross();
                             else if (trigger == "Hook") _myCombat.VoiceAttackHook();
                             else if (trigger == "Block") _myCombat.VoiceAttackBlock();
-                            LogExecution($"{cmdName} INSTANT");
+                            LogExecution($"{cmdName} FREE");
                         }
                     }
+                }
+                else
+                {
+                    LogExecution("SLOTS FULL");
                 }
             }
         }

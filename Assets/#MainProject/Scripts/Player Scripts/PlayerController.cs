@@ -14,7 +14,7 @@ public class PlayerController : NetworkBehaviour
     [Header("Dash Settings")]
     public float dashDistance = 2f;
     public float dashDuration = 0.15f;
-    public float dashCooldown = 0.25f; 
+    public float dashCooldown = 0.25f;
 
     [Header("Equidistance Settings")]
     public float DesiredDistance = 2.5f;
@@ -33,7 +33,7 @@ public class PlayerController : NetworkBehaviour
     private CapsuleCollider playerCollider;
 
     [Header("Lock-On Settings")]
-    public float LockOnSpeed = 25f; 
+    public float LockOnSpeed = 25f;
 
     public Transform CameraPosition => cameraPosition;
     [SerializeField] private Transform cameraPosition;
@@ -41,8 +41,15 @@ public class PlayerController : NetworkBehaviour
     [field: SyncVar] public string PlayerName { get; private set; }
     [field: SyncVar] public bool Ready { get; private set; }
 
+    // Replace your existing SetReadyCmd with these two functions
+    public void SetReady(bool ready)
+    {
+        if (isServer) Ready = ready; // Bots set it directly
+        else SetReadyCmd(ready);    // Humans send a Command
+    }
+
     [Command]
-    public void SetReadyCmd(bool ready) { Ready = ready; }
+    private void SetReadyCmd(bool ready) { Ready = ready; }
 
     private void Awake() { if (GameManager.players != null) GameManager.players.Add(this); }
     private void OnDestroy() { if (GameManager.players != null) GameManager.players.Remove(this); }
@@ -53,7 +60,7 @@ public class PlayerController : NetworkBehaviour
         _combat = GetComponent<PlayerCombat>();
         playerCollider = GetComponent<CapsuleCollider>();
         _characterController.enabled = isLocalPlayer || isServer;
-        
+
         if (isLocalPlayer)
         {
             GameManager.localPlayer = this;
@@ -62,17 +69,17 @@ public class PlayerController : NetworkBehaviour
     }
 
     private void Update()
-{
-    // Allow the code to run if:
-    // 1. It's the human playing (isLocalPlayer)
-    // 2. OR it's the Bot running on the Server (isServer && !isLocalPlayer)
-    bool isBotOnServer = isServer && !isLocalPlayer;
-    
-    if (!(isLocalPlayer || isBotOnServer) || _combat.IsDead || _combat.IsHurting) return;
+    {
+        // Allow the code to run if:
+        // 1. It's the human playing (isLocalPlayer)
+        // 2. OR it's the Bot running on the Server (isServer && !isLocalPlayer)
+        bool isBotOnServer = isServer && !isLocalPlayer;
 
-    ProcessDashQueue();
-    Movement();
-}
+        if (!(isLocalPlayer || isBotOnServer) || _combat.IsDead || _combat.IsHurting) return;
+
+        ProcessDashQueue();
+        Movement();
+    }
 
     private void FixedUpdate()
     {
@@ -82,7 +89,7 @@ public class PlayerController : NetworkBehaviour
         if (opponent == null) return;
 
         float currentDist = Vector3.Distance(transform.position, opponent.transform.position);
-        
+
         if (!_isDashing && !_combat.IsHurting && !opponent._isDashing && !opponent._combat.IsHurting)
         {
             if (Mathf.Abs(currentDist - DesiredDistance) > 0.1f)
@@ -97,15 +104,15 @@ public class PlayerController : NetworkBehaviour
     [Command]
     public void CmdRhythmDash(Vector3 dir)
     {
-        ApplyDash(dir); 
+        ApplyDash(dir);
         RpcSyncDash(dir);
     }
 
-    [Command] 
-    void CmdDash(Vector3 dir) 
-    { 
-        ApplyDash(dir); 
-        RpcSyncDash(dir); 
+    [Command]
+    void CmdDash(Vector3 dir)
+    {
+        ApplyDash(dir);
+        RpcSyncDash(dir);
     }
 
     // FIXED: Removed !isLocalPlayer so the character moves when the server tells it to
@@ -130,11 +137,11 @@ public class PlayerController : NetworkBehaviour
     private void Movement()
     {
         PlayerController opponent = GetOpponent();
-    
+
         // 1. Handle Rotation and Aiming
         if (opponent != null)
         {
-            if (!_combat.isAttacking) 
+            if (!_combat.isAttacking)
             {
                 Vector3 directionToOpponent = opponent.transform.position - transform.position;
                 directionToOpponent.y = 0;
@@ -144,7 +151,7 @@ public class PlayerController : NetworkBehaviour
                     // Both Local Player and Server (Bot) can rotate to face the opponent
                     transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * LockOnSpeed);
                 }
-    
+
                 // Only update the vertical pitch calculation if we are the local player
                 if (isLocalPlayer)
                 {
@@ -157,20 +164,20 @@ public class PlayerController : NetworkBehaviour
             transform.Rotate(0, GameManager.Look.x * GameManager.Sensitivity * Time.deltaTime, 0);
             _rotationYLocal = Mathf.Clamp(_rotationYLocal + -GameManager.Look.y * GameManager.Sensitivity * Time.deltaTime, -90, 90);
         }
-    
+
         // 2. Networking and Camera (Authority Fix)
         // ONLY the local player should send rotation commands to the server
-        if (isLocalPlayer && NetworkClient.ready) 
+        if (isLocalPlayer && NetworkClient.ready)
         {
             UpdateLookRotationCmd(_rotationYLocal);
         }
-    
+
         // Only rotate the camera holder if it is actually assigned in the inspector (Reference Fix)
         if (cameraPosition != null)
         {
             cameraPosition.localRotation = Quaternion.Euler(_rotationYLocal, 0, 0);
         }
-    
+
         // 3. Dash Execution
         if (_isDashing)
         {
@@ -180,11 +187,11 @@ public class PlayerController : NetworkBehaviour
             if (_dashElapsed >= dashDuration) _isDashing = false;
             return;
         }
-        else 
-        { 
-            playerCollider.enabled = true; 
+        else
+        {
+            playerCollider.enabled = true;
         }
-    
+
         // 4. Auto-Spacing Logic
         Vector3 autoSpacingVelocity = Vector3.zero;
         if (opponent != null && !_isDashing && !_combat.isAttacking && !_combat.IsHurting)
@@ -199,28 +206,28 @@ public class PlayerController : NetworkBehaviour
                 autoSpacingVelocity = dirToOpponent * moveDir * SpacingSpeed;
             }
         }
-    
+
         // 5. Visual Cleanup
         if (isLocalPlayer)
         {
             // Hide the mesh for the local player so you don't see the inside of the head
             var renderer = GetComponentInChildren<SkinnedMeshRenderer>();
-            if (renderer != null && renderer.enabled) 
+            if (renderer != null && renderer.enabled)
             {
                 renderer.enabled = false;
             }
         }
-    
+
         // 6. Final Movement Calculation
         _velocityY += Physics.gravity.y * Time.deltaTime;
-        
+
         // Only get human input if this is the local player
         Vector3 inputMovement = isLocalPlayer ? (GameManager.Move.y * transform.forward + GameManager.Move.x * transform.right) : Vector3.zero;
-        
+
         Vector3 targetVelocity = inputMovement * GameManager.Speed;
         targetVelocity += autoSpacingVelocity;
         targetVelocity.y = _velocityY;
-        
+
         _characterController.Move(targetVelocity * Time.deltaTime);
     }
     public void InterruptMovement() { _dashQueue.Clear(); _isDashing = false; }

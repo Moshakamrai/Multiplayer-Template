@@ -437,21 +437,30 @@ public class RhythmRoundManager : NetworkBehaviour
     }
 
     private Color GetStateColor(int state) { if (state == 1) return Color.green; if (state == -1) return Color.red; return Color.white; }
+    // Replace only the EnsureBotExists function
     [Server]
     private void EnsureBotExists()
     {
-        // Check if there is only 1 player (the host)
         if (GameManager.players.Count == 1 && _activeBot == null)
         {
-            // Spawn the bot at a position opposite to the player
-            Vector3 spawnPos = new Vector3(0, 0, 5); // Adjust based on your arena
+            Vector3 spawnPos = new Vector3(0, 0, 5); 
             _activeBot = Instantiate(botPrefab, spawnPos, Quaternion.identity);
 
-            // Spawn it on the network so everyone sees it
             NetworkServer.Spawn(_activeBot);
 
-            // Force the bot to be 'Ready' so the match can proceed
-            _activeBot.GetComponent<PlayerController>().SetReadyCmd(true);
+            // Use the new public wrapper to signal the bot is ready
+            _activeBot.GetComponent<PlayerController>().SetReady(true);
         }
+    }
+
+    // Add these to RhythmRoundManager.cs
+    public float GetNextBeatTime() 
+    { 
+        return (_upcomingImpacts.Count > 0) ? _upcomingImpacts[0] : 0f; 
+    }
+
+    public float GetCurrentTrackTime() 
+    { 
+        return (currentType == RoundType.CustomTrack) ? BeatAnalyzer.Instance.audioSource.time : (float)(NetworkTime.time - _startTime); 
     }
 }

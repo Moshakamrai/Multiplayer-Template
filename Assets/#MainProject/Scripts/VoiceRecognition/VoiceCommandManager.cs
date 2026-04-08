@@ -86,17 +86,28 @@ public class VoiceCommandManager : MonoBehaviour
 
             // 1. RECOGNITION LOGIC (Keeping the structure but we will ignore 'cost' later)
             if (GetSimilarity(word, "punch") > 0.72f) { cmdName = "JAB"; trigger = "Jab"; recognized = true; }
-            else if (GetSimilarity(word, "cross") > 0.72f) { cmdName = "CROSS"; trigger = "Cross"; recognized = true; }
-            else if (GetSimilarity(word, "hook") > 0.72f) { cmdName = "HOOK"; trigger = "Hook"; recognized = true; }
+            else if (GetSimilarity(word, "cross") > 0.7f) { cmdName = "CROSS"; trigger = "Cross"; recognized = true; }
+            else if (GetSimilarity(word, "hook") > 0.7f) { cmdName = "HOOK"; trigger = "Hook"; recognized = true; }
             else if (GetSimilarity(word, "block") > 0.72f || GetSimilarity(word, "guard") > 0.72f) { cmdName = "BLOCK"; trigger = "Block"; recognized = true; }
-            else if (GetSimilarity(word, "parry") > 0.72f) { cmdName = "PARRY"; trigger = "ParryIntent"; recognized = true; }
+            else if (GetSimilarity(word, "cage") > 0.70f || GetSimilarity(word, "vapp") > 0.70f)
+            {
+                cmdName = "CAGE";
+                trigger = "ParryIntent";
+                recognized = true;
+            }
             else if (GetSimilarity(word, "left") > 0.8f) { cmdName = "LFT"; dashDir = Vector3.left; recognized = true; }
             else if (GetSimilarity(word, "right") > 0.8f) { cmdName = "RGT"; dashDir = Vector3.right; recognized = true; }
+            else if (GetSimilarity(word, "boom") > 0.72f)
+            {
+                cmdName = "BOOM";
+                trigger = "UnbreakablePunch";
+                recognized = true;
+            }
 
             if (recognized)
             {
                 // FORCE COST TO ZERO FOR DEBUGGING/TESTING
-                cost = 0f; 
+                cost = 0f;
 
                 bool isMovement = (dashDir != Vector3.zero);
 

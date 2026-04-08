@@ -70,10 +70,9 @@ public class PlayerCombat : NetworkBehaviour
 
     private void CheckLocalParryTiming()
     {
+        // 1. Logic Gate: Only process if a move is actually queued
         string currentMove = _pendingAttackTrigger;
         bool isDashing = (_pendingDashDirection != Vector3.zero);
-        
-        // Exit if no action is queued
         if (string.IsNullOrEmpty(currentMove) && !isDashing) return;
 
         if (vp == null || _vcm == null || RhythmRoundManager.Instance == null) return;
@@ -87,31 +86,54 @@ public class PlayerCombat : NetworkBehaviour
 
         bool vocalSpike = currentVol >= threshold;
 
-        // --- APPLY YOUR CUSTOM WINDOWS ---
-        float window = 0.3f; // Default for Attacks
-        if (currentMove == "ParryIntent") window = 0.2f;
+        // 2. Window Mapping
+        float window = 0.3f; 
+        if (currentMove == "ParryIntent") window = 0.3f;
+        else if (currentMove == "UnbreakablePunch") window = 0.2f; 
         else if (currentMove == "Block") window = 0.4f;
         else if (isDashing) window = 0.3f; 
 
         bool isInsideWindow = timeUntilImpact > 0 && timeUntilImpact <= window;
 
+        // 3. Local Confirmation for Parry
         if (vocalSpike && isInsideWindow)
         {
-            // Record the spike for the server to calculate damage/success
-            CmdRegisterVocalSpike(currentTime); 
-            
+            // If it's a Parry, we tell the server "This is verified" immediately
             if (currentMove == "ParryIntent") 
             {
-                CmdConfirmSuccessfulParry();
-                _pendingAttackTrigger = "Parry"; 
+                // We send the currentTime so the server knows exactly when it happened
+                CmdConfirmEliteParry(currentTime); 
+                Debug.Log($"<color=green>VOCAL SUCCESS:</color> Parry (CAGE) verified locally at {timeUntilImpact:F3}s.");
+                
+                // Change intent to 'Locked' so we don't spam the server
+                _pendingAttackTrigger = "ParryLocked"; 
             }
-            
-            Debug.Log($"<color=green>VOCAL SUCCESS:</color> {currentMove} triggered within {window}s window.");
+            else 
+            {
+                // For regular attacks (like BOOM), just sync the spike time for damage calculation
+                CmdRegisterVocalSpike(currentTime);
+                Debug.Log($"<color=green>VOCAL SUCCESS:</color> {currentMove} spike registered.");
+            }
         }
     }
 
     [Command]
-    void CmdRegisterVocalSpike(float time) { lastVocalSpikeTime = time; }
+    void CmdConfirmEliteParry(float spikeTime)
+    {
+        lastVocalSpikeTime = spikeTime;
+        IsParryActive = true; // Set instantly on server
+        
+        if (animator != null) animator.Play("Parry");
+        
+        TargetAddEnergy(1); 
+        StartCoroutine(ResetParryFlag());
+    }
+
+    [Command]
+    void CmdRegisterVocalSpike(float time) 
+    { 
+        lastVocalSpikeTime = time; 
+    }
 
     [Command]
     void CmdConfirmSuccessfulParry()
@@ -133,8 +155,10 @@ public class PlayerCombat : NetworkBehaviour
 
     IEnumerator ResetParryFlag()
     {
-        yield return new WaitForSeconds(0.4f); 
+        // Keep it active long enough for the server pulse to see it
+        yield return new WaitForSeconds(0.6f); 
         IsParryActive = false;
+        lastVocalSpikeTime = -1f; // Clear the spike for the next round
     }
 
     private IEnumerator PerformAttack(string trigger)
@@ -211,15 +235,35 @@ public class PlayerCombat : NetworkBehaviour
     {
         if (!string.IsNullOrEmpty(attack))
         {
-            // Map the internal 'ParryIntent' logic to the actual 'Parry' animation state
-            string animToPlay = (attack == "ParryIntent") ? "Parry" : attack;
+            // Map the internal logical triggers to the actual Animator state names
+            string animToPlay = attack;
 
-            if (animator != null) animator.Play(animToPlay, 0, 0f);
+            if (attack == "ParryIntent") 
+            {
+                animToPlay = "Parry";
+            }
+            else if (attack == "UnbreakablePunch") 
+            {
+                // Mapping the "Boom" command logic to your "UpperCut" animation
+                animToPlay = "Uppercut"; 
+            }
+
+            if (animator != null) 
+            {
+                // Play the mapped animation state
+                animator.Play(animToPlay, 0, 0f);
+            }
             
             if (isLocalPlayer || (isServer && connectionToClient == null)) 
+            {
                 StartCoroutine(PerformAttack(attack));
+            }
         }
-        if (dash != Vector3.zero) GetComponent<PlayerController>().ApplyDashExternal(dash);
+        
+        if (dash != Vector3.zero) 
+        {
+            GetComponent<PlayerController>().ApplyDashExternal(dash);
+        }
     }
 
     [TargetRpc] public void TargetAddEnergy(int amount) { if (isLocalPlayer) GetComponent<PlayerEnergy>().AddBonusEnergy(amount); }

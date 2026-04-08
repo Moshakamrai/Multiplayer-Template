@@ -246,9 +246,9 @@ public class RhythmRoundManager : NetworkBehaviour
         var playerList = new List<PlayerController>(GameManager.players);
         if (playerList.Count < 2) return;
 
-        PlayerController pc1 = playerList[0]; 
+        PlayerController pc1 = playerList[0];
         PlayerController pc2 = playerList[1];
-        PlayerCombat p1 = pc1.GetComponent<PlayerCombat>(); 
+        PlayerCombat p1 = pc1.GetComponent<PlayerCombat>();
         PlayerCombat p2 = pc2.GetComponent<PlayerCombat>();
 
         var m1 = p1.PeekNextMove();
@@ -256,47 +256,43 @@ public class RhythmRoundManager : NetworkBehaviour
 
         float targetBeat = GetNextBeatTime();
 
-        // --- NEW: THE CLOSENESS TIE-BREAKER ---
-        // If both players perform the same attack, we compare who shouted closer to the beat.
+        // --- CLOSENESS TIE-BREAKER ---
         bool p1WinsTie = false;
         bool p2WinsTie = false;
-
         if (m1.attack == m2.attack && !string.IsNullOrEmpty(m1.attack))
         {
-            // Calculate absolute offset from the beat for both players
-            float p1Offset = Mathf.Abs(targetBeat - p1.lastVocalSpikeTime);
-            float p2Offset = Mathf.Abs(targetBeat - p2.lastVocalSpikeTime);
-
-            // The smaller offset (closer to beat) wins the exchange
-            if (p1Offset < p2Offset) p1WinsTie = true;
-            else if (p2Offset < p1Offset) p2WinsTie = true;
-            // Note: If perfectly equal, both may still take the default trade logic below
+            float p1Off = Mathf.Abs(targetBeat - p1.lastVocalSpikeTime);
+            float p2Off = Mathf.Abs(targetBeat - p2.lastVocalSpikeTime);
+            if (p1Off < p2Off) p1WinsTie = true;
+            else if (p2Off < p1Off) p2WinsTie = true;
         }
 
-        // --- UPDATED INTERRUPTION LOGIC ---
-        // A player is interrupted if:
-        // 1. They lost the tie-breaker for the same move
-        // 2. Or they are hit by a move that naturally counters theirs (Jab > Cross/Hook, Cross > Hook)
-        bool p1Interrupted = p2WinsTie || (m2.attack == "Jab" && (m1.attack == "Cross" || m1.attack == "Hook")) || (m2.attack == "Cross" && m1.attack == "Hook");
-        bool p2Interrupted = p1WinsTie || (m1.attack == "Jab" && (m2.attack == "Cross" || m2.attack == "Hook")) || (m1.attack == "Cross" && m2.attack == "Hook");
+        // --- BULLETPROOF PROTECTION ---
+        // Added "Parry" and any string containing "Parry" to ensure it never takes interruption damage
+        bool p1Protected = (m1.attack.Contains("Parry") || m1.attack == "ParryIntent" || m1.attack == "UnbreakablePunch");
+        bool p2Protected = (m2.attack.Contains("Parry") || m2.attack == "ParryIntent" || m2.attack == "UnbreakablePunch");
+
+        // --- INTERRUPTION LOGIC ---
+        bool p1Interrupted = !p1Protected && (p2WinsTie || (m2.attack == "Jab" && (m1.attack == "Cross" || m1.attack == "Hook")) || (m2.attack == "Cross" && m1.attack == "Hook"));
+        bool p2Interrupted = !p2Protected && (p1WinsTie || (m1.attack == "Jab" && (m2.attack == "Cross" || m2.attack == "Hook")) || (m1.attack == "Cross" && m2.attack == "Hook"));
 
         int p1DamageTaken = 0;
         int p2DamageTaken = 0;
 
-        // Apply a small penalty for being interrupted
+        // Penalty only applies if NOT protected
         if (p1Interrupted) { p1.TakeDamage(5); p1DamageTaken += 5; }
         if (p2Interrupted) { p2.TakeDamage(5); p2DamageTaken += 5; }
 
-        // Process the final damage with the new vocal-scaling damage system
+        // PROCESS ACTUAL HITS
         int p1Result = ProcessDamage(p1, m1, p2, m2, p1Interrupted, out int dmgToP2);
         int p2Result = ProcessDamage(p2, m2, p1, m1, p2Interrupted, out int dmgToP1);
 
         p2DamageTaken += dmgToP2;
         p1DamageTaken += dmgToP1;
 
-        // Determine visual state for the Combat Log (Win = 1, Loss = -1, Draw = 0)
-        int p1State = 0; if (p1Interrupted || p2Result == 1) p1State = -1; else if (p1Result == 1 || p2Result == -1) p1State = 1;
-        int p2State = 0; if (p2Interrupted || p1Result == 1) p2State = -1; else if (p2Result == 1 || p1Result == -1) p2State = 1;
+        // Green if Result is 1 (Hit) or -1 (Successful Parry Reflection)
+        int p1State = (p1Result == 1 || p1Result == -1) ? 1 : (p1DamageTaken > 0 ? -1 : 0);
+        int p2State = (p2Result == 1 || p2Result == -1) ? 1 : (p2DamageTaken > 0 ? -1 : 0);
 
         RpcLogCombatTrade(pc1.PlayerName, FormatMove(m1), p1State, p1DamageTaken, pc2.PlayerName, FormatMove(m2), p2State, p2DamageTaken);
     }
@@ -305,74 +301,78 @@ public class RhythmRoundManager : NetworkBehaviour
     private int ProcessDamage(PlayerCombat attacker, PlayerCombat.RhythmAction move, PlayerCombat defender, PlayerCombat.RhythmAction defMove, bool isInterrupted, out int damageDealt)
     {
         damageDealt = 0;
-        if (isInterrupted || string.IsNullOrEmpty(move.attack)) return 0;
+        if (string.IsNullOrEmpty(move.attack) || move.attack == "Block") return 0;
 
-        float targetBeat = GetNextBeatTime();
+        // --- 1. PARRY REFLECTION (CLIENT-AUTHORITATIVE) ---
+        // If the client verified the parry, we reflect damage regardless of server-side lag
+        if (defender.IsParryActive)
+        {
+            bool isUnbreakable = (move.attack == "UnbreakablePunch");
+            int baseRef = isUnbreakable ? 15 : ((move.attack == "Hook") ? 25 : 10);
 
-        // 1. RESOLVE DEFENDER MOVEMENT (0.3s Window)
-        bool moveSuccessful = true;
+            attacker.TakeDamage(Mathf.CeilToInt(baseRef * 1.2f));
+
+            damageDealt = 0;
+            return -1; // Return -1 to trigger Green State in the log
+        }
+
+        // --- 2. MOVEMENT & BLOCK ---
+        bool moveSuccessful = false;
         if (defMove.dash != Vector3.zero)
         {
             float dSpike = defender.lastVocalSpikeTime;
-            // Fails if no spike or spike is outside the 0.3s window
-            if (dSpike < 0 || (targetBeat - dSpike) > 0.3f) moveSuccessful = false;
+            if (dSpike > 0 && (GetNextBeatTime() - dSpike) <= 0.3f) moveSuccessful = true;
         }
 
-        // 2. RESOLVE DEFENDER BLOCK (0.4s Window)
         bool blockSuccessful = false;
         if (defMove.attack == "Block")
         {
             float bSpike = defender.lastVocalSpikeTime;
-            if (bSpike > 0 && (targetBeat - bSpike) <= 0.4f) blockSuccessful = true;
+            if (bSpike > 0 && (GetNextBeatTime() - bSpike) <= 0.4f) blockSuccessful = true;
         }
 
-        // 3. RESOLVE PARRY (0.2s Window)
-        if (defender.IsParryActive)
-        {
-            float pSpike = defender.lastVocalSpikeTime;
-            if (pSpike > 0 && (targetBeat - pSpike) <= 0.2f)
-            {
-                int baseRef = (move.attack == "Hook") ? 25 : (move.attack == "Cross") ? 15 : 10;
-                attacker.TakeDamage(Mathf.CeilToInt(baseRef * 1.2f));
-                return -1;
-            }
-        }
-
-        // 4. CALCULATE DYNAMIC ATTACK DAMAGE (0.3s Window)
+        // --- 3. ATTACK DAMAGE ---
+        float targetBeat = GetNextBeatTime();
         float atkSpike = attacker.lastVocalSpikeTime;
-        int finalDmg = 5; 
-        if (atkSpike > 0 && (targetBeat - atkSpike) <= 0.3f)
+        bool moveIsUnbreakable = (move.attack == "UnbreakablePunch");
+        int finalDmg = moveIsUnbreakable ? 15 : 5;
+        float window = moveIsUnbreakable ? 0.2f : 0.3f;
+
+        if (atkSpike > 0 && (targetBeat - atkSpike) <= window)
         {
-            float offset = Mathf.Max(0, targetBeat - atkSpike);
-            float bonus = Mathf.Lerp(10, 0, offset / 0.3f);
+            float bonus = Mathf.Lerp(10, 0, Mathf.Max(0, targetBeat - atkSpike) / window);
             finalDmg += Mathf.RoundToInt(bonus);
         }
 
-        // 5. HIT DETECTION
+        // --- 4. HIT DETECTION ---
         bool hits = false;
-        if (move.attack == "Jab") hits = (!moveSuccessful && !blockSuccessful);
-        else if (move.attack == "Cross") hits = !blockSuccessful; 
-        else if (move.attack == "Hook") hits = !moveSuccessful;
+        if (isInterrupted && !moveIsUnbreakable) hits = false;
+        else
+        {
+            if (moveIsUnbreakable) hits = !moveSuccessful;
+            else if (move.attack == "Jab") hits = (!moveSuccessful && !blockSuccessful);
+            else if (move.attack == "Cross") hits = !blockSuccessful;
+            else if (move.attack == "Hook") hits = !moveSuccessful;
+        }
 
         if (hits)
         {
             damageDealt = finalDmg;
             defender.TakeDamage(damageDealt);
-            attacker.lastVocalSpikeTime = -1f; 
             return 1;
         }
-        
-        attacker.lastVocalSpikeTime = -1f;
-        defender.lastVocalSpikeTime = -1f;
         return 0;
     }
 
     private string FormatMove(PlayerCombat.RhythmAction move)
     {
-        if (!string.IsNullOrEmpty(move.attack)) return move.attack;
-        if (move.dash == Vector3.left || move.dash == new Vector3(-1, 0, 0)) return "Dodge Left";
-        if (move.dash == Vector3.right || move.dash == new Vector3(1, 0, 0)) return "Dodge Right";
-        return "Idle";
+        if (!string.IsNullOrEmpty(move.attack))
+        {
+            if (move.attack == "ParryIntent") return "PARRY (CAGE)"; // Shows both in the log
+            if (move.attack == "UnbreakablePunch") return "BOOM";
+            return move.attack;
+        }
+        return (move.dash != Vector3.zero) ? "DODGE" : "IDLE";
     }
 
     [ClientRpc]
@@ -394,7 +394,19 @@ public class RhythmRoundManager : NetworkBehaviour
     private void ExecutePulseImpact()
     {
         if (GameManager.players.Count >= 2) ResolveRhythmCombat();
-        foreach (var player in GameManager.players) { if (player != null) player.GetComponent<PlayerCombat>().ConsumeNextMove(); }
+
+        foreach (var player in GameManager.players)
+        {
+            if (player != null)
+            {
+                PlayerCombat pc = player.GetComponent<PlayerCombat>();
+                pc.ConsumeNextMove();
+
+                // HARD RESET: Clear all flags so lag cannot roll into the next beat
+                pc.lastVocalSpikeTime = -1f;
+                pc.IsParryActive = false;
+            }
+        }
     }
 
     [ClientRpc] private void RpcTriggerHitStop() { StartCoroutine(HitStopRoutine()); }
@@ -497,7 +509,7 @@ public class RhythmRoundManager : NetworkBehaviour
     {
         if (GameManager.players.Count == 1 && _activeBot == null)
         {
-            Vector3 spawnPos = new Vector3(0, 0, 5); 
+            Vector3 spawnPos = new Vector3(0, 0, 5);
             _activeBot = Instantiate(botPrefab, spawnPos, Quaternion.identity);
 
             NetworkServer.Spawn(_activeBot);
@@ -508,13 +520,13 @@ public class RhythmRoundManager : NetworkBehaviour
     }
 
     // Add these to RhythmRoundManager.cs
-    public float GetNextBeatTime() 
-    { 
-        return (_upcomingImpacts.Count > 0) ? _upcomingImpacts[0] : 0f; 
+    public float GetNextBeatTime()
+    {
+        return (_upcomingImpacts.Count > 0) ? _upcomingImpacts[0] : 0f;
     }
 
-    public float GetCurrentTrackTime() 
-    { 
-        return (currentType == RoundType.CustomTrack) ? BeatAnalyzer.Instance.audioSource.time : (float)(NetworkTime.time - _startTime); 
+    public float GetCurrentTrackTime()
+    {
+        return (currentType == RoundType.CustomTrack) ? BeatAnalyzer.Instance.audioSource.time : (float)(NetworkTime.time - _startTime);
     }
 }

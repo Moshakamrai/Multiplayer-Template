@@ -796,6 +796,7 @@ MonoBehaviour:
   flashMaterial: {fileID: 2100000, guid: 53ba7b32d17e498438356150ba39ed0f, type: 2}
   _originalMaterial: {fileID: 2100000, guid: d3b488fade9d5bf48b05a6346500e4c7, type: 2}
   vp: {fileID: 3402618379187400785}
+  lastVocalSpikeTime: -1
 --- !u!114 &8845738990167672434
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -832,7 +833,7 @@ MonoBehaviour:
   VoskInstance: {fileID: 8869197606853308541}
   InputText: {fileID: 9000886226906405309}
   OutputText: {fileID: 4065655095339251321}
-  parryVolumeThreshold: 0.4
+  parryVolumeThreshold: 0.3
 --- !u!95 &1151712140726684061
 Animator:
   serializedVersion: 5

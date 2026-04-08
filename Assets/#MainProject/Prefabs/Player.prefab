@@ -16,7 +16,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &854248409355371947
 RectTransform:
   m_ObjectHideFlags: 0
@@ -123,7 +123,7 @@ RectTransform:
   m_Father: {fileID: 6602380012618306115}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
-  m_AnchorMax: {x: 0, y: 0}
+  m_AnchorMax: {x: 0, y: 1}
   m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 10, y: 0}
   m_Pivot: {x: 0.5, y: 0.5}
@@ -198,7 +198,7 @@ RectTransform:
   m_Father: {fileID: 2119128827425997651}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
-  m_AnchorMax: {x: 0, y: 0}
+  m_AnchorMax: {x: 0, y: 1}
   m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 20, y: 0}
   m_Pivot: {x: 0.5, y: 0.5}
@@ -464,7 +464,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &718068350511789014
 RectTransform:
   m_ObjectHideFlags: 0
@@ -619,6 +619,7 @@ GameObject:
   - component: {fileID: 8845738990167672434}
   - component: {fileID: 271289335390154355}
   - component: {fileID: 1151712140726684061}
+  - component: {fileID: 664431552623705391}
   m_Layer: 0
   m_Name: Player
   m_TagString: Player
@@ -830,6 +831,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 129500b884afc774cab86e0bebfae14c, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  syncDirection: 0
+  syncMode: 0
+  syncInterval: 0
   VoskInstance: {fileID: 8869197606853308541}
   InputText: {fileID: 9000886226906405309}
   OutputText: {fileID: 4065655095339251321}
@@ -855,6 +859,46 @@ Animator:
   m_AllowConstantClipSamplingOptimization: 1
   m_KeepAnimatorStateOnDisable: 0
   m_WriteDefaultValuesOnDisable: 0
+--- !u!114 &664431552623705391
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8718707839533561219}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d33829a658ab65047b9b5832b9ff8c75, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  syncDirection: 0
+  syncMode: 0
+  syncInterval: 0
+  cardLibrary:
+  - cardName: PUNCH
+    triggerName: Jab
+    description: Quick lead strike. Reliable base damage.
+  - cardName: CROSS
+    triggerName: Cross
+    description: Straight power hit. Counters enemies trying to dodge.
+  - cardName: HOOK
+    triggerName: Hook
+    description: Heavy side-swing. High damage and grants bonus Energy.
+  - cardName: BLOCK
+    triggerName: guard
+    description: Standard defense. Wider timing window to negate damage.
+  - cardName: CAGE
+    triggerName: ParryIntent
+    description: Elite Parry. Reflects 120% damage back at the attacker.
+  - cardName: BOOM
+    triggerName: UnbreakablePunch
+    description: Unstoppable. Ignores blocks and deals massive 15-25 dmg.
+  - cardName: LEFT
+    triggerName: (Dash Left)
+    description: Quick dodge to the left. Evades Jabs and Hooks.
+  - cardName: RIGHT
+    triggerName: (Dash Right)
+    description: Quick dodge to the right. Evades Jabs and Hooks.
 --- !u!1 &8782005603362053964
 GameObject:
   m_ObjectHideFlags: 0
@@ -903,7 +947,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &2282006134912288650
 RectTransform:
   m_ObjectHideFlags: 0

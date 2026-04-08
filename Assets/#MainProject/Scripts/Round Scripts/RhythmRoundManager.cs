@@ -154,18 +154,50 @@ public class RhythmRoundManager : NetworkBehaviour
         SetupRound();
     }
 
+    // Replace only this part of SetupRound in RhythmRoundManager.cs
     [Server]
     private void SetupRound()
     {
-        // NEW: Check for solo player and spawn bot before starting
         EnsureBotExists();
+
+        foreach (var player in GameManager.players)
+        {
+            if (player != null)
+            {
+                // Only deal cards to players with a CardManager and NO BotController
+                CardManager cm = player.GetComponent<CardManager>();
+                if (cm != null && player.GetComponent<BotController>() == null)
+                {
+                    cm.currentHandIndices.Clear(); 
+                    cm.DealInitialHand(); // Force DrawCard() x4
+                    Debug.Log($"<color=green>SERVER:</color> Dealt cards to {player.PlayerName}");
+                }
+            }
+        }
 
         _startTime = NetworkTime.time + 1.0;
         isRoundActive = true;
         RpcClearLogs();
     }
 
-    [Server] public void StopRound() { isRoundActive = false; _startTime = 0; _upcomingImpacts.Clear(); _isWindUpFired = false; }
+    [Server] 
+    public void StopRound() 
+    { 
+        isRoundActive = false; 
+        _startTime = 0; 
+        _upcomingImpacts.Clear(); 
+        _isWindUpFired = false; 
+
+        // Clear player hands so the GUI hides
+        foreach (var player in GameManager.players)
+        {
+            if (player != null)
+            {
+                CardManager cm = player.GetComponent<CardManager>();
+                if (cm != null) cm.currentHandIndices.Clear();
+            }
+        }
+    }
 
     [ClientRpc] private void RpcClearLogs() { combatLogs.Clear(); }
 
@@ -393,6 +425,7 @@ public class RhythmRoundManager : NetworkBehaviour
 
     private void ExecutePulseImpact()
     {
+        // 1. Resolve combat logic for players
         if (GameManager.players.Count >= 2) ResolveRhythmCombat();
 
         foreach (var player in GameManager.players)
@@ -402,9 +435,24 @@ public class RhythmRoundManager : NetworkBehaviour
                 PlayerCombat pc = player.GetComponent<PlayerCombat>();
                 pc.ConsumeNextMove();
 
-                // HARD RESET: Clear all flags so lag cannot roll into the next beat
+                // 2. HARD RESET: Clear all flags so lag cannot roll into the next beat
                 pc.lastVocalSpikeTime = -1f;
                 pc.IsParryActive = false;
+
+                // 3. REFILL HANDS: Draw cards until the hand is full (4 cards)
+                // This must happen on the Server so the SyncList updates for everyone.
+                if (isServer)
+                {
+                    CardManager cm = player.GetComponent<CardManager>();
+                    if (cm != null)
+                    {
+                        // Draw cards until the player has 4 in hand again
+                        while (cm.currentHandIndices.Count < 4)
+                        {
+                            cm.DrawCard();
+                        }
+                    }
+                }
             }
         }
     }

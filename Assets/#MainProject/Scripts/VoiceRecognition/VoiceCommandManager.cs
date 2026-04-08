@@ -1,8 +1,9 @@
 using UnityEngine;
 using UnityEngine.UI;
+using Mirror; // REQUIRED for [Command]
 
 [RequireComponent(typeof(PlayerController), typeof(PlayerCombat), typeof(PlayerEnergy))]
-public class VoiceCommandManager : MonoBehaviour
+public class VoiceCommandManager : NetworkBehaviour
 {
     public VoskSpeechToText VoskInstance;
     public Text InputText;
@@ -11,15 +12,19 @@ public class VoiceCommandManager : MonoBehaviour
     private PlayerController _myController;
     private PlayerCombat _myCombat;
     private PlayerEnergy _myEnergy;
+    
+    private CardManager _myCards; // Add this reference
 
     [Header("Parry Settings")]
     public float parryVolumeThreshold = 0.4f; // Adjust this in Inspector
+    
 
     void Start()
     {
         _myController = GetComponent<PlayerController>();
         _myCombat = GetComponent<PlayerCombat>();
         _myEnergy = GetComponent<PlayerEnergy>();
+        _myCards = GetComponent<CardManager>(); // Initialize the reference
 
         if (!_myController.isLocalPlayer) { if (VoskInstance != null) Destroy(VoskInstance); this.enabled = false; return; }
 
@@ -67,6 +72,15 @@ public class VoiceCommandManager : MonoBehaviour
         }
     }
 
+    [Command]
+    void CmdUseCardOnServer(string trigger) 
+    { 
+        if (_myCards != null) 
+        {
+            _myCards.DiscardCard(trigger); 
+        }
+    }
+
     void HandleFinalResult(string jsonResult) => _previousPartialText = "";
 
     void ProcessWords(string segment)
@@ -79,58 +93,58 @@ public class VoiceCommandManager : MonoBehaviour
         foreach (string word in words)
         {
             bool recognized = false;
-            float cost = 0f; // Default is 0
-            string cmdName = "";
             string trigger = "";
             Vector3 dashDir = Vector3.zero;
 
-            // 1. RECOGNITION LOGIC (Keeping the structure but we will ignore 'cost' later)
-            if (GetSimilarity(word, "punch") > 0.72f) { cmdName = "JAB"; trigger = "Jab"; recognized = true; }
-            else if (GetSimilarity(word, "cross") > 0.7f) { cmdName = "CROSS"; trigger = "Cross"; recognized = true; }
-            else if (GetSimilarity(word, "hook") > 0.7f) { cmdName = "HOOK"; trigger = "Hook"; recognized = true; }
-            else if (GetSimilarity(word, "block") > 0.72f || GetSimilarity(word, "guard") > 0.72f) { cmdName = "BLOCK"; trigger = "Block"; recognized = true; }
-            else if (GetSimilarity(word, "cage") > 0.70f || GetSimilarity(word, "vapp") > 0.70f)
-            {
-                cmdName = "CAGE";
-                trigger = "ParryIntent";
-                recognized = true;
-            }
-            else if (GetSimilarity(word, "left") > 0.8f) { cmdName = "LFT"; dashDir = Vector3.left; recognized = true; }
-            else if (GetSimilarity(word, "right") > 0.8f) { cmdName = "RGT"; dashDir = Vector3.right; recognized = true; }
-            else if (GetSimilarity(word, "boom") > 0.72f)
-            {
-                cmdName = "BOOM";
-                trigger = "UnbreakablePunch";
-                recognized = true;
-            }
+            // 1. RECOGNITION MAPPING
+            if (GetSimilarity(word, "punch") > 0.72f) { trigger = "Jab"; recognized = true; }
+            else if (GetSimilarity(word, "cross") > 0.7f) { trigger = "Cross"; recognized = true; }
+            else if (GetSimilarity(word, "hook") > 0.7f) { trigger = "Hook"; recognized = true; }
+            else if (GetSimilarity(word, "block") > 0.72f || GetSimilarity(word, "guard") > 0.72f) { trigger = "Block"; recognized = true; }
+            else if (GetSimilarity(word, "cage") > 0.70f) { trigger = "ParryIntent"; recognized = true; }
+            else if (GetSimilarity(word, "boom") > 0.72f) { trigger = "UnbreakablePunch"; recognized = true; }
+            else if (GetSimilarity(word, "left") > 0.8f) { dashDir = Vector3.left; recognized = true; }
+            else if (GetSimilarity(word, "right") > 0.8f) { dashDir = Vector3.right; recognized = true; }
 
             if (recognized)
             {
-                // FORCE COST TO ZERO FOR DEBUGGING/TESTING
-                cost = 0f;
-
                 bool isMovement = (dashDir != Vector3.zero);
 
-                // Still check for open slots so you can't break the rhythm queue
+                // --- UPDATED CARD CHECK ---
+                // If it's an attack, it MUST be in your hand. 
+                // If you didn't add "LEFT/RIGHT" to your 8 cards, this skips the check for movement.
+                if (!isMovement && _myCards != null)
+                {
+                    if (!_myCards.IsCardInHand(trigger))
+                    {
+                        LogExecution("CARD NOT IN HAND");
+                        Debug.Log($"<color=orange>REJECTED:</color> {trigger} not in hand.");
+                        continue; 
+                    }
+                }
+
                 if (_myCombat.HasOpenSlot(isMovement))
                 {
-                    // This will now always return true and consume 0 energy
-                    if (_myEnergy.TryUseEnergy(cost))
+                    if (isRhythm)
                     {
-                        if (isRhythm)
+                        _myCombat.QueueRhythmMove(trigger, dashDir);
+                        // Only discard the card if it was an actual card-based attack
+                        if (!isMovement) CmdUseCardOnServer(trigger); 
+                        LogExecution("QUEUED: " + (isMovement ? "DASH" : trigger));
+                    }
+                    else
+                    {
+                        // FIXED: Corrected the component access for non-rhythm mode
+                        if (isMovement) _myController.CmdRhythmDash(dashDir);
+                        else 
                         {
-                            _myCombat.QueueRhythmMove(trigger, dashDir);
-                            LogExecution($"{cmdName} FREE");
-                        }
-                        else
-                        {
-                            if (dashDir != Vector3.zero) _myController.CmdRhythmDash(dashDir);
-                            else if (trigger == "ParryIntent") _myCombat.animator.Play("Parry", 0, 0f);
+                            if (trigger == "ParryIntent") _myCombat.animator.Play("Parry", 0, 0f);
                             else if (trigger == "Jab") _myCombat.VoiceAttackJab();
                             else if (trigger == "Cross") _myCombat.VoiceAttackCross();
                             else if (trigger == "Hook") _myCombat.VoiceAttackHook();
                             else if (trigger == "Block") _myCombat.VoiceAttackBlock();
-                            LogExecution($"{cmdName} FREE");
+                            
+                            CmdUseCardOnServer(trigger);
                         }
                     }
                 }
@@ -142,6 +156,8 @@ public class VoiceCommandManager : MonoBehaviour
         }
     }
 
+    
+    
     private float GetSimilarity(string s, string t)
     {
         if (s == t) return 1.0f;

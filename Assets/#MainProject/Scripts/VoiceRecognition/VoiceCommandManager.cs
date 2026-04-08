@@ -12,12 +12,12 @@ public class VoiceCommandManager : NetworkBehaviour
     private PlayerController _myController;
     private PlayerCombat _myCombat;
     private PlayerEnergy _myEnergy;
-    
+
     private CardManager _myCards; // Add this reference
 
     [Header("Parry Settings")]
     public float parryVolumeThreshold = 0.4f; // Adjust this in Inspector
-    
+
 
     void Start()
     {
@@ -73,11 +73,11 @@ public class VoiceCommandManager : NetworkBehaviour
     }
 
     [Command]
-    void CmdUseCardOnServer(string trigger) 
-    { 
-        if (_myCards != null) 
+    void CmdUseCardOnServer(string trigger)
+    {
+        if (_myCards != null)
         {
-            _myCards.DiscardCard(trigger); 
+            _myCards.DiscardCard(trigger);
         }
     }
 
@@ -119,8 +119,19 @@ public class VoiceCommandManager : NetworkBehaviour
                     {
                         LogExecution("CARD NOT IN HAND");
                         Debug.Log($"<color=orange>REJECTED:</color> {trigger} not in hand.");
-                        continue; 
+                        continue;
                     }
+                }
+
+                if (_myCards != null && !_myCards.IsCardInHand(trigger))
+                {
+                    LogExecution("CARD NOT IN HAND");
+                    
+                    // TRIGGER REJECT SOUND
+                    if (SoundManager.Instance != null) SoundManagerMain.Instance.PlayCardRejected();
+                    
+                    Debug.Log($"<color=red>REJECTED:</color> {trigger} not in hand.");
+                    continue; 
                 }
 
                 if (_myCombat.HasOpenSlot(isMovement))
@@ -128,22 +139,25 @@ public class VoiceCommandManager : NetworkBehaviour
                     if (isRhythm)
                     {
                         _myCombat.QueueRhythmMove(trigger, dashDir);
-                        // Only discard the card if it was an actual card-based attack
-                        if (!isMovement) CmdUseCardOnServer(trigger); 
-                        LogExecution("QUEUED: " + (isMovement ? "DASH" : trigger));
+                        CmdUseCardOnServer(trigger);
+
+                        // GLOBAL SOUND TRIGGER
+                        if (SoundManager.Instance != null) SoundManagerMain.Instance.PlayCardAccepted();
+
+                        LogExecution("QUEUED: " + trigger);
                     }
                     else
                     {
                         // FIXED: Corrected the component access for non-rhythm mode
                         if (isMovement) _myController.CmdRhythmDash(dashDir);
-                        else 
+                        else
                         {
                             if (trigger == "ParryIntent") _myCombat.animator.Play("Parry", 0, 0f);
                             else if (trigger == "Jab") _myCombat.VoiceAttackJab();
                             else if (trigger == "Cross") _myCombat.VoiceAttackCross();
                             else if (trigger == "Hook") _myCombat.VoiceAttackHook();
                             else if (trigger == "Block") _myCombat.VoiceAttackBlock();
-                            
+
                             CmdUseCardOnServer(trigger);
                         }
                     }
@@ -156,8 +170,8 @@ public class VoiceCommandManager : NetworkBehaviour
         }
     }
 
-    
-    
+
+
     private float GetSimilarity(string s, string t)
     {
         if (s == t) return 1.0f;

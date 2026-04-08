@@ -885,7 +885,7 @@ MonoBehaviour:
     triggerName: Hook
     description: Heavy side-swing. High damage and grants bonus Energy.
   - cardName: BLOCK
-    triggerName: guard
+    triggerName: Block
     description: Standard defense. Wider timing window to negate damage.
   - cardName: CAGE
     triggerName: ParryIntent

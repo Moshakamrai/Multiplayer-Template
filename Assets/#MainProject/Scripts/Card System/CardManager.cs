@@ -11,13 +11,22 @@ public class CombatCard
     public string description; // Small text: "Reflects 120% dmg"
 }
 
+
 public class CardManager : NetworkBehaviour
 {
     public List<CombatCard> cardLibrary = new List<CombatCard>(); 
     private List<CombatCard> _deck = new List<CombatCard>();
     
-    // SyncList tells all clients which cards are in their hand
     public readonly SyncList<int> currentHandIndices = new SyncList<int>();
+
+    // --- NEW ANIMATION STATE ---
+    private struct DiscardAnim 
+    { 
+        public int libIndex; 
+        public float startX; 
+        public float startTime; 
+    }
+    private List<DiscardAnim> _activeDiscardAnims = new List<DiscardAnim>();
 
     public override void OnStartServer()
     {
@@ -30,7 +39,6 @@ public class CardManager : NetworkBehaviour
         _deck.Clear();
         if (cardLibrary.Count == 0) return;
 
-        // 16 cards total (2 of each move)
         for (int i = 0; i < cardLibrary.Count; i++)
         {
             _deck.Add(cardLibrary[i]);
@@ -74,45 +82,90 @@ public class CardManager : NetworkBehaviour
         {
             if (cardLibrary[currentHandIndices[i]].triggerName == trigger)
             {
+                // Capture data for the animation before removing
+                TargetRpcPlayDiscardAnim(connectionToClient, currentHandIndices[i], i);
                 currentHandIndices.RemoveAt(i);
                 break;
             }
         }
     }
 
-    // Inside CardManager.cs
+    [TargetRpc]
+    private void TargetRpcPlayDiscardAnim(NetworkConnection target, int libIndex, int slotIndex)
+    {
+        // Calculate the exact starting X based on the slot it occupied
+        float cWidth = 160f; float space = 15f;
+        float totalW = (cWidth * 4) + (space * 3);
+        float startX = (Screen.width / 2) - (totalW / 2) + (slotIndex * (cWidth + space));
+
+        _activeDiscardAnims.Add(new DiscardAnim { 
+            libIndex = libIndex, 
+            startX = startX, 
+            startTime = Time.time 
+        });
+    }
+
     private void OnGUI()
     {
-        // 1. Only draw for the local human player
-        if (!isLocalPlayer || currentHandIndices.Count == 0) return;
-
-        // 2. Safety check for the library
+        if (!isLocalPlayer) return;
         if (cardLibrary == null || cardLibrary.Count == 0) return;
 
-        // --- DIRECT GUI RENDERING ---
-        float cWidth = 160f; float cHeight = 100f; float space = 15f;
-        float totalW = (cWidth * 4) + (space * 3);
-        float startX = (Screen.width / 2) - (totalW / 2);
-        float startY = Screen.height - cHeight - 60f; // Moved up slightly
-
-        // Style setup
+        // Styles
         GUIStyle titleStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.UpperCenter, fontStyle = FontStyle.Bold, fontSize = 20 };
         GUIStyle descStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.LowerCenter, fontSize = 11, wordWrap = true };
         titleStyle.normal.textColor = Color.yellow;
         descStyle.normal.textColor = Color.white;
 
+        float cWidth = 160f; float cHeight = 100f; float space = 15f;
+        float totalW = (cWidth * 4) + (space * 3);
+        float startX = (Screen.width / 2) - (totalW / 2);
+        
+        // --- 1. DRAW ACTIVE HAND (With Breathing Animation) ---
+        float hoverOffset = Mathf.Sin(Time.time * 2.5f) * 6f; 
+        float pulseScale = 1.0f + (Mathf.Sin(Time.time * 4f) * 0.03f);
+        float baseCenterY = Screen.height - cHeight - 60f + hoverOffset;
+
         for (int i = 0; i < currentHandIndices.Count; i++)
         {
-            // Safety check for indices
             int index = currentHandIndices[i];
             if (index < 0 || index >= cardLibrary.Count) continue;
 
             CombatCard card = cardLibrary[index];
-            Rect r = new Rect(startX + (i * (cWidth + space)), startY, cWidth, cHeight);
-            
-            GUI.Box(r, ""); // Background box
-            GUI.Label(new Rect(r.x, r.y + 5, cWidth, 30), card.cardName, titleStyle);
-            GUI.Label(new Rect(r.x + 5, r.y + 35, cWidth - 10, 60), card.description, descStyle);
+            float animW = cWidth * pulseScale;
+            float animH = cHeight * pulseScale;
+            float xOff = (animW - cWidth) / 2f;
+            float yOff = (animH - cHeight) / 2f;
+
+            Rect r = new Rect(startX + (i * (cWidth + space)) - xOff, baseCenterY - yOff, animW, animH);
+            GUI.Box(r, ""); 
+            GUI.Label(new Rect(r.x, r.y + 5, animW, 30), card.cardName, titleStyle);
+            GUI.Label(new Rect(r.x + 5, r.y + 35, animW - 10, animH - 40), card.description, descStyle);
         }
+
+        // --- 2. DRAW DISCARDING GHOSTS (Moving Out Animation) ---
+        for (int i = _activeDiscardAnims.Count - 1; i >= 0; i--)
+        {
+            float elapsed = Time.time - _activeDiscardAnims[i].startTime;
+            float duration = 0.5f; // Animation length
+
+            if (elapsed > duration)
+            {
+                _activeDiscardAnims.RemoveAt(i);
+                continue;
+            }
+
+            float t = elapsed / duration;
+            // Slide up 150 pixels and fade to 0 transparency
+            float slideUp = t * 150f;
+            GUI.color = new Color(1, 1, 1, 1.0f - t); 
+
+            CombatCard card = cardLibrary[_activeDiscardAnims[i].libIndex];
+            Rect r = new Rect(_activeDiscardAnims[i].startX, (Screen.height - cHeight - 60f) - slideUp, cWidth, cHeight);
+            
+            GUI.Box(r, "");
+            GUI.Label(new Rect(r.x, r.y + 5, cWidth, 30), card.cardName, titleStyle);
+            GUI.Label(new Rect(r.x + 5, r.y + 35, cWidth - 10, cHeight - 40), card.description, descStyle);
+        }
+        GUI.color = Color.white; // Reset color for other UI
     }
 }

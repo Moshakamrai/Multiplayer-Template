@@ -168,7 +168,7 @@ public class RhythmRoundManager : NetworkBehaviour
                 CardManager cm = player.GetComponent<CardManager>();
                 if (cm != null && player.GetComponent<BotController>() == null)
                 {
-                    cm.currentHandIndices.Clear(); 
+                    cm.currentHandIndices.Clear();
                     cm.DealInitialHand(); // Force DrawCard() x4
                     Debug.Log($"<color=green>SERVER:</color> Dealt cards to {player.PlayerName}");
                 }
@@ -180,13 +180,13 @@ public class RhythmRoundManager : NetworkBehaviour
         RpcClearLogs();
     }
 
-    [Server] 
-    public void StopRound() 
-    { 
-        isRoundActive = false; 
-        _startTime = 0; 
-        _upcomingImpacts.Clear(); 
-        _isWindUpFired = false; 
+    [Server]
+    public void StopRound()
+    {
+        isRoundActive = false;
+        _startTime = 0;
+        _upcomingImpacts.Clear();
+        _isWindUpFired = false;
 
         // Clear player hands so the GUI hides
         foreach (var player in GameManager.players)
@@ -333,65 +333,97 @@ public class RhythmRoundManager : NetworkBehaviour
     private int ProcessDamage(PlayerCombat attacker, PlayerCombat.RhythmAction move, PlayerCombat defender, PlayerCombat.RhythmAction defMove, bool isInterrupted, out int damageDealt)
     {
         damageDealt = 0;
+        // Return early if there is no attack or if the attacker is blocking
         if (string.IsNullOrEmpty(move.attack) || move.attack == "Block") return 0;
 
         // --- 1. PARRY REFLECTION (CLIENT-AUTHORITATIVE) ---
-        // If the client verified the parry, we reflect damage regardless of server-side lag
         if (defender.IsParryActive)
         {
             bool isUnbreakable = (move.attack == "UnbreakablePunch");
             int baseRef = isUnbreakable ? 15 : ((move.attack == "Hook") ? 25 : 10);
-
             attacker.TakeDamage(Mathf.CeilToInt(baseRef * 1.2f));
-
             damageDealt = 0;
-            return -1; // Return -1 to trigger Green State in the log
+            return -1;
         }
 
-        // --- 2. MOVEMENT & BLOCK ---
+        // --- 2. MOVEMENT & MITIGATION CALCULATION ---
         bool moveSuccessful = false;
+        float blockMitigation = 0f; // 0.0 (No Block) to 1.0 (Full Block)
+
         if (defMove.dash != Vector3.zero)
         {
             float dSpike = defender.lastVocalSpikeTime;
             if (dSpike > 0 && (GetNextBeatTime() - dSpike) <= 0.3f) moveSuccessful = true;
         }
 
-        bool blockSuccessful = false;
+        // NEW BLOCK LOGIC: Always 70% min, 100% on perfect spike
         if (defMove.attack == "Block")
         {
             float bSpike = defender.lastVocalSpikeTime;
-            if (bSpike > 0 && (GetNextBeatTime() - bSpike) <= 0.4f) blockSuccessful = true;
+            float targetBeat = GetNextBeatTime();
+            float offset = Mathf.Abs(targetBeat - bSpike);
+
+            // Guaranteed base mitigation just for playing the card
+            blockMitigation = 0.7f;
+
+            // If spike is within the 0.4s window, calculate the timing bonus
+            if (bSpike > 0 && offset <= 0.4f)
+            {
+                // The closer the offset is to 0, the more we add to the base 0.7f
+                float timingBonus = Mathf.Lerp(0.3f, 0f, offset / 0.4f);
+                blockMitigation += timingBonus;
+                Debug.Log($"<color=green>BLOCK SPIKE:</color> Mitigating {blockMitigation * 100f:F0}%");
+            }
+            else
+            {
+                Debug.Log("<color=yellow>BASE BLOCK:</color> Mitigating 70% (Timing Missed)");
+            }
         }
 
-        // --- 3. ATTACK DAMAGE ---
-        float targetBeat = GetNextBeatTime();
+        // --- 3. ATTACK DAMAGE CALCULATION ---
+        float targetBeatTime = GetNextBeatTime();
         float atkSpike = attacker.lastVocalSpikeTime;
         bool moveIsUnbreakable = (move.attack == "UnbreakablePunch");
         int finalDmg = moveIsUnbreakable ? 15 : 5;
         float window = moveIsUnbreakable ? 0.2f : 0.3f;
 
-        if (atkSpike > 0 && (targetBeat - atkSpike) <= window)
+        if (atkSpike > 0 && (targetBeatTime - atkSpike) <= window)
         {
-            float bonus = Mathf.Lerp(10, 0, Mathf.Max(0, targetBeat - atkSpike) / window);
+            float bonus = Mathf.Lerp(10, 0, Mathf.Max(0, targetBeatTime - atkSpike) / window);
             finalDmg += Mathf.RoundToInt(bonus);
         }
 
         // --- 4. HIT DETECTION ---
         bool hits = false;
-        if (isInterrupted && !moveIsUnbreakable) hits = false;
+        if (isInterrupted && !moveIsUnbreakable)
+        {
+            hits = false;
+        }
         else
         {
             if (moveIsUnbreakable) hits = !moveSuccessful;
-            else if (move.attack == "Jab") hits = (!moveSuccessful && !blockSuccessful);
-            else if (move.attack == "Cross") hits = !blockSuccessful;
+            else if (move.attack == "Jab") hits = !moveSuccessful; // Jab can be mitigated by block
+            else if (move.attack == "Cross") hits = true; // Cross always "hits" but respects block mitigation
             else if (move.attack == "Hook") hits = !moveSuccessful;
         }
 
         if (hits)
         {
-            damageDealt = finalDmg;
-            defender.TakeDamage(damageDealt);
-            return 1;
+            // Apply the block mitigation factor
+            float multiplier = 1f - blockMitigation;
+            damageDealt = Mathf.RoundToInt(finalDmg * multiplier);
+
+            // Only deal damage if it's not fully blocked
+            if (damageDealt > 0)
+            {
+                defender.TakeDamage(damageDealt);
+                return 1;
+            }
+            else
+            {
+                Debug.Log("<color=cyan>FULL BLOCK!</color> 0 Damage taken.");
+                return 0; // Treated as a successful block/negation
+            }
         }
         return 0;
     }

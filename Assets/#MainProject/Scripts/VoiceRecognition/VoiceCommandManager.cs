@@ -96,59 +96,39 @@ public class VoiceCommandManager : NetworkBehaviour
             string trigger = "";
             Vector3 dashDir = Vector3.zero;
 
-            // 1. RECOGNITION MAPPING
+            // 1. RECOGNITION MAPPING - FIXED TRIGGERS
             if (GetSimilarity(word, "punch") > 0.72f) { trigger = "Jab"; recognized = true; }
             else if (GetSimilarity(word, "cross") > 0.7f) { trigger = "Cross"; recognized = true; }
             else if (GetSimilarity(word, "hook") > 0.7f) { trigger = "Hook"; recognized = true; }
             else if (GetSimilarity(word, "block") > 0.72f || GetSimilarity(word, "guard") > 0.72f) { trigger = "Block"; recognized = true; }
             else if (GetSimilarity(word, "cage") > 0.70f) { trigger = "ParryIntent"; recognized = true; }
             else if (GetSimilarity(word, "boom") > 0.72f) { trigger = "UnbreakablePunch"; recognized = true; }
-            else if (GetSimilarity(word, "left") > 0.8f) { dashDir = Vector3.left; recognized = true; }
-            else if (GetSimilarity(word, "right") > 0.8f) { dashDir = Vector3.right; recognized = true; }
+            else if (GetSimilarity(word, "left") > 0.8f) { trigger = "Left"; dashDir = Vector3.left; recognized = true; }
+            else if (GetSimilarity(word, "right") > 0.8f) { trigger = "Right"; dashDir = Vector3.right; recognized = true; }
 
             if (recognized)
             {
-                bool isMovement = (dashDir != Vector3.zero);
-
-                // --- UPDATED CARD CHECK ---
-                // If it's an attack, it MUST be in your hand. 
-                // If you didn't add "LEFT/RIGHT" to your 8 cards, this skips the check for movement.
-                if (!isMovement && _myCards != null)
-                {
-                    if (!_myCards.IsCardInHand(trigger))
-                    {
-                        LogExecution("CARD NOT IN HAND");
-                        Debug.Log($"<color=orange>REJECTED:</color> {trigger} not in hand.");
-                        continue;
-                    }
-                }
-
+                // 2. STRICT CARD CHECK
                 if (_myCards != null && !_myCards.IsCardInHand(trigger))
                 {
                     LogExecution("CARD NOT IN HAND");
-                    
-                    // TRIGGER REJECT SOUND
-                    if (SoundManager.Instance != null) SoundManagerMain.Instance.PlayCardRejected();
-                    
+                    if (SoundManagerMain.Instance != null) SoundManagerMain.Instance.PlayCardRejected();
                     Debug.Log($"<color=red>REJECTED:</color> {trigger} not in hand.");
-                    continue; 
+                    continue;
                 }
 
+                bool isMovement = (dashDir != Vector3.zero);
                 if (_myCombat.HasOpenSlot(isMovement))
                 {
                     if (isRhythm)
                     {
                         _myCombat.QueueRhythmMove(trigger, dashDir);
                         CmdUseCardOnServer(trigger);
-
-                        // GLOBAL SOUND TRIGGER
-                        if (SoundManager.Instance != null) SoundManagerMain.Instance.PlayCardAccepted();
-
+                        if (SoundManagerMain.Instance != null) SoundManagerMain.Instance.PlayCardAccepted();
                         LogExecution("QUEUED: " + trigger);
                     }
                     else
                     {
-                        // FIXED: Corrected the component access for non-rhythm mode
                         if (isMovement) _myController.CmdRhythmDash(dashDir);
                         else
                         {
@@ -162,10 +142,7 @@ public class VoiceCommandManager : NetworkBehaviour
                         }
                     }
                 }
-                else
-                {
-                    LogExecution("SLOTS FULL");
-                }
+                else LogExecution("SLOTS FULL");
             }
         }
     }

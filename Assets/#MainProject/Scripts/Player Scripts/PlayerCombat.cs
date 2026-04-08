@@ -30,7 +30,7 @@ public class PlayerCombat : NetworkBehaviour
     public Material flashMaterial;
     public Material _originalMaterial;
 
-    public VoiceProcessor vp ;
+    public VoiceProcessor vp;
 
     private string _pendingAttackTrigger = "";
     private Vector3 _pendingDashDirection = Vector3.zero;
@@ -79,19 +79,19 @@ public class PlayerCombat : NetworkBehaviour
 
         float currentVol = vp.CurrentRawVolume;
         float threshold = _vcm.parryVolumeThreshold;
-        
-        float nextBeat = RhythmRoundManager.Instance.GetNextBeatTime(); 
+
+        float nextBeat = RhythmRoundManager.Instance.GetNextBeatTime();
         float currentTime = RhythmRoundManager.Instance.GetCurrentTrackTime();
         float timeUntilImpact = nextBeat - currentTime;
 
         bool vocalSpike = currentVol >= threshold;
 
         // 2. Window Mapping
-        float window = 0.3f; 
+        float window = 0.3f;
         if (currentMove == "ParryIntent") window = 0.3f;
-        else if (currentMove == "UnbreakablePunch") window = 0.2f; 
+        else if (currentMove == "UnbreakablePunch") window = 0.2f;
         else if (currentMove == "Block") window = 0.4f;
-        else if (isDashing) window = 0.3f; 
+        else if (isDashing) window = 0.3f;
 
         bool isInsideWindow = timeUntilImpact > 0 && timeUntilImpact <= window;
 
@@ -99,16 +99,16 @@ public class PlayerCombat : NetworkBehaviour
         if (vocalSpike && isInsideWindow)
         {
             // If it's a Parry, we tell the server "This is verified" immediately
-            if (currentMove == "ParryIntent") 
+            if (currentMove == "ParryIntent")
             {
                 // We send the currentTime so the server knows exactly when it happened
-                CmdConfirmEliteParry(currentTime); 
+                CmdConfirmEliteParry(currentTime);
                 Debug.Log($"<color=green>VOCAL SUCCESS:</color> Parry (CAGE) verified locally at {timeUntilImpact:F3}s.");
-                
+
                 // Change intent to 'Locked' so we don't spam the server
-                _pendingAttackTrigger = "ParryLocked"; 
+                _pendingAttackTrigger = "ParryLocked";
             }
-            else 
+            else
             {
                 // For regular attacks (like BOOM), just sync the spike time for damage calculation
                 CmdRegisterVocalSpike(currentTime);
@@ -122,33 +122,33 @@ public class PlayerCombat : NetworkBehaviour
     {
         lastVocalSpikeTime = spikeTime;
         IsParryActive = true; // Set instantly on server
-        
+
         if (animator != null) animator.Play("Parry");
-        
-        TargetAddEnergy(1); 
+
+        TargetAddEnergy(1);
         StartCoroutine(ResetParryFlag());
     }
 
     [Command]
-    void CmdRegisterVocalSpike(float time) 
-    { 
-        lastVocalSpikeTime = time; 
+    void CmdRegisterVocalSpike(float time)
+    {
+        lastVocalSpikeTime = time;
     }
 
     [Command]
     void CmdConfirmSuccessfulParry()
     {
         IsParryActive = true;
-        
-        if (animator != null) 
+
+        if (animator != null)
         {
             // Snapping to the pose in 0.02s for that 'crunchy' pose-to-pose feel
-            animator.Play("Parry"); 
+            animator.Play("Parry");
         }
-        
+
         // Return 1 Energy as a reward for the tight timing
-        TargetAddEnergy(1); 
-        
+        TargetAddEnergy(1);
+
         // We keep the hitbox active for 0.3s to match the window
         StartCoroutine(ResetParryFlag());
     }
@@ -156,7 +156,7 @@ public class PlayerCombat : NetworkBehaviour
     IEnumerator ResetParryFlag()
     {
         // Keep it active long enough for the server pulse to see it
-        yield return new WaitForSeconds(0.6f); 
+        yield return new WaitForSeconds(0.6f);
         IsParryActive = false;
         lastVocalSpikeTime = -1f; // Clear the spike for the next round
     }
@@ -238,29 +238,29 @@ public class PlayerCombat : NetworkBehaviour
             // Map the internal logical triggers to the actual Animator state names
             string animToPlay = attack;
 
-            if (attack == "ParryIntent") 
+            if (attack == "ParryIntent")
             {
                 animToPlay = "Parry";
             }
-            else if (attack == "UnbreakablePunch") 
+            else if (attack == "UnbreakablePunch")
             {
                 // Mapping the "Boom" command logic to your "UpperCut" animation
-                animToPlay = "Uppercut"; 
+                animToPlay = "Uppercut";
             }
 
-            if (animator != null) 
+            if (animator != null)
             {
                 // Play the mapped animation state
                 animator.Play(animToPlay, 0, 0f);
             }
-            
-            if (isLocalPlayer || (isServer && connectionToClient == null)) 
+
+            if (isLocalPlayer || (isServer && connectionToClient == null))
             {
                 StartCoroutine(PerformAttack(attack));
             }
         }
-        
-        if (dash != Vector3.zero) 
+
+        if (dash != Vector3.zero)
         {
             GetComponent<PlayerController>().ApplyDashExternal(dash);
         }
@@ -308,7 +308,7 @@ public class PlayerCombat : NetworkBehaviour
     private void OnGUI()
     {
         if (!isLocalPlayer) return;
-        
+
         // --- 1. BOT/OPPONENT HEALTH GUI (Top Middle) ---
         PlayerController opponent = GetComponent<PlayerController>().GetOpponent();
         if (opponent != null)
@@ -324,12 +324,12 @@ public class PlayerCombat : NetworkBehaviour
 
                 // Dark background for the bar
                 GUI.Box(new Rect(posX, posY, barWidth, barHeight), "");
-                
+
                 // Red foreground for the health
                 float healthPercent = (float)oppCombat.CurrentHealth / 100f;
                 GUI.color = Color.red;
                 GUI.Box(new Rect(posX + 5, posY + 5, (barWidth - 10) * healthPercent, barHeight - 10), "");
-                
+
                 // Text label for name and HP
                 GUI.color = Color.white;
                 GUIStyle nameStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 16 };
@@ -346,7 +346,7 @@ public class PlayerCombat : NetworkBehaviour
             float width = 260f; float height = 140f;
             float pX = Screen.width - width - 20f; float pY = Screen.height - height - 20f;
 
-            GUI.Box(new Rect(pX, pY, width, height), ""); 
+            GUI.Box(new Rect(pX, pY, width, height), "");
             GUILayout.BeginArea(new Rect(pX + 10f, pY + 10f, width - 20f, height - 20f));
             GUI.color = vol >= thr ? Color.green : Color.yellow;
             GUILayout.Label("<b>--- MIC MONITOR ---</b>");
@@ -354,7 +354,7 @@ public class PlayerCombat : NetworkBehaviour
             GUILayout.Label($"VOL: {vol:F3} / THR: {thr:F3}");
             if (vol >= thr) GUILayout.Label("<color=green>!!! SPIKE DETECTED !!!</color>");
             GUILayout.EndArea();
-            GUI.color = Color.white; 
+            GUI.color = Color.white;
         }
 
         // --- 3. COMBAT QUEUE (Bottom Left) ---
@@ -381,5 +381,16 @@ public class PlayerCombat : NetworkBehaviour
         if (dir == Vector3.forward) return "Forward"; if (dir == Vector3.back) return "Back";
         if (dir == Vector3.left || dir == new Vector3(-1, 0, 0)) return "Left";
         if (dir == Vector3.right || dir == new Vector3(1, 0, 0)) return "Right"; return dir.ToString();
+    }
+
+    // Add this inside the PlayerCombat class
+    [TargetRpc]
+    public void TargetPlaySuccessSound(string type)
+    {
+        // This looks for SoundManagerMain specifically since that is your new class name
+        if (SoundManagerMain.Instance != null)
+        {
+            SoundManagerMain.Instance.PlaySuccessSFX(type);
+        }
     }
 }

@@ -333,54 +333,54 @@ public class RhythmRoundManager : NetworkBehaviour
     private int ProcessDamage(PlayerCombat attacker, PlayerCombat.RhythmAction move, PlayerCombat defender, PlayerCombat.RhythmAction defMove, bool isInterrupted, out int damageDealt)
     {
         damageDealt = 0;
-        // Return early if there is no attack or if the attacker is blocking
         if (string.IsNullOrEmpty(move.attack) || move.attack == "Block") return 0;
 
-        // --- 1. PARRY REFLECTION (CLIENT-AUTHORITATIVE) ---
+        // --- 1. PARRY REFLECTION ---
         if (defender.IsParryActive)
         {
+            defender.TargetPlaySuccessSound("Parry"); // Calls the Rpc on PlayerCombat
+
             bool isUnbreakable = (move.attack == "UnbreakablePunch");
             int baseRef = isUnbreakable ? 15 : ((move.attack == "Hook") ? 25 : 10);
             attacker.TakeDamage(Mathf.CeilToInt(baseRef * 1.2f));
+
             damageDealt = 0;
             return -1;
         }
 
-        // --- 2. MOVEMENT & MITIGATION CALCULATION ---
+        // --- 2. MOVEMENT & MITIGATION ---
         bool moveSuccessful = false;
-        float blockMitigation = 0f; // 0.0 (No Block) to 1.0 (Full Block)
+        float blockMitigation = 0f;
 
         if (defMove.dash != Vector3.zero)
         {
             float dSpike = defender.lastVocalSpikeTime;
-            if (dSpike > 0 && (GetNextBeatTime() - dSpike) <= 0.3f) moveSuccessful = true;
+            if (dSpike > 0 && (GetNextBeatTime() - dSpike) <= 0.3f)
+            {
+                moveSuccessful = true;
+                if (defender.connectionToClient != null)
+                {
+                    defender.TargetPlaySuccessSound("Dash"); // Or "Block", "Parry", etc.
+                }
+            }
         }
 
-        // NEW BLOCK LOGIC: Always 70% min, 100% on perfect spike
         if (defMove.attack == "Block")
         {
             float bSpike = defender.lastVocalSpikeTime;
             float targetBeat = GetNextBeatTime();
             float offset = Mathf.Abs(targetBeat - bSpike);
 
-            // Guaranteed base mitigation just for playing the card
-            blockMitigation = 0.7f;
+            blockMitigation = 0.7f; // Always 70% min
 
-            // If spike is within the 0.4s window, calculate the timing bonus
             if (bSpike > 0 && offset <= 0.4f)
             {
-                // The closer the offset is to 0, the more we add to the base 0.7f
-                float timingBonus = Mathf.Lerp(0.3f, 0f, offset / 0.4f);
-                blockMitigation += timingBonus;
-                Debug.Log($"<color=green>BLOCK SPIKE:</color> Mitigating {blockMitigation * 100f:F0}%");
-            }
-            else
-            {
-                Debug.Log("<color=yellow>BASE BLOCK:</color> Mitigating 70% (Timing Missed)");
+                blockMitigation = 0.7f + Mathf.Lerp(0.3f, 0f, offset / 0.4f);
+                defender.TargetPlaySuccessSound("Block"); // Successful timed block sound
             }
         }
 
-        // --- 3. ATTACK DAMAGE CALCULATION ---
+        // --- 3. ATTACK DAMAGE ---
         float targetBeatTime = GetNextBeatTime();
         float atkSpike = attacker.lastVocalSpikeTime;
         bool moveIsUnbreakable = (move.attack == "UnbreakablePunch");
@@ -395,39 +395,34 @@ public class RhythmRoundManager : NetworkBehaviour
 
         // --- 4. HIT DETECTION ---
         bool hits = false;
-        if (isInterrupted && !moveIsUnbreakable)
-        {
-            hits = false;
-        }
+        if (isInterrupted && !moveIsUnbreakable) hits = false;
         else
         {
             if (moveIsUnbreakable) hits = !moveSuccessful;
-            else if (move.attack == "Jab") hits = !moveSuccessful; // Jab can be mitigated by block
-            else if (move.attack == "Cross") hits = true; // Cross always "hits" but respects block mitigation
+            else if (move.attack == "Jab") hits = !moveSuccessful;
+            else if (move.attack == "Cross") hits = true;
             else if (move.attack == "Hook") hits = !moveSuccessful;
         }
 
         if (hits)
         {
-            // Apply the block mitigation factor
             float multiplier = 1f - blockMitigation;
             damageDealt = Mathf.RoundToInt(finalDmg * multiplier);
 
-            // Only deal damage if it's not fully blocked
             if (damageDealt > 0)
             {
+                // 1. Attacker gets the "Hit" sound
+                if (attacker.connectionToClient != null) attacker.TargetPlaySuccessSound("Attack");
+
+                // 2. Defender gets the "Hurt" sound
+                if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Hurt");
+                
                 defender.TakeDamage(damageDealt);
                 return 1;
-            }
-            else
-            {
-                Debug.Log("<color=cyan>FULL BLOCK!</color> 0 Damage taken.");
-                return 0; // Treated as a successful block/negation
             }
         }
         return 0;
     }
-
     private string FormatMove(PlayerCombat.RhythmAction move)
     {
         if (!string.IsNullOrEmpty(move.attack))
@@ -608,5 +603,12 @@ public class RhythmRoundManager : NetworkBehaviour
     public float GetCurrentTrackTime()
     {
         return (currentType == RoundType.CustomTrack) ? BeatAnalyzer.Instance.audioSource.time : (float)(NetworkTime.time - _startTime);
+    }
+
+    [TargetRpc]
+    public void TargetPlaySuccessSound(string type)
+    {
+        if (SoundManagerMain.Instance != null)
+            SoundManagerMain.Instance.PlaySuccessSFX(type);
     }
 }

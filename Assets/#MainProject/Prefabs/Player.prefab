@@ -894,10 +894,10 @@ MonoBehaviour:
     triggerName: UnbreakablePunch
     description: Unstoppable. Ignores blocks and deals massive 15-25 dmg.
   - cardName: LEFT
-    triggerName: (Dash Left)
+    triggerName: Left
     description: Quick dodge to the left. Evades Jabs and Hooks.
   - cardName: RIGHT
-    triggerName: (Dash Right)
+    triggerName: Right
     description: Quick dodge to the right. Evades Jabs and Hooks.
 --- !u!1 &8782005603362053964
 GameObject:

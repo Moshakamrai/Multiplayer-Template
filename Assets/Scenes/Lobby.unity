@@ -1026,6 +1026,11 @@ MonoBehaviour:
   audioSource: {fileID: 647447569}
   cardAcceptedClip: {fileID: 8300000, guid: 78202341f237c2d45ac026e670311186, type: 3}
   cardRejectedClip: {fileID: 8300000, guid: a211199a9c1594049b71dbc7294cf359, type: 3}
+  attackClip: {fileID: 8300000, guid: c1a2fea840ef00f4dad20de129605ca4, type: 3}
+  blockClip: {fileID: 8300000, guid: 63b25126a44a8cc4aa660e279e66a1a2, type: 3}
+  parryClip: {fileID: 8300000, guid: 0e582e82bc30b864aa4d76048fb5884b, type: 3}
+  dashClip: {fileID: 8300000, guid: 2fb42d93158ea314c9264541506a0bfc, type: 3}
+  hurtClip: {fileID: 8300000, guid: 76a36c3191748a943b0229ec68459d20, type: 3}
 --- !u!82 &647447569
 AudioSource:
   m_ObjectHideFlags: 0
@@ -1044,7 +1049,7 @@ AudioSource:
   Mute: 0
   Spatialize: 0
   SpatializePostEffects: 0
-  Priority: 0
+  Priority: 104
   DopplerLevel: 1
   MinDistance: 1
   MaxDistance: 500

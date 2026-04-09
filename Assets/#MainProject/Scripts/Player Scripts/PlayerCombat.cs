@@ -173,10 +173,10 @@ public class PlayerCombat : NetworkBehaviour
     public void QueueRhythmMove(string attackTrigger, Vector3 dashDir)
     {
         if (IsDead || IsHurting) return;
-        
+
         // 1. Queue locally so the Bottom Left GUI updates instantly
         QueueLogic(attackTrigger, dashDir);
-        
+
         // 2. Tell the server to queue it so the Bot/Opponent gets hit
         if (isLocalPlayer) CmdQueueRhythmMove(attackTrigger, dashDir);
     }
@@ -203,7 +203,7 @@ public class PlayerCombat : NetworkBehaviour
             if (!string.IsNullOrEmpty(attackTrigger)) { _pendingAttackTrigger = attackTrigger; _pendingDashDirection = Vector3.zero; }
             if (dashDir != Vector3.zero) { _pendingDashDirection = dashDir; _pendingAttackTrigger = ""; }
         }
-        else 
+        else
         {
             // This is what allows the "Masterpiece" multi-attack
             if (_comboBuffer.Count < RhythmRoundManager.Instance.currentComboCount)
@@ -319,34 +319,52 @@ public class PlayerCombat : NetworkBehaviour
     [ClientRpc] void RpcKnockout() { IsDead = true; if (animator != null) animator.SetTrigger("Knock out"); if (isServer) StartCoroutine(ServerRestartMatchRoutine()); }
     [Server] private IEnumerator ServerRestartMatchRoutine() { yield return new WaitForSeconds(4f); NetworkManager.singleton.ServerChangeScene(SceneManager.GetActiveScene().name); }
 
+    private Texture2D _whiteTexture;
+
     private void OnGUI()
     {
         if (!isLocalPlayer) return;
 
         // --- 1. BOT/OPPONENT HEALTH GUI (Top Middle) ---
+        // --- 1. BOT/OPPONENT HEALTH GUI (Top Right) ---
+
+        // --- INITIALIZE TEXTURE ---
+        if (_whiteTexture == null)
+        {
+            _whiteTexture = new Texture2D(1, 1);
+            _whiteTexture.SetPixel(0, 0, Color.white);
+            _whiteTexture.Apply();
+        }
         PlayerController opponent = GetComponent<PlayerController>().GetOpponent();
         if (opponent != null)
         {
             PlayerCombat oppCombat = opponent.GetComponent<PlayerCombat>();
             if (oppCombat != null)
             {
-                // Centering the health bar at the top
                 float barWidth = 400f;
-                float barHeight = 40f;
-                float posX = (Screen.width / 2) - (barWidth / 2);
+                float barHeight = 60f; // Increased height for better visibility
+                                       // Anchored to the Top Right
+                float posX = Screen.width - barWidth - 20f;
                 float posY = 20f;
 
-                // Dark background for the bar
-                GUI.Box(new Rect(posX, posY, barWidth, barHeight), "");
+                // Solid black background for high contrast
+                GUI.color = new Color(0.1f, 0.1f, 0.1f, 1f);
+                GUI.DrawTexture(new Rect(posX, posY, barWidth, barHeight), _whiteTexture);
 
-                // Red foreground for the health
+                // Neon Red foreground for health
                 float healthPercent = (float)oppCombat.CurrentHealth / 100f;
                 GUI.color = Color.red;
-                GUI.Box(new Rect(posX + 5, posY + 5, (barWidth - 10) * healthPercent, barHeight - 10), "");
+                GUI.DrawTexture(new Rect(posX + 5, posY + 5, (barWidth - 10) * healthPercent, barHeight - 10), _whiteTexture);
 
-                // Text label for name and HP
+                // Bold, Large text label
                 GUI.color = Color.white;
-                GUIStyle nameStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 16 };
+                GUIStyle nameStyle = new GUIStyle(GUI.skin.label)
+                {
+                    alignment = TextAnchor.MiddleCenter,
+                    fontStyle = FontStyle.Bold,
+                    fontSize = 24 // Increased font size as requested
+                };
+
                 string oppName = string.IsNullOrEmpty(opponent.PlayerName) ? "BOT UNIT" : opponent.PlayerName;
                 GUI.Label(new Rect(posX, posY, barWidth, barHeight), $"{oppName}: {oppCombat.CurrentHealth} HP", nameStyle);
             }

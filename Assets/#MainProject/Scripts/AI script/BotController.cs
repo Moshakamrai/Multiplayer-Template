@@ -1,18 +1,20 @@
 using UnityEngine;
 using Mirror;
+using System.Collections.Generic;
 
 public class BotController : NetworkBehaviour
 {
     private PlayerCombat _combat;
     private PlayerController _controller;
 
-    // Replace your Start function
+    // --- ADAPTIVE AI MEMORY ---
+    private Dictionary<string, int> _playerMoveHistory = new Dictionary<string, int>();
+    // REMOVED the unused _lastObservedPlayerMove variable
+
     void Start()
     {
         _combat = GetComponent<PlayerCombat>();
         _controller = GetComponent<PlayerController>();
-
-        // Call the new public wrapper to avoid authority and protection errors
         if (isServer) _controller.SetReady(true);
     }
 
@@ -21,27 +23,61 @@ public class BotController : NetworkBehaviour
     {
         if (_combat.IsHurting || _combat.IsDead) return;
 
-        float decision = Random.value;
+        // 1. ANALYZE PLAYER
+        PlayerController opponent = _controller.GetOpponent();
+        if (opponent != null)
+        {
+            var oppMove = opponent.GetComponent<PlayerCombat>().PeekNextMove();
+            UpdatePlayerHistory(oppMove.attack);
+        }
+
+        // 2. CHOOSE COUNTER OR RANDOM
         string attack = "";
         Vector3 dash = Vector3.zero;
 
-        // 1. Determine Action (70% Attack, 20% Dodge, 10% Block)
-        if (decision < 0.7f)
-        {
-            float atkType = Random.value;
-            if (atkType < 0.5f) attack = "Jab";
-            else if (atkType < 0.8f) attack = "Cross";
-            else attack = "Hook";
-        }
-        else if (decision < 0.9f) dash = (Random.value > 0.5f) ? Vector3.left : Vector3.right;
-        else attack = "Block";
+        string mostSpammed = GetMostSpammedMove();
+        float adaptiveChance = Random.value;
 
-        // 2. Simulate Random Vocal Timing
-        // The bot picks a random 'spike' time between 0.0s and 0.4s before the beat.
+        if (adaptiveChance < 0.6f && !string.IsNullOrEmpty(mostSpammed)) 
+        {
+            // Counter Logic: 60% chance to specifically counter your spam
+            if (mostSpammed == "Jab") { dash = Random.value > 0.5f ? Vector3.left : Vector3.right; } // Jab is dodgable
+            else if (mostSpammed == "Cross") { attack = "Block"; } // Block is great vs Cross
+            else if (mostSpammed == "Hook") { attack = "Jab"; } // Jab interrupts Hook
+            else if (mostSpammed == "UnbreakablePunch") { dash = Vector3.left; } // BOOM must be dodged
+        }
+        else
+        {
+            // Standard Random Logic (40% fallback)
+            float decision = Random.value;
+            if (decision < 0.7f) attack = Random.value < 0.5f ? "Jab" : (Random.value < 0.8f ? "Cross" : "Hook");
+            else if (decision < 0.9f) dash = (Random.value > 0.5f) ? Vector3.left : Vector3.right;
+            else attack = "Block";
+        }
+
+        // 3. SEMI-PRO TIMING (Tighter but not perfect)
+        // Instead of 0.01 - 0.4, we use 0.05 - 0.2 to make it much harder to out-time
         float targetBeat = RhythmRoundManager.Instance.GetNextBeatTime();
-        float randomDelay = Random.Range(0.01f, 0.4f); 
-        _combat.lastVocalSpikeTime = targetBeat - randomDelay;
+        float proDelay = Random.Range(0.05f, 0.21f); 
+        _combat.lastVocalSpikeTime = targetBeat - proDelay;
 
         _combat.QueueRhythmMove(attack, dash);
+    }
+
+    private void UpdatePlayerHistory(string move)
+    {
+        if (string.IsNullOrEmpty(move) || move == "IDLE") return;
+        if (!_playerMoveHistory.ContainsKey(move)) _playerMoveHistory[move] = 0;
+        _playerMoveHistory[move]++;
+    }
+
+    private string GetMostSpammedMove()
+    {
+        string best = ""; int max = 0;
+        foreach (var pair in _playerMoveHistory)
+        {
+            if (pair.Value > max) { max = pair.Value; best = pair.Key; }
+        }
+        return (max >= 3) ? best : ""; // Only counter if they've used it 3+ times
     }
 }

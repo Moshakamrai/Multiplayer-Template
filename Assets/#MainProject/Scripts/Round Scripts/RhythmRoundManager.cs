@@ -632,27 +632,28 @@ public class RhythmRoundManager : NetworkBehaviour
         // Create a single white pixel texture once to use for solid coloring
         if (_whiteTexture == null) { _whiteTexture = new Texture2D(1, 1); _whiteTexture.SetPixel(0, 0, Color.white); _whiteTexture.Apply(); }
 
-        float highwayWidth = 100f;
+        // --- UPDATED DIMENSIONS (50% wider) ---
+        float highwayWidth = 150f; // Increased from 100f
         float highwayHeight = 500f;
-        float xPos = Screen.width - 130f; 
+        float xPos = Screen.width - 180f; // Adjusted from 130f to keep it on screen
         float yPos = Screen.height / 2 - 250f;
 
         // 1. SOLID BACKGROUND (Bright Grey/Blue)
-        GUI.color = new Color(0.2f, 0.2f, 0.3f, 1f); // Solid dark blue-grey
+        GUI.color = new Color(0.2f, 0.2f, 0.3f, 1f); 
         GUI.DrawTexture(new Rect(xPos, yPos, highwayWidth, highwayHeight), _whiteTexture);
 
         // 2. NEON BORDER
-        GUI.color = Color.magenta; // Hot Pink/Magenta border
+        GUI.color = Color.magenta; 
         GUI.DrawTexture(new Rect(xPos - 3, yPos, 3, highwayHeight), _whiteTexture); // Left
-        GUI.Box(new Rect(xPos + highwayWidth, yPos, 3, highwayHeight), ""); // Right
+        GUI.DrawTexture(new Rect(xPos + highwayWidth, yPos, 3, highwayHeight), _whiteTexture); // Right
 
         // 3. THE HIT ZONE (SOLID YELLOW)
         float hitZoneY = yPos + highwayHeight - 55f;
         GUI.color = Color.yellow;
         GUI.DrawTexture(new Rect(xPos + 5, hitZoneY, highwayWidth - 10, 45f), _whiteTexture);
         
-        GUI.color = Color.black; // Black text on Yellow background for contrast
-        GUIStyle shoutStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 18 };
+        GUI.color = Color.black; 
+        GUIStyle shoutStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 22 }; // Increased font for width
         GUI.Label(new Rect(xPos + 5, hitZoneY, highwayWidth - 10, 45f), "SHOUT!", shoutStyle);
 
         // 4. FLOWING NOTES
@@ -669,12 +670,11 @@ public class RhythmRoundManager : NetworkBehaviour
                 float progress = 1.0f - (timeUntilImpact / viewWindow);
                 float noteY = yPos + (progress * (highwayHeight - 55f));
 
-                // Bright Neon Colors for the notes
-                if (timeUntilImpact < 0.2f) GUI.color = Color.green; // Perfect
-                else if (timeUntilImpact < windUpTime) GUI.color = Color.cyan; // Ready
-                else GUI.color = Color.white; // Incoming
+                if (timeUntilImpact < 0.2f) GUI.color = Color.green; 
+                else if (timeUntilImpact < windUpTime) GUI.color = Color.cyan; 
+                else GUI.color = Color.white; 
 
-                // Draw solid note bar
+                // Draw solid note bar - now wider to match
                 GUI.DrawTexture(new Rect(xPos + 10, noteY, highwayWidth - 20, 20f), _whiteTexture);
             }
             if (i > 6) break; 

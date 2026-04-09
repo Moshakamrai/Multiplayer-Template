@@ -75,28 +75,31 @@ public class RhythmRoundManager : NetworkBehaviour
     {
         if (isRoundActive) return;
         currentType = RoundType.FastCombo;
-        currentComboCount = 4;
-        customIsCombo = true;
-
         _upcomingImpacts.Clear();
         _clusterSizes.Clear();
-        _isWindUpFired = false;
 
-        // Map out 3 windows (8s, 16s, 24s). 
-        for (int i = 1; i <= 3; i++)
-        {
-            float baseTime = i * 8.0f;
-            for (int j = 0; j < 4; j++)
-            {
-                // INCREASED FROM 0.6f TO 1.2f!
-                // Now the animations have exactly 1.2 seconds to finish before the next punch fires.
-                float t = baseTime + (j * 1.2f);
-                _upcomingImpacts.Add(t);
-                _finalStandardBeat = t;
-            }
-        }
+        // Mapping: (Input Window Duration, Hits in Chain)
+        AddComboWindow(8f, 6f, 3);  // 8s intro + 6s input = 14s impact
+        AddComboWindow(14f, 8f, 4); // 8s input starts AFTER 14s
+        AddComboWindow(22f, 4f, 1); // Quick 4s snap
+        AddComboWindow(26f, 8f, 4); // Peak energy
+        AddComboWindow(34f, 6f, 3); // Downbeat
+        AddComboWindow(40f, 8f, 4); // Final Push
 
+        _finalStandardBeat = 48f;
         SetupRound();
+    }
+
+    // Helper to ensure gaps are respected
+    private void AddComboWindow(float startTime, float inputWindow, int hits)
+    {
+        for (int j = 0; j < hits; j++)
+        {
+            // Hits fire every 0.8s once the input window closes
+            float t = startTime + inputWindow + (j * 0.8f);
+            _upcomingImpacts.Add(t);
+        }
+        for (int j = 0; j < hits; j++) _clusterSizes.Add(hits);
     }
 
     [Server]
@@ -204,20 +207,38 @@ public class RhythmRoundManager : NetworkBehaviour
     private void Update()
     {
         if (!isRoundActive || _startTime == 0) return;
-        double elapsed = NetworkTime.time - _startTime;
-        if (elapsed < 0) return;
+        
+        // --- NEW: DEATH CHECK ---
+        // The round now only ends if someone is dead
+        bool anyoneDead = false;
+        foreach (var p in GameManager.players)
+        {
+            if (p != null && p.GetComponent<PlayerCombat>().CurrentHealth <= 0)
+                anyoneDead = true;
+        }
+
+        if (anyoneDead)
+        {
+            StopRound();
+            return;
+        }
 
         if (isServer)
         {
-            // THE UNIFIED TIME ENGINE: Custom uses track time, Standard uses pure math time
-            float currentTime = (currentType == RoundType.CustomTrack) ? BeatAnalyzer.Instance.audioSource.time : (float)elapsed;
+            float currentTime = GetCurrentTrackTime();
+
+            // --- NEW: MUSIC LOOPING LOGIC ---
+            // If we run out of impacts but the round is still active, refill the list
+            if (_upcomingImpacts.Count == 0)
+            {
+                RefillImpactsForLoop(currentTime);
+            }
 
             if (_upcomingImpacts.Count > 0)
             {
                 float targetBeat = _upcomingImpacts[0];
 
-
-                // --- PHASE 1: THE WIND UP ---
+                // Wind Up Logic
                 if (!_isWindUpFired && currentTime >= targetBeat - windUpTime)
                 {
                     _isWindUpFired = true;
@@ -225,50 +246,46 @@ public class RhythmRoundManager : NetworkBehaviour
                     {
                         if (player != null)
                         {
-                            // NEW: Check if this player is a Bot and force it to decide
                             BotController bot = player.GetComponent<BotController>();
-                            if (bot != null)
-                            {
-                                bot.ThinkNextMove(); // This populates the _comboBuffer or _pendingAttack
-                            }
-
+                            if (bot != null) bot.ThinkNextMove();
                             player.GetComponent<PlayerCombat>().ExecuteRhythmWindUp();
                         }
                     }
                 }
 
-                // --- PHASE 2: THE IMPACT ---
+                // Impact Logic
                 if (currentTime >= targetBeat)
                 {
                     _isWindUpFired = false;
                     _upcomingImpacts.RemoveAt(0);
-
                     if (_clusterSizes.Count > 0) _clusterSizes.RemoveAt(0);
 
                     ExecutePulseImpact();
                     RpcTriggerHitStop();
+                }
+            }
+        }
+    }
 
-                    // Only dynamically scale the UI if it's a Custom Track, otherwise leave it locked at 4
-                    if (currentType == RoundType.CustomTrack && _upcomingImpacts.Count > 0)
-                    {
-                        currentComboCount = _clusterSizes[0];
-                        customIsCombo = (currentComboCount > 1);
-                    }
-                }
-            }
-            else
-            {
-                // Graceful Round Ending
-                if (currentType == RoundType.CustomTrack)
-                {
-                    if (!BeatAnalyzer.Instance.audioSource.isPlaying) StopRound();
-                }
-                else
-                {
-                    // For standard modes, give the final hit 1.5s to finish animating before cutting the round
-                    if (currentTime >= _finalStandardBeat + 1.5f) StopRound();
-                }
-            }
+    [Server]
+    private void RefillImpactsForLoop(float currentTime)
+    {
+        // For Slow/Fast rounds, just keep adding beats every 4s or 8s
+        float nextBeat = currentTime + (currentType == RoundType.FastCombo ? 8.0f : 4.0f);
+        _upcomingImpacts.Add(nextBeat);
+        
+        // Ensure music loops back if it hits the end of the file
+        RpcLoopMusicIfEnded();
+    }
+
+    [ClientRpc]
+    private void RpcLoopMusicIfEnded()
+    {
+        AudioSource source = BeatAnalyzer.Instance.audioSource;
+        if (!source.isPlaying || source.time >= source.clip.length - 0.1f)
+        {
+            source.time = 0f;
+            source.Play();
         }
     }
 
@@ -416,7 +433,7 @@ public class RhythmRoundManager : NetworkBehaviour
 
                 // 2. Defender gets the "Hurt" sound
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Hurt");
-                
+
                 defender.TakeDamage(damageDealt);
                 return 1;
             }
@@ -491,6 +508,7 @@ public class RhythmRoundManager : NetworkBehaviour
 
     private void OnGUI()
     {
+        // --- 1. SERVER CONTROLS (Top Left) ---
         if (NetworkServer.active && isServer)
         {
             GUILayout.BeginArea(new Rect(10, 10, 220, 300));
@@ -513,6 +531,7 @@ public class RhythmRoundManager : NetworkBehaviour
             GUILayout.EndArea();
         }
 
+        // --- 2. PLAYER HP (Center Left) ---
         GUILayout.BeginArea(new Rect(10, Screen.height / 2 - 100, 250, 200));
         foreach (var p in GameManager.players)
         {
@@ -526,36 +545,52 @@ public class RhythmRoundManager : NetworkBehaviour
         }
         GUILayout.EndArea();
 
+        // --- 3. THE MASTERPIECE TIMER (Top Center) ---
         if (isRoundActive && _startTime != 0)
         {
             float elapsed = (float)(NetworkTime.time - _startTime);
             GUIStyle style = new GUIStyle(GUI.skin.box) { fontSize = 24, alignment = TextAnchor.MiddleCenter };
 
-            if (elapsed < 0) { style.normal.textColor = Color.yellow; GUI.Box(new Rect(Screen.width / 2 - 100, 50, 200, 70), "READY?", style); }
-            else
+            if (elapsed < 0) 
+            { 
+                style.normal.textColor = Color.yellow; 
+                GUI.Box(new Rect(Screen.width / 2 - 125, 50, 250, 70), "READY?", style); 
+            }
+            else if (currentType == RoundType.CustomTrack || currentType == RoundType.FastCombo)
             {
-                if (currentType == RoundType.CustomTrack)
+                if (_upcomingImpacts.Count > 0)
                 {
-                    if (_upcomingImpacts.Count > 0)
-                    {
-                        float trackTime = BeatAnalyzer.Instance.audioSource.time;
-                        float timeToNextBeat = _upcomingImpacts[0] - trackTime;
+                    float trackTime = GetCurrentTrackTime();
+                    float timeToNextImpact = _upcomingImpacts[0] - trackTime;
+                    
+                    // Logic to detect if we are currently in an "Attack Chain" or "Input Window"
+                    // If time to impact is less than (ComboCount * 0.8s), the hits are currently firing
+                    bool isAttacking = timeToNextImpact < (currentComboCount * 0.8f);
 
-                        style.normal.textColor = (timeToNextBeat < 1.0f) ? Color.red : Color.cyan;
-                        string modeText = customIsCombo ? $"CHAIN MODE ({currentComboCount}x)" : "SINGLE MODE";
-                        GUI.Box(new Rect(Screen.width / 2 - 125, 50, 250, 120), $"{modeText}\nNEXT DROP\n{timeToNextBeat.ToString("F1")}s", style);
+                    if (isAttacking)
+                    {
+                        style.normal.textColor = Color.red;
+                        GUI.Box(new Rect(Screen.width / 2 - 150, 50, 300, 120), $"DANGER\nATTACK CHAIN ACTIVE\n{currentComboCount}x HITS", style);
                     }
-                    else { GUI.Box(new Rect(Screen.width / 2 - 125, 50, 250, 70), "FINISHING...", style); }
+                    else
+                    {
+                        style.normal.textColor = Color.cyan;
+                        string modeText = (currentComboCount > 1) ? $"CHAIN ({currentComboCount}x)" : "SINGLE";
+                        GUI.Box(new Rect(Screen.width / 2 - 150, 50, 300, 120), $"{modeText}\nTHINK TIME\n{timeToNextImpact:F1}s", style);
+                    }
                 }
-                else
-                {
-                    float interval = (currentType == RoundType.FastCombo) ? 8.0f : 4.0f; float timer = elapsed % interval;
-                    style.normal.textColor = (timer > (interval - 1.5f)) ? Color.red : Color.white;
-                    GUI.Box(new Rect(Screen.width / 2 - 125, 50, 250, 100), $"WINDOW\n{timer.ToString("F1")}s / {interval}s", style);
-                }
+                else { GUI.Box(new Rect(Screen.width / 2 - 125, 50, 250, 70), "FINISHING...", style); }
+            }
+            else // Standard Slow Rhythm
+            {
+                float interval = 4.0f; 
+                float timer = elapsed % interval;
+                style.normal.textColor = (timer > (interval - 1.5f)) ? Color.red : Color.white;
+                GUI.Box(new Rect(Screen.width / 2 - 125, 50, 250, 100), $"WINDOW\n{timer:F1}s / {interval}s", style);
             }
         }
 
+        // --- 4. COMBAT LOG (Right Side) ---
         if (combatLogs.Count > 0)
         {
             GUILayout.BeginArea(new Rect(Screen.width - 550, 100, 530, 600));
@@ -563,18 +598,88 @@ public class RhythmRoundManager : NetworkBehaviour
             GUIStyle boxStyle = new GUIStyle(GUI.skin.box);
             GUILayout.Label("COMBAT LOG", logStyle); GUILayout.Space(5);
 
-            foreach (var log in combatLogs)
+            // Show the last 10 entries to keep it clean
+            int start = Mathf.Max(0, combatLogs.Count - 10);
+            for (int i = start; i < combatLogs.Count; i++)
             {
+                var log = combatLogs[i];
                 GUILayout.BeginHorizontal(boxStyle);
                 string p1DmgStr = log.p1Damage > 0 ? $" (-{log.p1Damage} HP)" : "";
                 string p2DmgStr = log.p2Damage > 0 ? $" (-{log.p2Damage} HP)" : "";
-                logStyle.normal.textColor = GetStateColor(log.p1State); GUILayout.Label($"{log.p1Name}: {log.p1Move}{p1DmgStr}", logStyle, GUILayout.Width(230));
-                logStyle.normal.textColor = Color.white; GUILayout.Label(" vs ", logStyle, GUILayout.Width(40));
-                logStyle.normal.textColor = GetStateColor(log.p2State); GUILayout.Label($"{log.p2Name}: {log.p2Move}{p2DmgStr}", logStyle, GUILayout.Width(230));
+                
+                logStyle.normal.textColor = GetStateColor(log.p1State); 
+                GUILayout.Label($"{log.p1Name}: {log.p1Move}{p1DmgStr}", logStyle, GUILayout.Width(230));
+                
+                logStyle.normal.textColor = Color.white; 
+                GUILayout.Label(" vs ", logStyle, GUILayout.Width(40));
+                
+                logStyle.normal.textColor = GetStateColor(log.p2State); 
+                GUILayout.Label($"{log.p2Name}: {log.p2Move}{p2DmgStr}", logStyle, GUILayout.Width(230));
                 GUILayout.EndHorizontal(); GUILayout.Space(2);
             }
-            GUILayout.EndArea(); GUI.color = Color.white;
+            GUILayout.EndArea(); 
+            GUI.color = Color.white;
         }
+        DrawRhythmHighway();
+    }
+
+    private Texture2D _whiteTexture;
+
+    private void DrawRhythmHighway()
+    {
+        if (!isRoundActive || _upcomingImpacts.Count == 0) return;
+
+        // Create a single white pixel texture once to use for solid coloring
+        if (_whiteTexture == null) { _whiteTexture = new Texture2D(1, 1); _whiteTexture.SetPixel(0, 0, Color.white); _whiteTexture.Apply(); }
+
+        float highwayWidth = 100f;
+        float highwayHeight = 500f;
+        float xPos = Screen.width - 130f; 
+        float yPos = Screen.height / 2 - 250f;
+
+        // 1. SOLID BACKGROUND (Bright Grey/Blue)
+        GUI.color = new Color(0.2f, 0.2f, 0.3f, 1f); // Solid dark blue-grey
+        GUI.DrawTexture(new Rect(xPos, yPos, highwayWidth, highwayHeight), _whiteTexture);
+
+        // 2. NEON BORDER
+        GUI.color = Color.magenta; // Hot Pink/Magenta border
+        GUI.DrawTexture(new Rect(xPos - 3, yPos, 3, highwayHeight), _whiteTexture); // Left
+        GUI.Box(new Rect(xPos + highwayWidth, yPos, 3, highwayHeight), ""); // Right
+
+        // 3. THE HIT ZONE (SOLID YELLOW)
+        float hitZoneY = yPos + highwayHeight - 55f;
+        GUI.color = Color.yellow;
+        GUI.DrawTexture(new Rect(xPos + 5, hitZoneY, highwayWidth - 10, 45f), _whiteTexture);
+        
+        GUI.color = Color.black; // Black text on Yellow background for contrast
+        GUIStyle shoutStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 18 };
+        GUI.Label(new Rect(xPos + 5, hitZoneY, highwayWidth - 10, 45f), "SHOUT!", shoutStyle);
+
+        // 4. FLOWING NOTES
+        float trackTime = GetCurrentTrackTime();
+        float viewWindow = 2.5f;
+
+        for (int i = 0; i < _upcomingImpacts.Count; i++)
+        {
+            float impactTime = _upcomingImpacts[i];
+            float timeUntilImpact = impactTime - trackTime;
+
+            if (timeUntilImpact > 0 && timeUntilImpact < viewWindow)
+            {
+                float progress = 1.0f - (timeUntilImpact / viewWindow);
+                float noteY = yPos + (progress * (highwayHeight - 55f));
+
+                // Bright Neon Colors for the notes
+                if (timeUntilImpact < 0.2f) GUI.color = Color.green; // Perfect
+                else if (timeUntilImpact < windUpTime) GUI.color = Color.cyan; // Ready
+                else GUI.color = Color.white; // Incoming
+
+                // Draw solid note bar
+                GUI.DrawTexture(new Rect(xPos + 10, noteY, highwayWidth - 20, 20f), _whiteTexture);
+            }
+            if (i > 6) break; 
+        }
+        GUI.color = Color.white;
     }
 
     private Color GetStateColor(int state) { if (state == 1) return Color.green; if (state == -1) return Color.red; return Color.white; }

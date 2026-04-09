@@ -173,21 +173,29 @@ public class PlayerCombat : NetworkBehaviour
     public void QueueRhythmMove(string attackTrigger, Vector3 dashDir)
     {
         if (IsDead || IsHurting) return;
-        if (isServer || isLocalPlayer) QueueLogic(attackTrigger, dashDir);
-        if (isLocalPlayer && !isServer) CmdQueueRhythmMove(attackTrigger, dashDir);
+        
+        // 1. Queue locally so the Bottom Left GUI updates instantly
+        QueueLogic(attackTrigger, dashDir);
+        
+        // 2. Tell the server to queue it so the Bot/Opponent gets hit
+        if (isLocalPlayer) CmdQueueRhythmMove(attackTrigger, dashDir);
     }
 
     [Command]
     private void CmdQueueRhythmMove(string attack, Vector3 dash)
     {
+        // This ensures the Server copy of the player also has the full buffer
         QueueLogic(attack, dash);
+
         if (RhythmRoundManager.Instance.IsWindUpActive)
         {
-            bool isCurrentBeat = RhythmRoundManager.Instance.IsSingleMoveMode() || _comboBuffer.Count == 1;
-            if (isCurrentBeat) TargetTriggerRhythmWindUp(attack, dash);
+            // Only trigger wind-up for the first move in a chain
+            if (_comboBuffer.Count == 1 || RhythmRoundManager.Instance.IsSingleMoveMode())
+                TargetTriggerRhythmWindUp(attack, dash);
         }
     }
 
+    // THE ONLY QUEUELOGIC YOU NEED
     private void QueueLogic(string attackTrigger, Vector3 dashDir)
     {
         if (RhythmRoundManager.Instance.IsSingleMoveMode())
@@ -195,8 +203,14 @@ public class PlayerCombat : NetworkBehaviour
             if (!string.IsNullOrEmpty(attackTrigger)) { _pendingAttackTrigger = attackTrigger; _pendingDashDirection = Vector3.zero; }
             if (dashDir != Vector3.zero) { _pendingDashDirection = dashDir; _pendingAttackTrigger = ""; }
         }
-        else if (_comboBuffer.Count < RhythmRoundManager.Instance.currentComboCount)
-            _comboBuffer.Add(new RhythmAction { attack = attackTrigger, dash = dashDir });
+        else 
+        {
+            // This is what allows the "Masterpiece" multi-attack
+            if (_comboBuffer.Count < RhythmRoundManager.Instance.currentComboCount)
+            {
+                _comboBuffer.Add(new RhythmAction { attack = attackTrigger, dash = dashDir });
+            }
+        }
     }
 
     public RhythmAction PeekNextMove()
@@ -372,6 +386,45 @@ public class PlayerCombat : NetworkBehaviour
                 GUILayout.Label($"Attack: {atk}", new GUIStyle(GUI.skin.label) { fontSize = 18 });
                 GUI.color = Color.white;
             }
+            GUILayout.EndArea();
+        }
+        // --- 4. CHAIN ATTACK INPUT LIST (Bottom Left) ---
+        if (RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive && !RhythmRoundManager.Instance.IsSingleMoveMode())
+        {
+            float w = 240f;
+            float h = 280f;
+            // Positioned at Bottom Left, slightly above the Volume Monitor
+            Rect chainRect = new Rect(20, Screen.height - h - 180f, w, h);
+
+            GUI.Box(chainRect, "<b>NEXT COMBO CHAIN</b>");
+
+            GUILayout.BeginArea(new Rect(chainRect.x + 10, chainRect.y + 30, w - 20, h - 40));
+
+            int totalNeeded = RhythmRoundManager.Instance.currentComboCount;
+
+            for (int i = 0; i < totalNeeded; i++)
+            {
+                if (i < _comboBuffer.Count)
+                {
+                    var move = _comboBuffer[i];
+                    string moveName = string.IsNullOrEmpty(move.attack) ? "DASH" : move.attack;
+
+                    // Friendly names for the UI
+                    if (moveName == "ParryIntent") moveName = "CAGE";
+                    if (moveName == "UnbreakablePunch") moveName = "BOOM";
+
+                    GUI.color = Color.cyan;
+                    GUILayout.Box($"{i + 1}. {moveName.ToUpper()}", GUILayout.Height(40));
+                }
+                else
+                {
+                    GUI.color = new Color(1, 1, 1, 0.2f);
+                    GUILayout.Box($"{i + 1}. [WAITING]", GUILayout.Height(40));
+                }
+
+                if (i < totalNeeded - 1) GUILayout.Label("      ▼", GUILayout.Height(10));
+            }
+            GUI.color = Color.white;
             GUILayout.EndArea();
         }
     }

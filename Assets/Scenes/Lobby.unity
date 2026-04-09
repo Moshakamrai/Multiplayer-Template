@@ -756,11 +756,11 @@ AudioSource:
   m_Enabled: 1
   serializedVersion: 4
   OutputAudioMixerGroup: {fileID: 0}
-  m_audioClip: {fileID: 8300000, guid: 21ba39156c78be14194df57e32de3f6b, type: 3}
+  m_audioClip: {fileID: 8300000, guid: 6e54e070d51e98a4d8ffe840e50ed7f6, type: 3}
   m_PlayOnAwake: 0
   m_Volume: 0.631
   m_Pitch: 1
-  Loop: 0
+  Loop: 1
   Mute: 0
   Spatialize: 0
   SpatializePostEffects: 0
@@ -1999,9 +1999,17 @@ PrefabInstance:
       value: MusicAnalyzer
       objectReference: {fileID: 0}
     - target: {fileID: 2984976270258637181, guid: f0794d77fdd34d9438e1b7e255827741, type: 3}
+      propertyPath: Loop
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 2984976270258637181, guid: f0794d77fdd34d9438e1b7e255827741, type: 3}
       propertyPath: m_audioClip
       value: 
       objectReference: {fileID: 8300000, guid: 6e54e070d51e98a4d8ffe840e50ed7f6, type: 3}
+    - target: {fileID: 2984976270258637181, guid: f0794d77fdd34d9438e1b7e255827741, type: 3}
+      propertyPath: m_PlayOnAwake
+      value: 1
+      objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []

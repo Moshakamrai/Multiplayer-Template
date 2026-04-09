@@ -174,11 +174,19 @@ public class PlayerCombat : NetworkBehaviour
     {
         if (IsDead || IsHurting) return;
 
-        // 1. Queue locally so the Bottom Left GUI updates instantly
-        QueueLogic(attackTrigger, dashDir);
+        // 1. Only queue locally if you are purely a Client. 
+        // If you are the Host (isServer), skip this so it doesn't double-count!
+        if (!isServer)
+        {
+            QueueLogic(attackTrigger, dashDir);
+        }
 
-        // 2. Tell the server to queue it so the Bot/Opponent gets hit
-        if (isLocalPlayer) CmdQueueRhythmMove(attackTrigger, dashDir);
+        // 2. Send the command. 
+        // If you are the Host, this will run instantly and add it exactly once.
+        if (isLocalPlayer) 
+        {
+            CmdQueueRhythmMove(attackTrigger, dashDir);
+        }
     }
 
     [Command]

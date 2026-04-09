@@ -89,30 +89,43 @@ public class RhythmRoundManager : NetworkBehaviour
         _upcomingImpacts.Clear();
         _clusterSizes.Clear();
 
-        // We loop this to create the 8-second input -> 4-hit chain sequence
-        float currentTime = 0f;
-        for (int i = 0; i < 6; i++)
-        {
-            AddComboWindow(currentTime, 8f, 4); // 8s input, 4 hits
-            // Move the timeline forward by the 8s window + the time it takes to do 4 hits (4 * 0.8s = 3.2s)
-            currentTime += 8f + (4 * 0.8f);
-        }
+        // 1. The Intro (Impacts at 8.0, 8.6, 9.2, 9.8) - Wraps up right before 10s
+        AddComboWindow(0f, 8f, 4, 0.6f);  
 
-        // --- THE CRITICAL BUG FIX ---
-        currentComboCount = 4; // THIS is what unlocks your buffer!
+        // 2. The 13s Half-Beat Burst (Impacts at 13.0, 13.3, 13.6, 13.9)
+        // 4 hits using 0.3f gap for that fast double-time feel
+        AddComboWindow(10f, 3f, 4, 0.3f); 
+
+        // 3. Engagement Filler (15s to 38s)
+        // Single strikes spaced 4 seconds apart to keep the player active
+        AddComboWindow(14f, 4f, 1, 0.6f); // Hits at 18.0s
+        AddComboWindow(18f, 4f, 1, 0.6f); // Hits at 22.0s
+        AddComboWindow(22f, 4f, 1, 0.6f); // Hits at 26.0s
+        AddComboWindow(26f, 4f, 1, 0.6f); // Hits at 30.0s
+        AddComboWindow(30f, 4f, 1, 0.6f); // Hits at 34.0s
+
+        // 4. The 38.4s BIG DROP
+        // Starts exactly at 38.4s and runs 4 heavy hits
+        AddComboWindow(34f, 4.4f, 4, 0.6f); 
+
+        // 5. Final Burst before the 52s Loop
+        // Fast half-beats ending right at 48.9s
+        AddComboWindow(41f, 7f, 4, 0.3f); 
+
+        currentComboCount = 4; // Ensures the buffer is open
         customIsCombo = true;
 
-        _finalStandardBeat = currentTime;
+        _finalStandardBeat = 52f;
         SetupRound();
     }
 
-    // Helper to ensure gaps are respected
-    private void AddComboWindow(float startTime, float inputWindow, int hits)
+    // Added 'beatGap' parameter to control how fast the chain executes
+    private void AddComboWindow(float startTime, float inputWindow, int hits, float beatGap = 0.6f)
     {
         for (int j = 0; j < hits; j++)
         {
-            // Hits fire every 0.8s once the input window closes
-            float t = startTime + inputWindow + (j * 0.8f);
+            // Hits fire sequentially based on the specific beat gap
+            float t = startTime + inputWindow + (j * beatGap);
             _upcomingImpacts.Add(t);
         }
         for (int j = 0; j < hits; j++) _clusterSizes.Add(hits);
@@ -293,15 +306,23 @@ public class RhythmRoundManager : NetworkBehaviour
     [Server]
     private void RefillImpactsForLoop(float currentTime)
     {
-        // Keep the 8-second, 4-hit structure going infinitely
         if (currentType == RoundType.FastCombo) 
         {
-             AddComboWindow(currentTime, 8f, 4);
+            // Rebuilds the custom song timeline perfectly
+            AddComboWindow(currentTime + 0f, 8f, 4, 0.6f);
+            AddComboWindow(currentTime + 10f, 3f, 4, 0.3f);
+            AddComboWindow(currentTime + 14f, 4f, 1, 0.6f);
+            AddComboWindow(currentTime + 18f, 4f, 1, 0.6f);
+            AddComboWindow(currentTime + 22f, 4f, 1, 0.6f);
+            AddComboWindow(currentTime + 26f, 4f, 1, 0.6f);
+            AddComboWindow(currentTime + 30f, 4f, 1, 0.6f);
+            AddComboWindow(currentTime + 34f, 4.4f, 4, 0.6f);
+            AddComboWindow(currentTime + 41f, 7f, 4, 0.3f);
         } 
         else 
         {
-             _upcomingImpacts.Add(currentTime + 4.0f);
-             _clusterSizes.Add(1);
+            _upcomingImpacts.Add(currentTime + 4.0f);
+            _clusterSizes.Add(1);
         }
         
         RpcLoopMusicIfEnded();

@@ -174,18 +174,22 @@ public class PlayerCombat : NetworkBehaviour
     {
         if (IsDead || IsHurting) return;
 
-        // 1. Only queue locally if you are purely a Client. 
-        // If you are the Host (isServer), skip this so it doesn't double-count!
-        if (!isServer)
+        if (isLocalPlayer)
         {
-            QueueLogic(attackTrigger, dashDir);
+            // --- HUMAN PLAYER LOGIC ---
+            // If you are a pure Client, update locally for the UI.
+            // (If you are the Host, this skips so you don't double-count).
+            if (!isServer) QueueLogic(attackTrigger, dashDir); 
+            
+            // Send the command to the Server.
+            CmdQueueRhythmMove(attackTrigger, dashDir); 
         }
-
-        // 2. Send the command. 
-        // If you are the Host, this will run instantly and add it exactly once.
-        if (isLocalPlayer) 
+        else if (isServer)
         {
-            CmdQueueRhythmMove(attackTrigger, dashDir);
+            // --- BOT LOGIC ---
+            // The Bot lives purely on the Server and isn't a "Local Player".
+            // It just needs to drop its moves straight into the logic.
+            QueueLogic(attackTrigger, dashDir);
         }
     }
 

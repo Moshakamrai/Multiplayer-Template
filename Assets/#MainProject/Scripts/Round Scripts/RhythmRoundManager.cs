@@ -30,7 +30,18 @@ public class RhythmRoundManager : NetworkBehaviour
     // NEW: Tracks the very last beat to know when to cleanly end standard rounds
     private float _finalStandardBeat = 0f;
 
-    private struct CombatLogEntry { public string p1Name; public string p1Move; public int p1State; public int p1Damage; public string p2Name; public string p2Move; public int p2State; public int p2Damage; }
+    private struct CombatLogEntry 
+    { 
+        public string p1Name; 
+        public string p1Move; 
+        public int p1State; 
+        public int p1Damage; 
+        public string p2Name; 
+        public string p2Move; 
+        public int p2State; 
+        public int p2Damage; 
+        public float timeAdded; // NEW: Tracks when this log was created
+    }
     private List<CombatLogEntry> combatLogs = new List<CombatLogEntry>();
 
     [Header("Single Player Settings")]
@@ -463,7 +474,8 @@ public class RhythmRoundManager : NetworkBehaviour
             p2Name = string.IsNullOrEmpty(p2Name) ? "Player 2" : p2Name,
             p2Move = p2Move,
             p2State = p2State,
-            p2Damage = p2Dmg
+            p2Damage = p2Dmg,
+            timeAdded = Time.time // Stamps the exact moment it appeared
         });
     }
 

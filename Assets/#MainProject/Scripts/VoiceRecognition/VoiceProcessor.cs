@@ -140,11 +140,29 @@ public class VoiceProcessor : MonoBehaviour
             }
             CurrentRawVolume = maxVolume;
 
-            if (_autoDetect == false) _transmit = _audioDetected = true;
+            // --- THE VAD FIX ---
+            if (_autoDetect == false) 
+            {
+                _transmit = _audioDetected = true; 
+            }
             else
             {
-                if (maxVolume >= _minimumSpeakingSampleValue) { _transmit = _audioDetected = true; _timeAtSilenceBegan = Time.time; }
-                else { _transmit = false; if (_audioDetected && Time.time - _timeAtSilenceBegan > _silenceTimer) _audioDetected = false; }
+                if (maxVolume >= _minimumSpeakingSampleValue) 
+                { 
+                    _audioDetected = true; 
+                    _timeAtSilenceBegan = Time.time; 
+                }
+                else 
+                { 
+                    // If we drop below the volume threshold, check if the silence timer has expired
+                    if (_audioDetected && Time.time - _timeAtSilenceBegan > _silenceTimer) 
+                    {
+                        _audioDetected = false; 
+                    }
+                }
+                
+                // Keep transmitting as long as audio is considered "detected" (including the silence tail)
+                _transmit = _audioDetected; 
             }
 
             if (_audioDetected)

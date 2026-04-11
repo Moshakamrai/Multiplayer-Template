@@ -9,6 +9,7 @@ public class VoiceCommandManager : NetworkBehaviour
     public Text InputText;
     public Text OutputText;
     private string _previousPartialText = "";
+    private string _lastProcessedWord = ""; // NEW: Tracks the exact last word checked
     private PlayerController _myController;
     private PlayerCombat _myCombat;
     private PlayerEnergy _myEnergy;
@@ -43,33 +44,28 @@ public class VoiceCommandManager : NetworkBehaviour
 
         string currentText = ParsePartialJson(jsonResult).ToLower().Trim();
         if (string.IsNullOrEmpty(currentText)) return;
+        
+        // Update the UI instantly so it feels responsive
+        if (InputText != null) InputText.text = currentText;
 
-        // Split into arrays to track word-by-word progress
         string[] currentWords = currentText.Split(new[] { ' ' }, System.StringSplitOptions.RemoveEmptyEntries);
-        string[] previousWords = _previousPartialText.Split(new[] { ' ' }, System.StringSplitOptions.RemoveEmptyEntries);
+        if (currentWords.Length == 0) return;
 
-        // Only process if we have actually heard more words than before
-        if (currentWords.Length > previousWords.Length)
+        // Grab the very last word Vosk is currently guessing
+        string newestWord = currentWords[currentWords.Length - 1];
+
+        // If Vosk guessed a new word, or updated its current guess, process it INSTANTLY
+        if (newestWord != _lastProcessedWord)
         {
-            string newWords = "";
-            for (int i = previousWords.Length; i < currentWords.Length; i++)
-            {
-                newWords += currentWords[i] + " ";
-            }
-
-            _previousPartialText = currentText;
-
-            if (!string.IsNullOrEmpty(newWords.Trim()))
-            {
-                ProcessWords(newWords.Trim());
-                if (InputText != null) InputText.text = currentText;
-            }
+            _lastProcessedWord = newestWord;
+            ProcessWords(newestWord); 
         }
-        else if (currentWords.Length < previousWords.Length)
-        {
-            // Recognition reset or correction happened
-            _previousPartialText = currentText;
-        }
+    }
+
+    void HandleFinalResult(string jsonResult) 
+    {
+        _previousPartialText = "";
+        _lastProcessedWord = ""; // Reset the tracker for the next sentence
     }
 
     [Command]
@@ -82,7 +78,7 @@ public class VoiceCommandManager : NetworkBehaviour
         }
     }
 
-    void HandleFinalResult(string jsonResult) => _previousPartialText = "";
+   
 
     void ProcessWords(string segment)
     {
@@ -98,14 +94,19 @@ public class VoiceCommandManager : NetworkBehaviour
             Vector3 dashDir = Vector3.zero;
 
             // 1. RECOGNITION MAPPING - FIXED TRIGGERS
-            if (GetSimilarity(word, "punch") > 0.72f) { trigger = "Jab"; recognized = true; }
-            else if (GetSimilarity(word, "cross") > 0.7f) { trigger = "Cross"; recognized = true; }
-            else if (GetSimilarity(word, "hook") > 0.7f) { trigger = "Hook"; recognized = true; }
-            else if (GetSimilarity(word, "block") > 0.72f || GetSimilarity(word, "guard") > 0.72f) { trigger = "Block"; recognized = true; }
-            else if (GetSimilarity(word, "cage") > 0.70f) { trigger = "ParryIntent"; recognized = true; }
-            else if (GetSimilarity(word, "boom") > 0.72f) { trigger = "UnbreakablePunch"; recognized = true; }
-            else if (GetSimilarity(word, "left") > 0.8f) { trigger = "Left"; dashDir = Vector3.left; recognized = true; }
-            else if (GetSimilarity(word, "right") > 0.8f) { trigger = "Right"; dashDir = Vector3.right; recognized = true; }
+            // 1. RECOGNITION MAPPING - FIXED TRIGGERS WITH ALIASES
+            if (GetSimilarity(word, "punch") > 0.6f || word == "jab") { trigger = "Jab"; recognized = true; }
+            
+            // CROSS FIX: Lowered threshold to 0.60f and added common Vosk mishears!
+            // The new "Cross" - using BLAST
+            else if (GetSimilarity(word, "blast") > 0.60f || word == "last" || word == "fast" || word == "cast") { trigger = "Cross"; recognized = true; }
+            
+            else if (GetSimilarity(word, "hook") > 0.6f) { trigger = "Hook"; recognized = true; }
+            else if (GetSimilarity(word, "block") > 0.6f || GetSimilarity(word, "guard") > 0.72f) { trigger = "Block"; recognized = true; }
+            else if (GetSimilarity(word, "cage") > 0.6f || word == "page" || word == "engage") { trigger = "ParryIntent"; recognized = true; }
+            else if (GetSimilarity(word, "boom") > 0.6f || word == "room" || word == "doom") { trigger = "UnbreakablePunch"; recognized = true; }
+            else if (GetSimilarity(word, "left") > 0.6f) { trigger = "Left"; dashDir = Vector3.left; recognized = true; }
+            else if (GetSimilarity(word, "right") > 0.6f) { trigger = "Right"; dashDir = Vector3.right; recognized = true; }
 
             if (recognized)
             {
@@ -113,7 +114,7 @@ public class VoiceCommandManager : NetworkBehaviour
                 if (_myCards != null && !_myCards.IsCardInHand(trigger))
                 {
                     LogExecution("CARD NOT IN HAND");
-                    if (SoundManagerMain.Instance != null) SoundManagerMain.Instance.PlayCardRejected();
+                    //if (SoundManagerMain.Instance != null) SoundManagerMain.Instance.PlayCardRejected();
                     Debug.Log($"<color=red>REJECTED:</color> {trigger} not in hand.");
                     continue;
                 }

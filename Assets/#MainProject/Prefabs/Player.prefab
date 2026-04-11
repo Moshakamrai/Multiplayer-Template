@@ -878,7 +878,7 @@ MonoBehaviour:
   - cardName: PUNCH
     triggerName: Jab
     description: Quick lead strike. Reliable base damage.
-  - cardName: CROSS
+  - cardName: BLAST
     triggerName: Cross
     description: Straight power hit. Counters enemies trying to dodge.
   - cardName: HOOK

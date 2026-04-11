@@ -35,6 +35,11 @@ public class PlayerCombat : NetworkBehaviour
     private string _pendingAttackTrigger = "";
     private Vector3 _pendingDashDirection = Vector3.zero;
 
+    // --- TIMING FEEDBACK VARIABLES ---
+    private string _timingText = "";
+    private Color _timingColor = Color.white;
+    private float _timingFade = 0f;
+
     private VoiceCommandManager _vcm;
 
     [SyncVar] public float lastVocalSpikeTime = -1f; // Timestamp of the loudest peak
@@ -53,6 +58,12 @@ public class PlayerCombat : NetworkBehaviour
     private void Update()
     {
         if (isLocalPlayer && ShieldText != null) ShieldText.text = CurrentShield.ToString();
+
+        // --- Fade the timing text ---
+        if (isLocalPlayer && _timingFade > 0)
+        {
+            _timingFade -= Time.deltaTime * 1.5f; // Fades out completely in ~0.66 seconds
+        }
 
         // Local Parry Spike Check: Only runs for the local player
         if (isLocalPlayer && !IsDead && !IsHurting)
@@ -170,6 +181,16 @@ public class PlayerCombat : NetworkBehaviour
         yield return new WaitForSeconds(0.1f);
     }
 
+    [TargetRpc]
+    public void TargetShowTimingFeedback(string rating)
+    {
+        _timingText = rating;
+        _timingFade = 1.0f; // Reset fade timer to max
+        
+        if (rating == "EXCELLENT") _timingColor = Color.cyan;
+        else if (rating == "GOOD") _timingColor = Color.green;
+        else _timingColor = Color.red;
+    }
     public void QueueRhythmMove(string attackTrigger, Vector3 dashDir)
     {
         if (IsDead || IsHurting) return;
@@ -337,9 +358,6 @@ public class PlayerCombat : NetworkBehaviour
     {
         if (!isLocalPlayer) return;
 
-        // --- 1. BOT/OPPONENT HEALTH GUI (Top Middle) ---
-        // --- 1. BOT/OPPONENT HEALTH GUI (Top Right) ---
-
         // --- INITIALIZE TEXTURE ---
         if (_whiteTexture == null)
         {
@@ -347,6 +365,7 @@ public class PlayerCombat : NetworkBehaviour
             _whiteTexture.SetPixel(0, 0, Color.white);
             _whiteTexture.Apply();
         }
+        
         PlayerController opponent = GetComponent<PlayerController>().GetOpponent();
         if (opponent != null)
         {
@@ -354,27 +373,23 @@ public class PlayerCombat : NetworkBehaviour
             if (oppCombat != null)
             {
                 float barWidth = 400f;
-                float barHeight = 60f; // Increased height for better visibility
-                                       // Anchored to the Top Right
+                float barHeight = 60f; 
                 float posX = Screen.width - barWidth - 20f;
                 float posY = 20f;
 
-                // Solid black background for high contrast
                 GUI.color = new Color(0.1f, 0.1f, 0.1f, 1f);
                 GUI.DrawTexture(new Rect(posX, posY, barWidth, barHeight), _whiteTexture);
 
-                // Neon Red foreground for health
                 float healthPercent = (float)oppCombat.CurrentHealth / 100f;
                 GUI.color = Color.red;
                 GUI.DrawTexture(new Rect(posX + 5, posY + 5, (barWidth - 10) * healthPercent, barHeight - 10), _whiteTexture);
 
-                // Bold, Large text label
                 GUI.color = Color.white;
                 GUIStyle nameStyle = new GUIStyle(GUI.skin.label)
                 {
                     alignment = TextAnchor.MiddleCenter,
                     fontStyle = FontStyle.Bold,
-                    fontSize = 24 // Increased font size as requested
+                    fontSize = 24 
                 };
 
                 string oppName = string.IsNullOrEmpty(opponent.PlayerName) ? "BOT UNIT" : opponent.PlayerName;
@@ -418,12 +433,12 @@ public class PlayerCombat : NetworkBehaviour
             }
             GUILayout.EndArea();
         }
+        
         // --- 4. CHAIN ATTACK INPUT LIST (Bottom Left) ---
         if (RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive && !RhythmRoundManager.Instance.IsSingleMoveMode())
         {
             float w = 240f;
             float h = 280f;
-            // Positioned at Bottom Left, slightly above the Volume Monitor
             Rect chainRect = new Rect(20, Screen.height - h - 180f, w, h);
 
             GUI.Box(chainRect, "<b>NEXT COMBO CHAIN</b>");
@@ -439,7 +454,6 @@ public class PlayerCombat : NetworkBehaviour
                     var move = _comboBuffer[i];
                     string moveName = string.IsNullOrEmpty(move.attack) ? "DASH" : move.attack;
 
-                    // Friendly names for the UI
                     if (moveName == "ParryIntent") moveName = "CAGE";
                     if (moveName == "UnbreakablePunch") moveName = "BOOM";
 
@@ -456,6 +470,25 @@ public class PlayerCombat : NetworkBehaviour
             }
             GUI.color = Color.white;
             GUILayout.EndArea();
+        }
+
+        // --- 5. TIMING FEEDBACK FLOATER (Center Screen) ---
+        if (_timingFade > 0)
+        {
+            GUIStyle timingStyle = new GUIStyle(GUI.skin.label) 
+            { 
+                alignment = TextAnchor.MiddleCenter, 
+                fontStyle = FontStyle.Bold, 
+                fontSize = 42 
+            };
+            
+            float yOffset = Mathf.Lerp(60f, 0f, _timingFade); 
+            
+            _timingColor.a = _timingFade; 
+            timingStyle.normal.textColor = _timingColor;
+            
+            GUI.Label(new Rect(Screen.width / 2 - 200, Screen.height / 2 - 150 - yOffset, 400, 100), _timingText, timingStyle);
+            GUI.color = Color.white; 
         }
     }
 

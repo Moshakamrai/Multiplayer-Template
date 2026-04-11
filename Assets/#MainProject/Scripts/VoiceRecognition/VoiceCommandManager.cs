@@ -78,6 +78,7 @@ public class VoiceCommandManager : NetworkBehaviour
         if (_myCards != null)
         {
             _myCards.DiscardCard(trigger);
+            _myCards.DrawCard(); // <-- NEW: Instantly draw a replacement card!
         }
     }
 

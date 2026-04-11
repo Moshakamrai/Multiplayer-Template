@@ -90,11 +90,11 @@ public class RhythmRoundManager : NetworkBehaviour
         _clusterSizes.Clear();
 
         // 1. The Intro (Impacts at 8.0, 8.6, 9.2, 9.8) - Wraps up right before 10s
-        AddComboWindow(0f, 8f, 4, 0.6f);  
+        AddComboWindow(0f, 8f, 4, 0.6f);
 
         // 2. The 13s Half-Beat Burst (Impacts at 13.0, 13.3, 13.6, 13.9)
         // 4 hits using 0.3f gap for that fast double-time feel
-        AddComboWindow(10f, 3f, 4, 0.3f); 
+        AddComboWindow(10f, 3f, 4, 0.3f);
 
         // 3. Engagement Filler (15s to 38s)
         // Single strikes spaced 4 seconds apart to keep the player active
@@ -106,11 +106,11 @@ public class RhythmRoundManager : NetworkBehaviour
 
         // 4. The 38.4s BIG DROP
         // Starts exactly at 38.4s and runs 4 heavy hits
-        AddComboWindow(34f, 4.4f, 4, 0.6f); 
+        AddComboWindow(34f, 4.4f, 4, 0.6f);
 
         // 5. Final Burst before the 52s Loop
         // Fast half-beats ending right at 48.9s
-        AddComboWindow(41f, 7f, 4, 0.3f); 
+        AddComboWindow(41f, 7f, 4, 0.3f);
 
         currentComboCount = 4; // Ensures the buffer is open
         customIsCombo = true;
@@ -134,46 +134,48 @@ public class RhythmRoundManager : NetworkBehaviour
     [Server]
     public void StartCustomRound()
     {
-        if (isRoundActive || !BeatAnalyzer.Instance.isAnalyzed) return;
+        if (isRoundActive) return;
         currentType = RoundType.CustomTrack;
 
-        List<float> allBeats = BeatAnalyzer.Instance.GetAllActionTriggers();
+        string saveKey = "CustomMap_" + BeatAnalyzer.Instance.audioSource.clip.name;
+        if (!PlayerPrefs.HasKey(saveKey)) return;
+
         _upcomingImpacts.Clear();
         _clusterSizes.Clear();
-        _isWindUpFired = false;
+        string rawData = PlayerPrefs.GetString(saveKey);
+        string[] rawTimes = rawData.Split('|');
 
-        int tempComboSize = 1;
-
-        for (int i = 0; i < allBeats.Count; i++)
+        List<float> loadedTaps = new List<float>();
+        foreach (string tStr in rawTimes)
         {
-            if (i == 0) { _upcomingImpacts.Add(allBeats[i]); tempComboSize = 1; }
-            else
-            {
-                if (allBeats[i] - allBeats[i - 1] < 2.0f) tempComboSize++;
-                else
-                {
-                    _clusterSizes.Add(tempComboSize);
-                    _upcomingImpacts.Add(allBeats[i]);
-                    tempComboSize = 1;
-                }
-            }
+            if (float.TryParse(tStr, out float t)) loadedTaps.Add(t);
         }
-        if (allBeats.Count > 0) _clusterSizes.Add(tempComboSize);
+        loadedTaps.Sort(); // Ensure perfect chronological order
 
-        for (int i = 0; i < _upcomingImpacts.Count; i++)
+        // --- NEW: THE CHAIN DETECTOR ---
+        int i = 0;
+        while (i < loadedTaps.Count)
         {
-            float prepTime = (i == 0) ? _upcomingImpacts[i] : (_upcomingImpacts[i] - _upcomingImpacts[i - 1]);
-            float reqPrep = _clusterSizes[i] * 1.2f;
+            int chainCount = 1;
 
-            if (prepTime < reqPrep && _clusterSizes[i] > 1)
+            // Look ahead: If the next beat is less than 2.0 seconds away, group it!
+            while (i + chainCount < loadedTaps.Count && (loadedTaps[i + chainCount] - loadedTaps[i + chainCount - 1]) < 2.0f)
             {
-                int maxAllowed = Mathf.Max(1, Mathf.FloorToInt(prepTime / 1.2f));
-                _clusterSizes[i] = Mathf.Min(_clusterSizes[i], maxAllowed);
+                chainCount++;
             }
-            if (_clusterSizes[i] > 4) _clusterSizes[i] = 4;
+
+            // Assign this cluster size to all beats in this group
+            for (int j = 0; j < chainCount; j++)
+            {
+                _upcomingImpacts.Add(loadedTaps[i + j]);
+                _clusterSizes.Add(chainCount);
+            }
+
+            i += chainCount; // Skip ahead to the next ungrouped beat
         }
 
-        if (_upcomingImpacts.Count > 0)
+        // Initialize the UI for the very first beat group
+        if (_clusterSizes.Count > 0)
         {
             currentComboCount = _clusterSizes[0];
             customIsCombo = (currentComboCount > 1);
@@ -183,6 +185,7 @@ public class RhythmRoundManager : NetworkBehaviour
         BeatAnalyzer.Instance.audioSource.time = 0f;
         BeatAnalyzer.Instance.audioSource.Play();
 
+        _isWindUpFired = false;
         SetupRound();
     }
 
@@ -291,9 +294,16 @@ public class RhythmRoundManager : NetworkBehaviour
 
                     // --- NEW: UNLOCK THE NEXT CHAIN ---
                     // This updates the limit so you can shout 4 times again for the next wave
+                    // --- NEW: UNLOCK THE NEXT CHAIN ---
                     if (_clusterSizes.Count > 0)
                     {
                         currentComboCount = _clusterSizes[0];
+
+                        // Dynamically toggle between SINGLE and CHAIN UI for custom tracks!
+                        if (currentType == RoundType.CustomTrack)
+                        {
+                            customIsCombo = (currentComboCount > 1);
+                        }
                     }
 
                     ExecutePulseImpact();
@@ -306,7 +316,7 @@ public class RhythmRoundManager : NetworkBehaviour
     [Server]
     private void RefillImpactsForLoop(float currentTime)
     {
-        if (currentType == RoundType.FastCombo) 
+        if (currentType == RoundType.FastCombo)
         {
             // Rebuilds the custom song timeline perfectly
             AddComboWindow(currentTime + 0f, 8f, 4, 0.6f);
@@ -318,13 +328,13 @@ public class RhythmRoundManager : NetworkBehaviour
             AddComboWindow(currentTime + 30f, 4f, 1, 0.6f);
             AddComboWindow(currentTime + 34f, 4.4f, 4, 0.6f);
             AddComboWindow(currentTime + 41f, 7f, 4, 0.3f);
-        } 
-        else 
+        }
+        else
         {
             _upcomingImpacts.Add(currentTime + 4.0f);
             _clusterSizes.Add(1);
         }
-        
+
         RpcLoopMusicIfEnded();
     }
 
@@ -569,9 +579,31 @@ public class RhythmRoundManager : NetworkBehaviour
                 GUI.color = Color.magenta; if (GUILayout.Button("START FAST ROUND", GUILayout.Height(40))) StartFastRound();
                 GUILayout.Space(10);
 
-                if (!BeatAnalyzer.Instance.isAnalyzing && !BeatAnalyzer.Instance.isAnalyzed) { GUI.color = Color.yellow; if (GUILayout.Button("ANALYZE CUSTOM TRACK", GUILayout.Height(60))) BeatAnalyzer.Instance.StartAnalysis(); }
-                else if (BeatAnalyzer.Instance.isAnalyzing) { GUI.color = Color.gray; float prog = (BeatAnalyzer.Instance.audioSource.time / BeatAnalyzer.Instance.audioSource.clip.length) * 100f; GUILayout.Box($"ANALYZING... {prog.ToString("F0")}%", GUILayout.Height(60)); }
-                else if (BeatAnalyzer.Instance.isAnalyzed) { GUI.color = Color.green; if (GUILayout.Button("START CUSTOM ROUND", GUILayout.Height(60))) StartCustomRound(); }
+                // --- NEW: DIRECT CUSTOM MAP LOADER ---
+                // Safely check if the audio clip exists before trying to read its name
+                if (BeatAnalyzer.Instance != null && BeatAnalyzer.Instance.audioSource != null && BeatAnalyzer.Instance.audioSource.clip != null)
+                {
+                    string saveKey = "CustomMap_" + BeatAnalyzer.Instance.audioSource.clip.name;
+
+                    if (PlayerPrefs.HasKey(saveKey))
+                    {
+                        GUI.color = Color.green;
+                        if (GUILayout.Button("LOAD & START CUSTOM MAP", GUILayout.Height(60)))
+                        {
+                            StartCustomRound(); // Instantly loads your raw taps!
+                        }
+                    }
+                    else
+                    {
+                        GUI.color = Color.red;
+                        GUILayout.Box("NO MAP FOUND.\nUse Track Editor Scene.", GUILayout.Height(60));
+                    }
+                }
+                else
+                {
+                    GUI.color = Color.gray;
+                    GUILayout.Box("LOADING AUDIO...", GUILayout.Height(60));
+                }
                 GUI.color = Color.white;
             }
             else

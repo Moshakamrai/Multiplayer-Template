@@ -729,6 +729,22 @@ PrefabInstance:
       propertyPath: musicSource
       value: 
       objectReference: {fileID: 499465448}
+    - target: {fileID: 5658552433460229877, guid: 108b1f036cc01d2489d08e339e8c3dc2, type: 3}
+      propertyPath: availableTracks.Array.size
+      value: 3
+      objectReference: {fileID: 0}
+    - target: {fileID: 5658552433460229877, guid: 108b1f036cc01d2489d08e339e8c3dc2, type: 3}
+      propertyPath: availableTracks.Array.data[0]
+      value: 
+      objectReference: {fileID: 8300000, guid: b71b4bcdc3c6eb84ca75483268453e3a, type: 3}
+    - target: {fileID: 5658552433460229877, guid: 108b1f036cc01d2489d08e339e8c3dc2, type: 3}
+      propertyPath: availableTracks.Array.data[1]
+      value: 
+      objectReference: {fileID: 8300000, guid: 6e54e070d51e98a4d8ffe840e50ed7f6, type: 3}
+    - target: {fileID: 5658552433460229877, guid: 108b1f036cc01d2489d08e339e8c3dc2, type: 3}
+      propertyPath: availableTracks.Array.data[2]
+      value: 
+      objectReference: {fileID: 8300000, guid: 39f8a31ad625a8f4ba0e14d52204e4ac, type: 3}
     - target: {fileID: 9075757414588888488, guid: 108b1f036cc01d2489d08e339e8c3dc2, type: 3}
       propertyPath: sceneId
       value: 3456070752

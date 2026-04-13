@@ -283,7 +283,7 @@ AudioSource:
   m_Enabled: 1
   serializedVersion: 4
   OutputAudioMixerGroup: {fileID: 0}
-  m_audioClip: {fileID: 8300000, guid: b71b4bcdc3c6eb84ca75483268453e3a, type: 3}
+  m_audioClip: {fileID: 8300000, guid: 39f8a31ad625a8f4ba0e14d52204e4ac, type: 3}
   m_PlayOnAwake: 1
   m_Volume: 1
   m_Pitch: 1
@@ -382,7 +382,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   audioSource: {fileID: 1241885373}
-  targetBPM: 95
+  targetBPM: 100
   quantizeDivisor: 2
 --- !u!1 &1388852333
 GameObject:

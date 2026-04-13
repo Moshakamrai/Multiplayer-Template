@@ -104,7 +104,12 @@ public class VoskSpeechToText : MonoBehaviour
         if (!VoiceProcessor.IsRecording && _didInit)
         {
             _running = true;
-            VoiceProcessor.StartRecording();
+            
+            // --- FASTER POLLING FIX ---
+            // We force the frameSize to 256 instead of the default 512. 
+            // This makes the microphone feed Vosk twice as often!
+            VoiceProcessor.StartRecording(16000, 256); 
+            
             StartCoroutine(ThreadedWorkCoroutine());
         }
     }
@@ -120,23 +125,17 @@ public class VoskSpeechToText : MonoBehaviour
 
     private void UpdateGrammar()
     {
-        if (KeyPhrases.Count == 0)
-        {
-            _grammar = "";
-            return;
-        }
-
-        JSONArray keywords = new JSONArray();
-        foreach (string keyphrase in KeyPhrases)
-        {
-            keywords.Add(new JSONString(keyphrase.ToLower()));
-        }
-
-        // OPTIMIZATION: Removed [unk] so Vosk ONLY listens for your commands
-        // keywords.Add(new JSONString("[unk]")); 
-
-        _grammar = keywords.ToString();
+        // --- THE MASSIVE SPEED HACK ---
+        // Instead of relying on the Unity Inspector, we hardcode the EXACT 
+        // JSON array of words your VoiceCommandManager uses.
+        // Vosk will instantly stop checking its 100,000 word dictionary.
+        
+        _grammar = "[\"punch\", \"jab\", \"blast\", \"last\", \"fast\", \"cast\", \"hook\", \"block\", \"guard\", \"cage\", \"page\", \"engage\", \"boom\", \"room\", \"doom\", \"left\", \"right\", \"[unk]\"]";
+        
+        Debug.Log("<color=cyan>VOSK SPEED HACK:</color> Grammar strictly locked to combat words.");
     }
+
+    
 
     private IEnumerator Decompress()
     {

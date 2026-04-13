@@ -20,6 +20,9 @@ public class RhythmRoundManager : NetworkBehaviour
     [Header("Animation Sync")]
     public float windUpTime = 0.53f;
 
+    [Header("Custom Tracks")]
+    public AudioClip[] availableTracks; // Drag all your MP3s/WAVs here in the Inspector!
+
     public bool IsWindUpActive { get { return _isWindUpFired; } }
     private bool _isWindUpFired = false;
 
@@ -754,42 +757,59 @@ public class RhythmRoundManager : NetworkBehaviour
 
     void OnRoundStateChanged(bool oldVal, bool newVal) { if (BeatAnalyzer.Instance != null && BeatAnalyzer.Instance.audioSource != null && currentType != RoundType.CustomTrack) { if (newVal) BeatAnalyzer.Instance.audioSource.Play(); else BeatAnalyzer.Instance.audioSource.Stop(); } }
 
-    private void OnGUI()
+   private void OnGUI()
     {
         // --- 1. SERVER CONTROLS (Top Left) ---
         if (NetworkServer.active && isServer)
         {
-            GUILayout.BeginArea(new Rect(10, 10, 220, 300));
+            // Increased the height to 500 to fit multiple track buttons
+            GUILayout.BeginArea(new Rect(10, 10, 220, 500));
             if (!isRoundActive)
             {
                 GUI.color = Color.cyan; if (GUILayout.Button("START SLOW ROUND", GUILayout.Height(40))) StartSlowRound();
                 GUI.color = Color.magenta; if (GUILayout.Button("START FAST ROUND", GUILayout.Height(40))) StartFastRound();
                 GUILayout.Space(10);
 
-                // --- NEW: DIRECT CUSTOM MAP LOADER ---
-                // Safely check if the audio clip exists before trying to read its name
-                if (BeatAnalyzer.Instance != null && BeatAnalyzer.Instance.audioSource != null && BeatAnalyzer.Instance.audioSource.clip != null)
+                // --- NEW: DYNAMIC CUSTOM MAP LOADER ---
+                if (availableTracks != null && availableTracks.Length > 0)
                 {
-                    string saveKey = "CustomMap_" + BeatAnalyzer.Instance.audioSource.clip.name;
-
-                    if (PlayerPrefs.HasKey(saveKey))
+                    GUILayout.Label("<b>--- CUSTOM MAPS ---</b>", new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, richText = true });
+                    
+                    bool mapFound = false;
+                    foreach (AudioClip track in availableTracks)
                     {
-                        GUI.color = Color.green;
-                        if (GUILayout.Button("LOAD & START CUSTOM MAP", GUILayout.Height(60)))
+                        if (track == null) continue;
+                        
+                        string saveKey = "CustomMap_" + track.name;
+                        
+                        // If a map exists for this specific song, draw a button for it!
+                        if (PlayerPrefs.HasKey(saveKey))
                         {
-                            StartCustomRound(); // Instantly loads your raw taps!
+                            mapFound = true;
+                            GUI.color = Color.green; 
+                            if (GUILayout.Button($"PLAY: {track.name}", GUILayout.Height(45))) 
+                            {
+                                // Swap the audio source to the chosen track BEFORE starting
+                                if (BeatAnalyzer.Instance != null && BeatAnalyzer.Instance.audioSource != null)
+                                {
+                                    BeatAnalyzer.Instance.audioSource.clip = track;
+                                    StartCustomRound(); 
+                                }
+                            }
+                            GUILayout.Space(5); // Little gap between buttons
                         }
                     }
-                    else
+
+                    if (!mapFound)
                     {
-                        GUI.color = Color.red;
-                        GUILayout.Box("NO MAP FOUND.\nUse Track Editor Scene.", GUILayout.Height(60));
+                        GUI.color = Color.red; 
+                        GUILayout.Box("NO MAPS FOUND.\nMap tracks in Editor.", GUILayout.Height(60));
                     }
                 }
                 else
                 {
-                    GUI.color = Color.gray;
-                    GUILayout.Box("LOADING AUDIO...", GUILayout.Height(60));
+                    GUI.color = Color.gray; 
+                    GUILayout.Box("ADD TRACKS TO\nINSPECTOR ARRAY", GUILayout.Height(60));
                 }
                 GUI.color = Color.white;
             }
@@ -892,7 +912,6 @@ public class RhythmRoundManager : NetworkBehaviour
         }
         DrawRhythmHighway();
     }
-
     private Texture2D _whiteTexture;
 
     private void DrawRhythmHighway()

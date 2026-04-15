@@ -499,14 +499,21 @@ public class PlayerCombat : NetworkBehaviour
         if (dir == Vector3.right || dir == new Vector3(1, 0, 0)) return "Right"; return dir.ToString();
     }
 
-    // Add this inside the PlayerCombat class
     [TargetRpc]
     public void TargetPlaySuccessSound(string type)
     {
-        // This looks for SoundManagerMain specifically since that is your new class name
         if (SoundManagerMain.Instance != null)
-        {
             SoundManagerMain.Instance.PlaySuccessSFX(type);
-        }
+    }
+
+    /// <summary>
+    /// Plays a particle from the pool at this player's position on all clients.
+    /// Pool names to set up in ParticlePoolManager: "Hit", "Block", "Parry", "Dodge"
+    /// </summary>
+    [ClientRpc]
+    public void RpcPlayCombatParticle(string effectType)
+    {
+        if (ParticlePoolManager.Instance != null)
+            ParticlePoolManager.Instance.PlayParticle(effectType, transform.position);
     }
 }

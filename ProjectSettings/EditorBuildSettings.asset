@@ -14,5 +14,8 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/Level.unity
     guid: c2cbbacc855a2eb4cac1e8b7b51b37e6
+  - enabled: 1
+    path: Assets/Scenes/TrackEditor.unity
+    guid: a6393e28ffb64284a8860bf5de370228
   m_configObjects:
     com.unity.input.settings: {fileID: 11400000, guid: ac2e9bec2e581d54eb5002277b387897, type: 2}

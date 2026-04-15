@@ -466,6 +466,7 @@ public class RhythmRoundManager : NetworkBehaviour
         if (defender.IsParryActive)
         {
             if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Parry");
+            defender.RpcPlayCombatParticle("Parry");
 
             bool isUnbreakable = (move.attack == "UnbreakablePunch");
             int baseRef = isUnbreakable ? 15 : ((move.attack == "Hook") ? 25 : 10);
@@ -485,10 +486,8 @@ public class RhythmRoundManager : NetworkBehaviour
             if (dSpike > 0 && (GetNextBeatTime() - dSpike) <= 0.3f)
             {
                 moveSuccessful = true;
-                if (defender.connectionToClient != null)
-                {
-                    defender.TargetPlaySuccessSound("Dash"); 
-                }
+                if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Dash");
+                defender.RpcPlayCombatParticle("Dodge");
             }
         }
 
@@ -507,11 +506,12 @@ public class RhythmRoundManager : NetworkBehaviour
                     // Hook wraps around the guard! Block fails entirely.
                     blockMitigation = 0.0f; 
                 }
-                else 
+                else
                 {
                     // 100% Mitigation against Jab, Cross, etc.
-                    blockMitigation = 1.0f; 
-                    if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Block"); 
+                    blockMitigation = 1.0f;
+                    if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Block");
+                    defender.RpcPlayCombatParticle("Block");
                 }
             }
         }
@@ -550,8 +550,9 @@ public class RhythmRoundManager : NetworkBehaviour
                 // 1. Attacker gets the "Hit" sound
                 if (attacker.connectionToClient != null) attacker.TargetPlaySuccessSound("Attack");
 
-                // 2. Defender gets the "Hurt" sound
+                // 2. Defender gets the "Hurt" sound + hit particle
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Hurt");
+                defender.RpcPlayCombatParticle("Hit");
 
                 defender.TakeDamage(damageDealt);
                 return 1;

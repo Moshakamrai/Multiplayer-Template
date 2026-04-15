@@ -18,6 +18,8 @@ public class SteamLobby : MonoBehaviour
     void Start()
     {
         networkManager = GetComponent<NetworkManager>();
+        if (networkManager == null)
+            networkManager = NetworkManager.singleton;
 
         // DEBUG LOGS
         if (SteamManager.Initialized) 
@@ -39,15 +41,25 @@ public class SteamLobby : MonoBehaviour
     // 1. HOST: Call this when you click "Host Game" button
     public void HostSteamLobby()
     {
+        if (networkManager == null)
+            networkManager = NetworkManager.singleton;
+
+        if (networkManager == null)
+        {
+            Debug.LogError("[SteamLobby] NetworkManager not found. Cannot host.");
+            return;
+        }
+
         SteamMatchmaking.CreateLobby(ELobbyType.k_ELobbyTypeFriendsOnly, networkManager.maxConnections);
     }
 
     private void OnLobbyCreated(LobbyCreated_t callback)
     {
         if (callback.m_eResult != EResult.k_EResultOK)
-        {
             return;
-        }
+
+        if (networkManager == null)
+            networkManager = NetworkManager.singleton;
 
         networkManager.StartHost();
 
@@ -64,6 +76,9 @@ public class SteamLobby : MonoBehaviour
     private void OnLobbyEntered(LobbyEnter_t callback)
     {
         if (NetworkServer.active) { return; } // If I am host, don't join myself
+
+        if (networkManager == null)
+            networkManager = NetworkManager.singleton;
 
         // Get the host's Steam ID from the lobby data
         string hostAddress = SteamMatchmaking.GetLobbyData(new CSteamID(callback.m_ulSteamIDLobby), HostAddressKey);

@@ -383,7 +383,11 @@ public class RhythmRoundManager : NetworkBehaviour
     [ClientRpc]
     private void RpcForceMusicLoop()
     {
-        // Forces all clients to snap their music back to 0:00 perfectly synced with the map
+        // Server (host) already restarted audio directly in RefillImpactsForLoop.
+        // Only remote clients need to restart via this RPC; firing it on the host
+        // would reset audioSource.time a second time, shifting the beat timeline.
+        if (isServer) return;
+
         if (BeatAnalyzer.Instance != null && BeatAnalyzer.Instance.audioSource != null)
         {
             BeatAnalyzer.Instance.audioSource.Stop();
@@ -703,7 +707,9 @@ public class RhythmRoundManager : NetworkBehaviour
                 pc.ConsumeNextMove();
 
                 // 2. HARD RESET: Clear all flags so lag cannot roll into the next beat
-                pc.lastVocalSpikeTime = -1f;
+                // In chain mode, preserve the spike so hits 2-4 still grade correctly
+                if (!customIsCombo)
+                    pc.lastVocalSpikeTime = -1f;
                 pc.IsParryActive = false;
 
                 // 3. REFILL HANDS: Draw cards until the hand is full (4 cards)
@@ -729,34 +735,49 @@ public class RhythmRoundManager : NetworkBehaviour
     {
         // Don't grade them if they didn't do anything
         if (string.IsNullOrEmpty(move.attack) && move.dash == Vector3.zero) return;
-        
+
         // Bots don't need UI feedback, so we skip if there is no client connection
         if (pc.connectionToClient == null) return;
 
-        if (pc.lastVocalSpikeTime <= 0) 
+        float targetBeat = GetNextBeatTime();
+
+        // --- CHAIN MODE: one shout covers the whole cluster ---
+        // Hits 2-4 will have a growing offset from the beat, but the spike is still valid.
+        // Give GOOD for any existing spike; BAD only if there is no spike at all.
+        if (customIsCombo)
+        {
+            if (pc.lastVocalSpikeTime <= 0)
+            {
+                Debug.Log($"<color=orange>[TIMING]</color> {pc.name} - CHAIN | No Vocal Spike -> BAD");
+                pc.TargetShowTimingFeedback("BAD");
+                return;
+            }
+            float chainOffset = Mathf.Abs(targetBeat - pc.lastVocalSpikeTime);
+            string chainRating = (chainOffset <= 0.1f) ? "EXCELLENT" : "GOOD";
+            Debug.Log($"<color=cyan>[TIMING EVAL]</color> {pc.name} | CHAIN Beat: {targetBeat:F3}s | Spike: {pc.lastVocalSpikeTime:F3}s | Offset: {chainOffset:F3}s => <color=yellow>{chainRating}</color>");
+            pc.TargetShowTimingFeedback(chainRating);
+            return;
+        }
+
+        // --- SINGLE MODE: original narrow-window logic ---
+        if (pc.lastVocalSpikeTime <= 0)
         {
             Debug.Log($"<color=orange>[TIMING]</color> {pc.name} - Move: {(string.IsNullOrEmpty(move.attack) ? "DODGE" : move.attack)} | No Vocal Spike Detected -> BAD");
             pc.TargetShowTimingFeedback("BAD");
             return;
         }
 
-        // Because we fixed the Update loop, this now grabs the CORRECT current beat!
-        float targetBeat = GetNextBeatTime();
         float offset = Mathf.Abs(targetBeat - pc.lastVocalSpikeTime);
 
-        // Fetch the specific window for the move
         float window = 0.3f;
         if (move.attack == "Block") window = 0.4f;
         else if (move.attack == "UnbreakablePunch") window = 0.2f;
 
-        // Grade the timing
         string rating = "BAD";
         if (offset <= 0.1f) rating = "EXCELLENT";
         else if (offset <= window) rating = "GOOD";
 
-        // --- NEW: THE DEBUG LOGGER ---
         Debug.Log($"<color=cyan>[TIMING EVAL]</color> {pc.name} | Beat: {targetBeat:F3}s | Voice Spike: {pc.lastVocalSpikeTime:F3}s | Offset: {offset:F3}s | Window: {window}s => <color=yellow>{rating}</color>");
-
         pc.TargetShowTimingFeedback(rating);
     }
 
@@ -774,6 +795,17 @@ public class RhythmRoundManager : NetworkBehaviour
             GUILayout.BeginArea(new Rect(10, 10, 220, 500));
             if (!isRoundActive)
             {
+                GUIStyle instrStyle = new GUIStyle(GUI.skin.label)
+                {
+                    fontSize = 13,
+                    fontStyle = FontStyle.Italic,
+                    wordWrap = true,
+                    alignment = TextAnchor.MiddleCenter
+                };
+                instrStyle.normal.textColor = new Color(0.8f, 0.8f, 0.8f, 1f);
+                GUILayout.Label("Select a track or mode\nbelow to start the fight", instrStyle, GUILayout.Height(36));
+                GUILayout.Space(4);
+
                 GUI.color = Color.cyan; if (GUILayout.Button("START SLOW ROUND", GUILayout.Height(40))) StartSlowRound();
                 GUI.color = Color.magenta; if (GUILayout.Button("START FAST ROUND", GUILayout.Height(40))) StartFastRound();
                 GUILayout.Space(10);
@@ -947,6 +979,16 @@ public class RhythmRoundManager : NetworkBehaviour
 
     private void DrawBackButton()
     {
+        // Cursor hint — always visible in-game
+        GUIStyle hintStyle = new GUIStyle(GUI.skin.label)
+        {
+            fontSize = 14,
+            fontStyle = FontStyle.Italic,
+            alignment = TextAnchor.MiddleLeft
+        };
+        hintStyle.normal.textColor = new Color(0.75f, 0.75f, 0.75f, 1f);
+        GUI.Label(new Rect(20f, Screen.height - 80f, 260f, 22f), "Hold [Tab] to free cursor", hintStyle);
+
         if (isRoundActive) return;
 
         if (GUI.Button(new Rect(20f, Screen.height - 55f, 160f, 40f), "← BACK TO MENU"))
@@ -1075,7 +1117,7 @@ public class RhythmRoundManager : NetworkBehaviour
             yield break;
         }
 
-        string url = "file:///" + filePath.Replace("\\", "/");
+        string url = new System.Uri(filePath).AbsoluteUri;
         using UnityWebRequest req = UnityWebRequestMultimedia.GetAudioClip(url, audioType);
         yield return req.SendWebRequest();
 

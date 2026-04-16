@@ -526,7 +526,7 @@ PrefabInstance:
     - target: {fileID: 631507460551479432, guid: 3e17a6aeb95098945bd530e6a6eaccfd, type: 3}
       propertyPath: backgroundImage
       value: 
-      objectReference: {fileID: 2800000, guid: 5fd2e76df054ca8419595ab3a9b724a2, type: 3}
+      objectReference: {fileID: 2800000, guid: aae4cd03ddf78754da9a70ac20699079, type: 3}
     - target: {fileID: 631507460551479432, guid: 3e17a6aeb95098945bd530e6a6eaccfd, type: 3}
       propertyPath: offlineTransport
       value: 

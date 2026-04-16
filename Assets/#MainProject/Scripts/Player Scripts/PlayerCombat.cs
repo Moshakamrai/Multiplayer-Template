@@ -90,47 +90,72 @@ public class PlayerCombat : NetworkBehaviour
 
     private void CheckLocalParryTiming()
     {
-        // 1. Logic Gate: Only process if a move is actually queued
-        string currentMove = _pendingAttackTrigger;
-        bool isDashing = (_pendingDashDirection != Vector3.zero);
-        if (string.IsNullOrEmpty(currentMove) && !isDashing) return;
-
         if (vp == null || _vcm == null || RhythmRoundManager.Instance == null) return;
 
+        bool isChainMode = !RhythmRoundManager.Instance.IsSingleMoveMode();
+
+        // --- 1. Logic Gate ---
+        // Single mode: needs a pending attack/dash queued.
+        // Chain mode:  needs at least one move in the combo buffer.
+        string currentMove;
+        bool   isDashing;
+
+        if (isChainMode)
+        {
+            if (_comboBuffer.Count == 0) return;
+            // Use the most-recently queued chain move for window sizing
+            var latest = _comboBuffer[_comboBuffer.Count - 1];
+            currentMove = latest.attack;
+            isDashing   = (latest.dash != Vector3.zero);
+        }
+        else
+        {
+            currentMove = _pendingAttackTrigger;
+            isDashing   = (_pendingDashDirection != Vector3.zero);
+            if (string.IsNullOrEmpty(currentMove) && !isDashing) return;
+        }
+
         float currentVol = vp.CurrentRawVolume;
-        float threshold = _vcm.parryVolumeThreshold;
+        float threshold  = _vcm.parryVolumeThreshold;
+        bool  vocalSpike = currentVol >= threshold;
 
-        float nextBeat = RhythmRoundManager.Instance.GetNextBeatTime();
-        float currentTime = RhythmRoundManager.Instance.GetCurrentTrackTime();
-        float timeUntilImpact = nextBeat - currentTime;
+        float currentTime      = RhythmRoundManager.Instance.GetCurrentTrackTime();
+        float nextBeat         = RhythmRoundManager.Instance.GetNextBeatTime();
+        float timeUntilImpact  = nextBeat - currentTime;
 
-        bool vocalSpike = currentVol >= threshold;
+        // --- 2. Chain Mode: register spike on every shout while buffer is filling ---
+        // No tight window check — the player shouts all moves before the beat cluster
+        // fires, so any loud-enough shout updates the spike timestamp. The last shout
+        // (closest to the beat) ends up as the timing reference.
+        if (isChainMode)
+        {
+            if (vocalSpike)
+            {
+                CmdRegisterVocalSpike(currentTime);
+                Debug.Log($"<color=cyan>CHAIN SPIKE:</color> registered at {currentTime:F3}s ({timeUntilImpact:F3}s until beat)");
+            }
+            return;
+        }
 
-        // 2. Window Mapping
+        // --- 3. Single Mode: narrow window check (original logic) ---
         float window = 0.3f;
-        if (currentMove == "ParryIntent") window = 0.3f;
+        if (currentMove == "ParryIntent")       window = 0.3f;
         else if (currentMove == "UnbreakablePunch") window = 0.2f;
-        else if (currentMove == "Block") window = 0.4f;
-        else if (isDashing) window = 0.3f;
+        else if (currentMove == "Block")        window = 0.4f;
+        else if (isDashing)                     window = 0.3f;
 
         bool isInsideWindow = timeUntilImpact > 0 && timeUntilImpact <= window;
 
-        // 3. Local Confirmation for Parry
         if (vocalSpike && isInsideWindow)
         {
-            // If it's a Parry, we tell the server "This is verified" immediately
             if (currentMove == "ParryIntent")
             {
-                // We send the currentTime so the server knows exactly when it happened
                 CmdConfirmEliteParry(currentTime);
                 Debug.Log($"<color=green>VOCAL SUCCESS:</color> Parry (CAGE) verified locally at {timeUntilImpact:F3}s.");
-
-                // Change intent to 'Locked' so we don't spam the server
                 _pendingAttackTrigger = "ParryLocked";
             }
             else
             {
-                // For regular attacks (like BOOM), just sync the spike time for damage calculation
                 CmdRegisterVocalSpike(currentTime);
                 Debug.Log($"<color=green>VOCAL SUCCESS:</color> {currentMove} spike registered.");
             }

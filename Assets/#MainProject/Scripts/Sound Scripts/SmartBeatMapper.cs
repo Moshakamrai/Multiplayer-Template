@@ -13,7 +13,7 @@ public class SmartBeatMapper : MonoBehaviour
     [Header("Quantize Settings")]
     public float targetBPM = 100f;
 
-    [Tooltip("1 = Full Beats, 2 = Half Beats (0.3s), 4 = 16th Notes")]
+    [Tooltip("1 = Full Beats, 2 = Half Beats, 4 = 16th Notes")]
     public int quantizeDivisor = 2;
 
     private List<float> _rawTaps        = new List<float>();
@@ -32,14 +32,14 @@ public class SmartBeatMapper : MonoBehaviour
     private bool   _loadStatusIsError = false;
     private string _pendingFilePath   = null;
 
-    // ── BPM input ─────────────────────────────────────────────────────────
+    // ── BPM ───────────────────────────────────────────────────────────────
     private string _bpmInput     = "";
     private string _bpmStatus    = "";
     private bool   _detectingBPM = false;
 
     // ── Live tap feedback ─────────────────────────────────────────────────
     private float _lastTapTime   = -1f;
-    private float _lastTapOffset = 0f;   // offset vs BPM grid, shown while recording
+    private float _lastTapOffset = 0f;
 
     // ── Post-stop feedback ────────────────────────────────────────────────
     private float _lastRawTime     = -1f;
@@ -90,15 +90,12 @@ public class SmartBeatMapper : MonoBehaviour
             if (!_quantizedBeats.Contains(snapped))
                 _quantizedBeats.Add(snapped);
 
-            // Track the last tap for the post-stop display
             _lastRawTime     = raw;
             _lastSnappedTime = snapped;
         }
 
         _quantizedBeats.Sort();
-
-        Debug.Log($"<color=cyan>QUANTIZED:</color> {_rawTaps.Count} taps → {_quantizedBeats.Count} beats  " +
-                  $"(grid: {snapGrid * 1000f:F0} ms)");
+        Debug.Log($"<color=cyan>QUANTIZED:</color> {_rawTaps.Count} taps → {_quantizedBeats.Count} beats  (grid: {snapGrid * 1000f:F0} ms)");
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -115,6 +112,7 @@ public class SmartBeatMapper : MonoBehaviour
         DrawVisualizer();
         DrawInfoPanel();
         DrawControlPanel();
+        DrawHowToPanel();
         DrawLoadPanel();
         DrawBackButton();
     }
@@ -122,17 +120,17 @@ public class SmartBeatMapper : MonoBehaviour
     // ── Control panel (center-top) ────────────────────────────────────────
     private void DrawControlPanel()
     {
-        float pw = 420f, py = 20f;
+        float pw = 440f, py = 20f;
         float px = Screen.width / 2f - pw / 2f;
 
-        GUI.Label(new Rect(px, py,      pw, 30f), "BEAT MAPPER",
-            Style(22, FontStyle.Bold, Color.yellow, TextAnchor.MiddleCenter));
-        GUI.Label(new Rect(px, py + 30, pw, 22f),
-            $"BPM: {targetBPM}  |  Grid: 1/{quantizeDivisor}  ({(60f / targetBPM / quantizeDivisor) * 1000f:F0} ms/snap)",
-            Style(11, FontStyle.Normal, new Color(0.85f, 0.85f, 0.85f), TextAnchor.MiddleCenter));
+        GUI.Label(new Rect(px, py, pw, 36f), "BEAT MAPPER",
+            Style(26, FontStyle.Bold, Color.yellow, TextAnchor.MiddleCenter));
+        GUI.Label(new Rect(px, py + 36f, pw, 24f),
+            $"BPM: {targetBPM:F1}  |  Grid: 1/{quantizeDivisor}  ({(60f / targetBPM / quantizeDivisor) * 1000f:F0} ms/snap)",
+            Style(13, FontStyle.Normal, new Color(0.85f, 0.85f, 0.85f), TextAnchor.MiddleCenter));
 
         GUI.color = _isRecording ? new Color(1f, 0.3f, 0.3f) : Color.white;
-        if (GUI.Button(new Rect(px, py + 60, pw, 50f), _isRecording ? "■  STOP RECORDING" : "●  START TAP RECORD"))
+        if (GUI.Button(new Rect(px, py + 68f, pw, 54f), _isRecording ? "■  STOP RECORDING" : "●  START TAP RECORD"))
         {
             _isRecording = !_isRecording;
             if (_isRecording)
@@ -155,33 +153,71 @@ public class SmartBeatMapper : MonoBehaviour
         if (!_isRecording && _quantizedBeats.Count > 0)
         {
             GUI.color = Color.green;
-            if (GUI.Button(new Rect(px, py + 120, pw, 40f), $"SAVE  {_quantizedBeats.Count}  BEATS"))
+            if (GUI.Button(new Rect(px, py + 130f, pw, 44f), $"SAVE  {_quantizedBeats.Count}  BEATS"))
                 SaveCustomTrack();
             GUI.color = Color.white;
         }
 
-        GUI.Label(new Rect(px, py + 170, pw, 20f),
-            "SPACEBAR = tap to the beat",
-            Style(11, FontStyle.Normal, new Color(0.5f, 0.5f, 0.5f), TextAnchor.MiddleCenter));
+        GUI.Label(new Rect(px, py + 182f, pw, 22f),
+            "SPACEBAR = tap a beat  •  set BPM first  •  save when done",
+            Style(12, FontStyle.Normal, new Color(0.5f, 0.5f, 0.5f), TextAnchor.MiddleCenter));
+    }
+
+    // ── How-to guide (center, below control buttons) ─────────────────────
+    private void DrawHowToPanel()
+    {
+        float pw = 440f;
+        float px = Screen.width / 2f - pw / 2f;
+        float py = 215f;
+        float lh = 24f;
+        float y  = py;
+
+        GUIStyle header = Style(15, FontStyle.Bold,   new Color(0.35f, 1f, 0.75f), TextAnchor.MiddleLeft);
+        GUIStyle step   = Style(14, FontStyle.Bold,   Color.yellow,                TextAnchor.MiddleLeft);
+        GUIStyle desc   = Style(13, FontStyle.Normal, Color.white,                 TextAnchor.MiddleLeft);
+        GUIStyle tip    = Style(12, FontStyle.Italic, new Color(0.6f, 0.6f, 0.6f), TextAnchor.MiddleLeft);
+
+        GUI.Label(new Rect(px, y, pw, lh), "[ HOW TO MAP A SONG ]", header); y += lh + 4f;
+
+        GUI.Label(new Rect(px, y, pw, lh), "1.  LOAD YOUR SONG", step); y += lh;
+        GUI.Label(new Rect(px + 18f, y, pw, lh), "Click BROWSE or paste a file path, then hit LOAD.", desc); y += lh + 5f;
+
+        GUI.Label(new Rect(px, y, pw, lh), "2.  SET THE BPM  (right panel)", step); y += lh;
+        GUI.Label(new Rect(px + 18f, y, pw, lh), "Hit AUTO-DETECT for an estimate, then fine-tune with", desc); y += lh;
+        GUI.Label(new Rect(px + 18f, y, pw, lh), "the  − / +  buttons until the grid feels right.", desc); y += lh + 5f;
+
+        GUI.Label(new Rect(px, y, pw, lh), "3.  RECORD YOUR TAPS", step); y += lh;
+        GUI.Label(new Rect(px + 18f, y, pw, lh), "Press START TAP RECORD — music plays from 0:00.", desc); y += lh;
+        GUI.Label(new Rect(px + 18f, y, pw, lh), "Hit SPACEBAR on every beat or impact you want in the fight.", desc); y += lh + 5f;
+
+        GUI.Label(new Rect(px, y, pw, lh), "4.  STOP & REVIEW", step); y += lh;
+        GUI.Label(new Rect(px + 18f, y, pw, lh), "Press STOP — taps snap to your BPM grid automatically.", desc); y += lh;
+        GUI.Label(new Rect(px + 18f, y, pw, lh), "Check beat count on the left. Wrong? Tweak BPM and redo.", desc); y += lh + 5f;
+
+        GUI.Label(new Rect(px, y, pw, lh), "5.  SAVE", step); y += lh;
+        GUI.Label(new Rect(px + 18f, y, pw, lh), "Hit SAVE BEATS — your map appears as a green PLAY button", desc); y += lh;
+        GUI.Label(new Rect(px + 18f, y, pw, lh), "in the game lobby immediately.", desc); y += lh + 8f;
+
+        GUI.Label(new Rect(px, y, pw, lh), "Tip: recording again any time overwrites the old map.", tip);
     }
 
     // ── Info panel (left side) ────────────────────────────────────────────
     private void DrawInfoPanel()
     {
-        float x = 20f, y = 20f, w = 280f, lh = 21f;
+        float x = 20f, y = 20f, w = 300f, lh = 24f;
 
-        GUIStyle sec = Style(12, FontStyle.Bold,  new Color(0.35f, 1f, 0.75f));
-        GUIStyle val = Style(12, FontStyle.Normal, Color.white);
-        GUIStyle dim = Style(11, FontStyle.Normal, new Color(0.55f, 0.55f, 0.55f));
+        GUIStyle sec = Style(15, FontStyle.Bold,   new Color(0.35f, 1f, 0.75f));
+        GUIStyle val = Style(14, FontStyle.Normal,  Color.white);
+        GUIStyle dim = Style(13, FontStyle.Normal,  new Color(0.55f, 0.55f, 0.55f));
 
         // ── Audio ──
         GUI.Label(new Rect(x, y, w, lh), "[ AUDIO ]", sec); y += lh;
         float clipLen = audioSource.clip.length;
         float cur     = audioSource.time;
-        GUI.Label(new Rect(x, y, w, lh), $"Time :      {cur:F3} s  /  {clipLen:F3} s", val); y += lh;
-        DrawBar(new Rect(x, y, w - 10f, 7f), cur / clipLen, new Color(0.2f, 0.85f, 0.4f), new Color(0.1f, 0.18f, 0.12f));
-        y += 13f;
-        GUI.Label(new Rect(x, y, w, lh), $"Remaining : {(clipLen - cur):F3} s", dim); y += lh + 8f;
+        GUI.Label(new Rect(x, y, w, lh), $"Time :      {cur:F2} s  /  {clipLen:F2} s", val); y += lh;
+        DrawBar(new Rect(x, y, w - 10f, 8f), cur / clipLen, new Color(0.2f, 0.85f, 0.4f), new Color(0.1f, 0.18f, 0.12f));
+        y += 14f;
+        GUI.Label(new Rect(x, y, w, lh), $"Remaining : {(clipLen - cur):F2} s", dim); y += lh + 10f;
 
         // ── Taps ──
         GUI.Label(new Rect(x, y, w, lh), "[ TAPS ]", sec); y += lh;
@@ -192,14 +228,14 @@ public class SmartBeatMapper : MonoBehaviour
             GUI.Label(new Rect(x, y, w, lh), $"Dupes dropped :   {_rawTaps.Count - _quantizedBeats.Count}", dim);
             y += lh;
         }
-        y += 8f;
+        y += 10f;
 
         // ── Grid ──
         GUI.Label(new Rect(x, y, w, lh), "[ GRID ]", sec); y += lh;
         float beatInt  = 60f / targetBPM;
         float snapGrid = beatInt / quantizeDivisor;
         GUI.Label(new Rect(x, y, w, lh), $"Beat interval : {beatInt * 1000f:F1} ms", val);  y += lh;
-        GUI.Label(new Rect(x, y, w, lh), $"Snap grid :     {snapGrid * 1000f:F1} ms  (1/{quantizeDivisor})", val); y += lh + 8f;
+        GUI.Label(new Rect(x, y, w, lh), $"Snap grid :     {snapGrid * 1000f:F1} ms  (1/{quantizeDivisor})", val); y += lh + 10f;
 
         // ── Last tap ──
         if (_isRecording)
@@ -212,7 +248,7 @@ public class SmartBeatMapper : MonoBehaviour
                 string grade = Mathf.Abs(ms) < 20f ? "EXCELLENT" : Mathf.Abs(ms) < 50f ? "GOOD" : "BAD";
                 Color  gc    = Mathf.Abs(ms) < 20f ? Color.green : Mathf.Abs(ms) < 50f ? Color.yellow : Color.red;
                 GUI.color = gc;
-                GUI.Label(new Rect(x, y, w, lh), $"Grid offset : {ms:+0.0;-0.0} ms  [ {grade} ]", val);
+                GUI.Label(new Rect(x, y, w, lh), $"Offset : {ms:+0.0;-0.0} ms  [ {grade} ]", val);
                 GUI.color = Color.white;
             }
             else
@@ -255,21 +291,17 @@ public class SmartBeatMapper : MonoBehaviour
         }
         GUI.color = Color.white;
 
-        GUI.Label(new Rect(startX, startY - 20f, vizW, 18f),
+        GUI.Label(new Rect(startX, startY - 22f, vizW, 20f),
             flash ? "■  TAP" : "AUDIO SPECTRUM",
-            Style(10, FontStyle.Bold, flash ? Color.red : new Color(0.3f, 1f, 0.4f), TextAnchor.MiddleCenter));
+            Style(12, FontStyle.Bold, flash ? Color.red : new Color(0.3f, 1f, 0.4f), TextAnchor.MiddleCenter));
     }
 
     // ── Back button (bottom-left) ─────────────────────────────────────────
     private void DrawBackButton()
     {
-        if (GUI.Button(new Rect(20f, Screen.height - 55f, 160f, 40f), "← BACK TO MENU"))
+        if (GUI.Button(new Rect(20f, Screen.height - 55f, 170f, 42f), "← BACK TO MENU"))
         {
-            if (_isRecording)
-            {
-                audioSource.Stop();
-                _isRecording = false;
-            }
+            if (_isRecording) { audioSource.Stop(); _isRecording = false; }
             SceneManager.LoadScene("Menu");
         }
     }
@@ -291,69 +323,113 @@ public class SmartBeatMapper : MonoBehaviour
         return s;
     }
 
+    private static GUIStyle BtnStyle(int size)
+    {
+        var s = new GUIStyle(GUI.skin.button) { fontSize = size, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+        return s;
+    }
+
     // ── Load panel (right side) ───────────────────────────────────────────
     private void DrawLoadPanel()
     {
-        float pw = 340f;
+        float pw = 360f;
         float px = Screen.width - pw - 20f;
         float py = 20f;
-        float lh = 22f;
+        float lh = 24f;
         float y  = py;
 
-        GUI.Label(new Rect(px, y, pw, lh), "[ LOAD AUDIO ]",
-            Style(12, FontStyle.Bold, new Color(0.35f, 1f, 0.75f)));
-        y += lh;
+        GUIStyle secStyle  = Style(15, FontStyle.Bold,   new Color(0.35f, 1f, 0.75f));
+        GUIStyle valStyle  = Style(13, FontStyle.Normal,  Color.white);
+        GUIStyle dimStyle  = Style(12, FontStyle.Italic,  new Color(0.55f, 0.55f, 0.55f));
 
-        string clipName = (audioSource != null && audioSource.clip != null)
-            ? audioSource.clip.name : "none";
-        GUI.Label(new Rect(px, y, pw, lh), $"Loaded: {clipName}",
-            Style(11, FontStyle.Normal, Color.white));
-        y += lh + 4f;
+        // ── Load Audio ────────────────────────────────────────────────────
+        GUI.Label(new Rect(px, y, pw, lh), "[ LOAD AUDIO ]", secStyle); y += lh;
 
-        GUI.Label(new Rect(px, y, pw, lh), "File path:",
-            Style(11, FontStyle.Normal, new Color(0.7f, 0.7f, 0.7f)));
-        y += lh;
-        _filePath = GUI.TextField(new Rect(px, y, pw, 24f), _filePath,
-            Style(10, FontStyle.Normal, Color.white));
-        y += 28f;
+        string clipName = audioSource?.clip != null ? audioSource.clip.name : "none";
+        GUI.Label(new Rect(px, y, pw, lh), $"Loaded: {clipName}", valStyle); y += lh + 4f;
 
-        if (GUI.Button(new Rect(px, y, pw / 2f - 4f, 30f), "BROWSE..."))
+        GUI.Label(new Rect(px, y, pw, lh - 4f), "File path:", Style(12, FontStyle.Normal, new Color(0.7f, 0.7f, 0.7f)));
+        y += lh - 2f;
+        _filePath = GUI.TextField(new Rect(px, y, pw, 26f), _filePath, Style(11, FontStyle.Normal, Color.white));
+        y += 30f;
+
+        if (GUI.Button(new Rect(px, y, pw / 2f - 4f, 32f), "BROWSE...", BtnStyle(13)))
             OpenFileDialog();
 
         GUI.color = new Color(0.3f, 0.8f, 1f);
-        if (GUI.Button(new Rect(px + pw / 2f + 4f, y, pw / 2f - 4f, 30f), "LOAD"))
-        {
+        if (GUI.Button(new Rect(px + pw / 2f + 4f, y, pw / 2f - 4f, 32f), "LOAD", BtnStyle(13)))
             if (!string.IsNullOrWhiteSpace(_filePath))
                 StartCoroutine(LoadAudioCoroutine(_filePath.Trim()));
-        }
         GUI.color = Color.white;
-        y += 36f;
+        y += 38f;
 
         if (!string.IsNullOrEmpty(_loadStatus))
         {
             GUI.color = _loadStatusIsError ? Color.red : Color.green;
             GUI.Label(new Rect(px, y, pw, lh), _loadStatus,
-                Style(11, FontStyle.Normal, _loadStatusIsError ? Color.red : Color.green));
+                Style(13, FontStyle.Normal, _loadStatusIsError ? Color.red : Color.green));
             GUI.color = Color.white;
+            y += lh + 4f;
         }
-        y += lh + 8f;
+        else { y += 4f; }
 
-        // ── BPM section ───────────────────────────────────────────────────
-        GUI.Label(new Rect(px, y, pw, lh), "[ BPM ]",
-            Style(12, FontStyle.Bold, new Color(0.35f, 1f, 0.75f)));
+        // ── BPM Section ───────────────────────────────────────────────────
+        GUI.Label(new Rect(px, y, pw, lh), "[ BPM ]", secStyle); y += lh + 4f;
+
+        // Large BPM display
+        GUIStyle bpmDisplay = new GUIStyle(GUI.skin.box)
+        {
+            fontSize = 32,
+            fontStyle = FontStyle.Bold,
+            alignment = TextAnchor.MiddleCenter
+        };
+        bpmDisplay.normal.textColor = Color.yellow;
+        GUI.Box(new Rect(px, y, pw, 52f), $"{targetBPM:F1}  BPM", bpmDisplay);
+        y += 58f;
+
+        // Coarse adjustment row: -5, -1, +1, +5
+        float bw = (pw - 6f) / 4f;
+        GUI.color = new Color(1f, 0.5f, 0.5f);
+        if (GUI.Button(new Rect(px,            y, bw, 38f), "− 5",  BtnStyle(14))) ApplyBPMDelta(-5f);
+        if (GUI.Button(new Rect(px + bw + 2f,  y, bw, 38f), "− 1",  BtnStyle(14))) ApplyBPMDelta(-1f);
+        GUI.color = new Color(0.5f, 1f, 0.5f);
+        if (GUI.Button(new Rect(px + bw*2 + 4f, y, bw, 38f), "+ 1", BtnStyle(14))) ApplyBPMDelta(+1f);
+        if (GUI.Button(new Rect(px + bw*3 + 6f, y, bw, 38f), "+ 5", BtnStyle(14))) ApplyBPMDelta(+5f);
+        GUI.color = Color.white;
+        y += 42f;
+
+        // Fine adjustment row: -0.5, +0.5
+        float hw = pw / 2f - 4f;
+        GUI.color = new Color(1f, 0.75f, 0.5f);
+        if (GUI.Button(new Rect(px,        y, hw, 32f), "− 0.5", BtnStyle(13))) ApplyBPMDelta(-0.5f);
+        if (GUI.Button(new Rect(px + hw + 8f, y, hw, 32f), "+ 0.5", BtnStyle(13))) ApplyBPMDelta(+0.5f);
+        GUI.color = Color.white;
+        y += 38f;
+
+        // Common BPM presets
+        GUI.Label(new Rect(px, y, pw, lh - 4f), "Quick presets:", Style(12, FontStyle.Normal, new Color(0.7f, 0.7f, 0.7f)));
         y += lh;
+        float[] presets = { 80f, 90f, 100f, 110f, 120f, 128f, 140f, 160f };
+        float   pbw     = (pw - (presets.Length - 1) * 2f) / presets.Length;
+        for (int i = 0; i < presets.Length; i++)
+        {
+            bool active = Mathf.Abs(targetBPM - presets[i]) < 0.5f;
+            GUI.color = active ? Color.yellow : Color.white;
+            if (GUI.Button(new Rect(px + i * (pbw + 2f), y, pbw, 30f), presets[i].ToString("F0"), BtnStyle(11)))
+            {
+                targetBPM = presets[i];
+                _bpmInput = targetBPM.ToString("F1");
+                _bpmStatus = $"BPM set to {targetBPM:F1}";
+            }
+        }
+        GUI.color = Color.white;
+        y += 36f;
 
-        GUI.Label(new Rect(px, y, 60f, lh), "BPM:",
-            Style(11, FontStyle.Normal, new Color(0.7f, 0.7f, 0.7f)));
-        _bpmInput = GUI.TextField(new Rect(px + 44f, y, 70f, 22f), _bpmInput,
-            Style(11, FontStyle.Normal, Color.white));
-
-        if (GUI.Button(new Rect(px + 120f, y, 28f, 22f), "-1"))  ApplyBPMDelta(-1f);
-        if (GUI.Button(new Rect(px + 152f, y, 28f, 22f), "+1"))  ApplyBPMDelta(+1f);
-        if (GUI.Button(new Rect(px + 184f, y, 36f, 22f), "-0.5")) ApplyBPMDelta(-0.5f);
-        if (GUI.Button(new Rect(px + 224f, y, 36f, 22f), "+0.5")) ApplyBPMDelta(+0.5f);
-
-        if (GUI.Button(new Rect(px + 264f, y, 56f, 22f), "SET"))
+        // Manual text input + SET
+        GUI.Label(new Rect(px, y, 80f, lh), "Manual:", Style(12, FontStyle.Normal, new Color(0.7f, 0.7f, 0.7f)));
+        _bpmInput = GUI.TextField(new Rect(px + 64f, y, 100f, 26f), _bpmInput, Style(13, FontStyle.Normal, Color.white));
+        GUI.color = new Color(0.4f, 0.8f, 1f);
+        if (GUI.Button(new Rect(px + 170f, y, 60f, 26f), "SET", BtnStyle(13)))
         {
             if (float.TryParse(_bpmInput, out float parsed) && parsed > 0f)
             {
@@ -361,28 +437,32 @@ public class SmartBeatMapper : MonoBehaviour
                 _bpmInput  = targetBPM.ToString("F1");
                 _bpmStatus = $"BPM set to {targetBPM:F1}";
             }
-            else
-            {
-                _bpmStatus = "Invalid BPM — enter a positive number.";
-            }
+            else { _bpmStatus = "Invalid — enter a positive number."; }
         }
-        y += 28f;
-
-        bool hasClip = audioSource != null && audioSource.clip != null;
-        GUI.enabled = hasClip && !_detectingBPM && !_isRecording;
-        GUI.color   = _detectingBPM ? Color.grey : new Color(1f, 0.75f, 0.2f);
-        if (GUI.Button(new Rect(px, y, pw, 28f),
-            _detectingBPM ? "DETECTING BPM..." : "AUTO-DETECT BPM FROM AUDIO"))
-        {
-            StartCoroutine(DetectBPMCoroutine());
-        }
-        GUI.color   = Color.white;
-        GUI.enabled = true;
+        GUI.color = Color.white;
         y += 34f;
 
+        // Auto-detect
+        bool hasClip = audioSource?.clip != null;
+        GUI.enabled = hasClip && !_detectingBPM && !_isRecording;
+        GUI.color   = _detectingBPM ? Color.grey : new Color(1f, 0.8f, 0.2f);
+        if (GUI.Button(new Rect(px, y, pw, 34f),
+            _detectingBPM ? "DETECTING BPM..." : "AUTO-DETECT BPM FROM AUDIO", BtnStyle(13)))
+            StartCoroutine(DetectBPMCoroutine());
+        GUI.color   = Color.white;
+        GUI.enabled = true;
+        y += 40f;
+
         if (!string.IsNullOrEmpty(_bpmStatus))
+        {
             GUI.Label(new Rect(px, y, pw, lh), _bpmStatus,
-                Style(11, FontStyle.Normal, new Color(1f, 0.85f, 0.4f)));
+                Style(13, FontStyle.Normal, new Color(1f, 0.85f, 0.4f)));
+            y += lh + 2f;
+        }
+
+        GUI.Label(new Rect(px, y, pw, lh * 2f),
+            "After auto-detect, fine-tune with the buttons\nabove until the grid feels right.",
+            dimStyle);
     }
 
     // ── BPM helpers ───────────────────────────────────────────────────────
@@ -393,6 +473,10 @@ public class SmartBeatMapper : MonoBehaviour
         _bpmStatus = $"BPM set to {targetBPM:F1}";
     }
 
+    // ── Improved BPM detector ─────────────────────────────────────────────
+    // Uses adaptive-threshold onset detection + correct IOI histogram voting.
+    // The old version used `1f/mult` weighting which biased toward 2× tempo
+    // and produced ~187.5 BPM for almost every song.
     private IEnumerator DetectBPMCoroutine()
     {
         _detectingBPM = true;
@@ -403,72 +487,98 @@ public class SmartBeatMapper : MonoBehaviour
         int       sampleRate = clip.frequency;
         int       channels   = clip.channels;
 
-        float[] pcm = new float[clip.samples * channels];
+        // Analyse first 30 s only — enough to get a solid BPM estimate
+        int analyzeSamples = Mathf.Min(clip.samples, sampleRate * 30);
+        float[] pcm = new float[analyzeSamples * channels];
         clip.GetData(pcm, 0);
         yield return null;
 
-        int frameLen   = Mathf.Max(1, Mathf.RoundToInt(0.01f * sampleRate)) * channels;
-        int frameCount = pcm.Length / frameLen;
+        // ~23 ms hop (matches a typical STFT hop size)
+        float   hopSec   = 0.023f;
+        int     hopLen   = Mathf.Max(1, Mathf.RoundToInt(hopSec * sampleRate));
+        int     frameCount = analyzeSamples / hopLen;
 
-        float prevRMS = 0f;
-        var   fluxes  = new List<float>(frameCount);
-        var   times   = new List<float>(frameCount);
-
+        // RMS energy per frame
+        float[] rms = new float[frameCount];
         for (int f = 0; f < frameCount; f++)
         {
-            float sum   = 0f;
-            int   start = f * frameLen;
-            int   end   = Mathf.Min(start + frameLen, pcm.Length);
-            for (int i = start; i < end; i++) sum += pcm[i] * pcm[i];
-            float rms = Mathf.Sqrt(sum / (end - start));
-
-            fluxes.Add(Mathf.Max(0f, rms - prevRMS));
-            times.Add(f * frameLen / channels / (float)sampleRate);
-            prevRMS = rms;
-
-            if (f % 2000 == 0) yield return null;
+            float sum  = 0f;
+            int   s0   = f * hopLen * channels;
+            int   s1   = Mathf.Min(s0 + hopLen * channels, pcm.Length);
+            for (int i = s0; i < s1; i++) sum += pcm[i] * pcm[i];
+            rms[f] = Mathf.Sqrt(sum / Mathf.Max(1, s1 - s0));
+            if (f % 500 == 0) yield return null;
         }
 
-        float mean   = fluxes.Count > 0 ? fluxes.Average() : 0f;
-        var   onsets = new List<float>();
-        for (int i = 1; i < fluxes.Count - 1; i++)
-            if (fluxes[i] > fluxes[i - 1] && fluxes[i] > fluxes[i + 1] && fluxes[i] > mean)
-                onsets.Add(times[i]);
+        // Half-wave rectified onset strength
+        float[] onset = new float[frameCount];
+        for (int f = 1; f < frameCount; f++)
+            onset[f] = Mathf.Max(0f, rms[f] - rms[f - 1]);
 
-        if (onsets.Count < 4)
+        // Adaptive local threshold: local mean over ±0.5 s × 1.5
+        int     winF   = Mathf.Max(1, Mathf.RoundToInt(0.5f / hopSec));
+        float[] thresh = new float[frameCount];
+        for (int f = 0; f < frameCount; f++)
         {
-            _bpmStatus    = "Not enough onsets detected — set BPM manually.";
+            int lo = Mathf.Max(0, f - winF), hi = Mathf.Min(frameCount - 1, f + winF);
+            float s = 0f;
+            for (int i = lo; i <= hi; i++) s += onset[i];
+            thresh[f] = (s / (hi - lo + 1)) * 1.5f;
+        }
+
+        // Peak-pick: must exceed threshold, min 150 ms between picks
+        int     minGap = Mathf.Max(1, Mathf.RoundToInt(0.15f / hopSec));
+        var     onsets = new List<float>();
+        int     last   = -minGap;
+        for (int f = 1; f < frameCount - 1; f++)
+        {
+            if (onset[f] > onset[f - 1] && onset[f] >= onset[f + 1]
+                && onset[f] > thresh[f] && f - last >= minGap)
+            {
+                onsets.Add(f * hopSec);
+                last = f;
+            }
+        }
+
+        if (onsets.Count < 8)
+        {
+            _bpmStatus    = $"Only {onsets.Count} onsets found — set BPM manually.";
             _detectingBPM = false;
             yield break;
         }
 
+        // IOI histogram — compare each onset to its next 4 neighbours only.
+        // Weight by 1/(distance) so consecutive pairs count more.
+        // No octave voting — that's what caused the 187.5 bias.
         const float BPM_MIN  = 60f;
         const float BPM_MAX  = 200f;
-        const float BPM_STEP = 0.5f;
+        const float BPM_STEP = 1f;
         int         bins     = Mathf.RoundToInt((BPM_MAX - BPM_MIN) / BPM_STEP) + 1;
         float[]     histogram = new float[bins];
 
         for (int i = 0; i < onsets.Count - 1; i++)
         {
-            float ioi = onsets[i + 1] - onsets[i];
-            if (ioi <= 0f) continue;
-            float bpm = 60f / ioi;
-            foreach (float mult in new[] { 0.5f, 1f, 2f })
+            for (int j = i + 1; j <= Mathf.Min(i + 4, onsets.Count - 1); j++)
             {
-                float b = bpm * mult;
-                if (b < BPM_MIN || b > BPM_MAX) continue;
-                int bin = Mathf.RoundToInt((b - BPM_MIN) / BPM_STEP);
-                if (bin >= 0 && bin < bins) histogram[bin] += 1f / mult;
+                float ioi = onsets[j] - onsets[i];
+                if (ioi < 0.25f || ioi > 2.0f) continue;   // 30–240 BPM guard
+
+                float bpm = 60f / ioi;
+                if (bpm < BPM_MIN || bpm > BPM_MAX) continue;
+
+                float weight = 1f / (j - i);   // closer pairs get more weight
+                int   bin    = Mathf.RoundToInt((bpm - BPM_MIN) / BPM_STEP);
+                if (bin >= 0 && bin < bins) histogram[bin] += weight;
             }
         }
 
+        // 5-tap Gaussian smooth to merge near-BPM bins
         float[] smooth = new float[bins];
-        float[] kernel = { 0.25f, 0.5f, 0.25f };
-        for (int b = 1; b < bins - 1; b++)
-            smooth[b] = histogram[b - 1] * kernel[0] + histogram[b] * kernel[1] + histogram[b + 1] * kernel[2];
+        for (int b = 2; b < bins - 2; b++)
+            smooth[b] = histogram[b-2]*0.1f + histogram[b-1]*0.2f + histogram[b]*0.4f
+                      + histogram[b+1]*0.2f + histogram[b+2]*0.1f;
 
-        int   bestBin = 0;
-        float bestVal = -1f;
+        int bestBin = 0; float bestVal = -1f;
         for (int b = 0; b < bins; b++)
             if (smooth[b] > bestVal) { bestVal = smooth[b]; bestBin = b; }
 
@@ -478,7 +588,7 @@ public class SmartBeatMapper : MonoBehaviour
         _detectingBPM = false;
     }
 
-    // ── File dialog (Windows only, via PowerShell) ────────────────────────
+    // ── File dialog ───────────────────────────────────────────────────────
     private void OpenFileDialog()
     {
 #if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
@@ -500,55 +610,44 @@ if ($d.ShowDialog() -eq 'OK') { Write-Output $d.FileName }
                 CreateNoWindow         = true
             };
             using var proc = System.Diagnostics.Process.Start(psi);
-            string result = proc.StandardOutput.ReadToEnd().Trim();
+            string result  = proc.StandardOutput.ReadToEnd().Trim();
             proc.WaitForExit();
-            if (!string.IsNullOrEmpty(result))
-                _pendingFilePath = result;
+            if (!string.IsNullOrEmpty(result)) _pendingFilePath = result;
         });
         t.Start();
 #else
-        _loadStatus = "Browse not supported on this platform — paste path manually.";
+        _loadStatus = "Browse not supported — paste path manually.";
         _loadStatusIsError = true;
 #endif
     }
 
-    // ── Audio loader coroutine ────────────────────────────────────────────
+    // ── Audio loader ──────────────────────────────────────────────────────
     private IEnumerator LoadAudioCoroutine(string path)
     {
-        _loadStatus        = "Loading...";
-        _loadStatusIsError = false;
+        _loadStatus = "Loading..."; _loadStatusIsError = false;
 
         AudioType audioType = GetAudioTypeFromPath(path);
         if (audioType == AudioType.UNKNOWN)
         {
-            _loadStatus        = "Unsupported format. Use .mp3, .wav, .ogg, or .aiff";
-            _loadStatusIsError = true;
-            yield break;
+            _loadStatus = "Unsupported format. Use .mp3, .wav, .ogg, or .aiff";
+            _loadStatusIsError = true; yield break;
         }
 
-        string url = "file:///" + path.Replace("\\", "/");
+        string url = new System.Uri(path).AbsoluteUri;
         using UnityWebRequest req = UnityWebRequestMultimedia.GetAudioClip(url, audioType);
         yield return req.SendWebRequest();
 
         if (req.result != UnityWebRequest.Result.Success)
         {
-            _loadStatus        = $"Error: {req.error}";
-            _loadStatusIsError = true;
-            yield break;
+            _loadStatus = $"Error: {req.error}"; _loadStatusIsError = true; yield break;
         }
 
         AudioClip clip = DownloadHandlerAudioClip.GetContent(req);
         clip.name = Path.GetFileNameWithoutExtension(path);
 
-        if (_isRecording)
-        {
-            audioSource.Stop();
-            _isRecording = false;
-        }
-        _rawTaps.Clear();
-        _quantizedBeats.Clear();
-        _lastTapTime = -1f;
-        _lastRawTime = _lastSnappedTime = -1f;
+        if (_isRecording) { audioSource.Stop(); _isRecording = false; }
+        _rawTaps.Clear(); _quantizedBeats.Clear();
+        _lastTapTime = -1f; _lastRawTime = _lastSnappedTime = -1f;
 
         audioSource.clip       = clip;
         _loadStatus            = $"Loaded: {clip.name}  ({clip.length:F1}s)";
@@ -557,8 +656,7 @@ if ($d.ShowDialog() -eq 'OK') { Write-Output $d.FileName }
 
     private static AudioType GetAudioTypeFromPath(string path)
     {
-        string ext = Path.GetExtension(path).ToLowerInvariant();
-        return ext switch
+        return Path.GetExtension(path).ToLowerInvariant() switch
         {
             ".mp3"            => AudioType.MPEG,
             ".wav"            => AudioType.WAV,
@@ -568,12 +666,11 @@ if ($d.ShowDialog() -eq 'OK') { Write-Output $d.FileName }
         };
     }
 
-    // ─────────────────────────────────────────────────────────────────────
+    // ── Save ──────────────────────────────────────────────────────────────
     private void SaveCustomTrack()
     {
         string clipName = audioSource.clip.name;
-        string data     = string.Join("|", _quantizedBeats);
-        PlayerPrefs.SetString("CustomMap_" + clipName, data);
+        PlayerPrefs.SetString("CustomMap_" + clipName, string.Join("|", _quantizedBeats));
 
         if (!string.IsNullOrEmpty(_filePath))
             PlayerPrefs.SetString("CustomMapPath_" + clipName, _filePath);

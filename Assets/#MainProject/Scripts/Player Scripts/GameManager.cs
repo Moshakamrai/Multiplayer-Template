@@ -538,8 +538,9 @@ public override void Start()
     /// </summary>
     private void HandleCursor()
     {
-        // Visible if in the menu or the options are open.
-        bool visible = !IsServer && !IsClient || _optionsOpen;
+        // Visible if in the menu, options are open, or the player is holding Tab.
+        bool holdingFreeLook = Input.GetKey(KeyCode.Tab);
+        bool visible = !IsServer && !IsClient || _optionsOpen || holdingFreeLook;
         Cursor.visible = visible;
         Cursor.lockState = visible ? CursorLockMode.None : CursorLockMode.Locked;
     }

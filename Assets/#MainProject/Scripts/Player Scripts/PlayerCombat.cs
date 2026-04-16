@@ -44,6 +44,13 @@ public class PlayerCombat : NetworkBehaviour
 
     [SyncVar] public float lastVocalSpikeTime = -1f; // Timestamp of the loudest peak
 
+    public override void OnStartServer()
+    {
+        // Bots keep the default 100 HP; real players get 250 HP
+        if (GetComponent<BotController>() == null)
+            CurrentHealth = 250;
+    }
+
     private void Start()
     {
         if (isLocalPlayer && ShieldText == null) ShieldText = GameObject.Find("ShieldText")?.GetComponent<Text>();

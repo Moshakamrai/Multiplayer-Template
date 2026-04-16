@@ -1,7 +1,9 @@
 using Mirror;
 using UnityEngine;
+using UnityEngine.Networking;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 
 public enum RoundType { SlowRhythm, FastCombo, CustomTrack }
 
@@ -52,6 +54,11 @@ public class RhythmRoundManager : NetworkBehaviour
     [Header("Single Player Settings")]
     public GameObject botPrefab; // Drag your Bot Prefab here in the Inspector
     private GameObject _activeBot;
+
+    // Runtime-loaded clips from SmartBeatMapper file paths
+    private Dictionary<string, AudioClip> _runtimeClips = new Dictionary<string, AudioClip>();
+    private bool _isLoadingClip = false;
+    private string _loadingClipName = "";
 
     private void Awake() { if (Instance == null) Instance = this; }
 
@@ -771,46 +778,69 @@ public class RhythmRoundManager : NetworkBehaviour
                 GUI.color = Color.magenta; if (GUILayout.Button("START FAST ROUND", GUILayout.Height(40))) StartFastRound();
                 GUILayout.Space(10);
 
-                // --- NEW: DYNAMIC CUSTOM MAP LOADER ---
-                if (availableTracks != null && availableTracks.Length > 0)
+                // --- DYNAMIC CUSTOM MAP LOADER ---
+                // Collect all map names: from SmartBeatMapper registry + Inspector array
+                var allMapNames = new HashSet<string>();
+
+                string registry = PlayerPrefs.GetString("CustomMapRegistry", "");
+                if (!string.IsNullOrEmpty(registry))
+                    foreach (string n in registry.Split('|'))
+                        if (!string.IsNullOrEmpty(n) && PlayerPrefs.HasKey("CustomMap_" + n))
+                            allMapNames.Add(n);
+
+                if (availableTracks != null)
+                    foreach (AudioClip t in availableTracks)
+                        if (t != null && PlayerPrefs.HasKey("CustomMap_" + t.name))
+                            allMapNames.Add(t.name);
+
+                if (allMapNames.Count > 0)
                 {
                     GUILayout.Label("<b>--- CUSTOM MAPS ---</b>", new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, richText = true });
-                    
-                    bool mapFound = false;
-                    foreach (AudioClip track in availableTracks)
+
+                    foreach (string mapName in allMapNames)
                     {
-                        if (track == null) continue;
-                        
-                        string saveKey = "CustomMap_" + track.name;
-                        
-                        // If a map exists for this specific song, draw a button for it!
-                        if (PlayerPrefs.HasKey(saveKey))
+                        // Prefer Inspector asset, then runtime-cached clip
+                        AudioClip clip = null;
+                        if (availableTracks != null)
+                            foreach (AudioClip t in availableTracks)
+                                if (t != null && t.name == mapName) { clip = t; break; }
+                        if (clip == null && _runtimeClips.ContainsKey(mapName))
+                            clip = _runtimeClips[mapName];
+
+                        bool hasPath  = PlayerPrefs.HasKey("CustomMapPath_" + mapName);
+                        bool loading  = _isLoadingClip && _loadingClipName == mapName;
+
+                        if (loading)
                         {
-                            mapFound = true;
-                            GUI.color = Color.green; 
-                            if (GUILayout.Button($"PLAY: {track.name}", GUILayout.Height(45))) 
+                            GUI.color = Color.yellow;
+                            GUILayout.Box($"LOADING: {mapName}...", GUILayout.Height(45));
+                        }
+                        else if (clip != null || hasPath)
+                        {
+                            GUI.color = Color.green;
+                            if (GUILayout.Button($"PLAY: {mapName}", GUILayout.Height(45)))
                             {
-                                // Swap the audio source to the chosen track BEFORE starting
                                 if (BeatAnalyzer.Instance != null && BeatAnalyzer.Instance.audioSource != null)
                                 {
-                                    BeatAnalyzer.Instance.audioSource.clip = track;
-                                    StartCustomRound(); 
+                                    if (clip != null)
+                                    {
+                                        BeatAnalyzer.Instance.audioSource.clip = clip;
+                                        StartCustomRound();
+                                    }
+                                    else
+                                    {
+                                        StartCoroutine(LoadClipThenStartRound(mapName, PlayerPrefs.GetString("CustomMapPath_" + mapName)));
+                                    }
                                 }
                             }
-                            GUILayout.Space(5); // Little gap between buttons
                         }
-                    }
-
-                    if (!mapFound)
-                    {
-                        GUI.color = Color.red; 
-                        GUILayout.Box("NO MAPS FOUND.\nMap tracks in Editor.", GUILayout.Height(60));
+                        GUILayout.Space(5);
                     }
                 }
                 else
                 {
-                    GUI.color = Color.gray; 
-                    GUILayout.Box("ADD TRACKS TO\nINSPECTOR ARRAY", GUILayout.Height(60));
+                    GUI.color = Color.red;
+                    GUILayout.Box("NO MAPS FOUND.\nUse SmartBeatMapper to create one.", GUILayout.Height(60));
                 }
                 GUI.color = Color.white;
             }
@@ -1005,5 +1035,53 @@ public class RhythmRoundManager : NetworkBehaviour
     {
         if (SoundManagerMain.Instance != null)
             SoundManagerMain.Instance.PlaySuccessSFX(type);
+    }
+
+    private IEnumerator LoadClipThenStartRound(string clipName, string filePath)
+    {
+        _isLoadingClip = true;
+        _loadingClipName = clipName;
+
+        string ext = Path.GetExtension(filePath).ToLowerInvariant();
+        AudioType audioType = ext switch
+        {
+            ".mp3"            => AudioType.MPEG,
+            ".wav"            => AudioType.WAV,
+            ".ogg"            => AudioType.OGGVORBIS,
+            ".aiff" or ".aif" => AudioType.AIFF,
+            _                 => AudioType.UNKNOWN
+        };
+
+        if (audioType == AudioType.UNKNOWN)
+        {
+            Debug.LogWarning($"[RhythmRoundManager] Unsupported audio format for: {filePath}");
+            _isLoadingClip = false;
+            _loadingClipName = "";
+            yield break;
+        }
+
+        string url = "file:///" + filePath.Replace("\\", "/");
+        using UnityWebRequest req = UnityWebRequestMultimedia.GetAudioClip(url, audioType);
+        yield return req.SendWebRequest();
+
+        if (req.result == UnityWebRequest.Result.Success)
+        {
+            AudioClip clip = DownloadHandlerAudioClip.GetContent(req);
+            clip.name = clipName;
+            _runtimeClips[clipName] = clip;
+
+            if (BeatAnalyzer.Instance != null && BeatAnalyzer.Instance.audioSource != null)
+            {
+                BeatAnalyzer.Instance.audioSource.clip = clip;
+                StartCustomRound();
+            }
+        }
+        else
+        {
+            Debug.LogWarning($"[RhythmRoundManager] Failed to load clip '{clipName}': {req.error}");
+        }
+
+        _isLoadingClip = false;
+        _loadingClipName = "";
     }
 }

@@ -860,7 +860,7 @@ public class RhythmRoundManager : NetworkBehaviour
             {
                 PlayerCombat pc = p.GetComponent<PlayerCombat>();
                 GUIStyle healthStyle = new GUIStyle(GUI.skin.box) { fontSize = 18, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleLeft };
-                healthStyle.normal.textColor = pc.CurrentHealth <= 30 ? Color.red : Color.green;
+                healthStyle.normal.textColor = pc.CurrentHealth <= pc.MaxHealth * 0.3f ? Color.red : Color.green;
                 GUILayout.Label($"{p.PlayerName} Health: {pc.CurrentHealth}", healthStyle, GUILayout.Height(40));
             }
         }
@@ -942,7 +942,22 @@ public class RhythmRoundManager : NetworkBehaviour
             GUI.color = Color.white;
         }
         DrawRhythmHighway();
+        DrawBackButton();
     }
+
+    private void DrawBackButton()
+    {
+        if (isRoundActive) return;
+
+        if (GUI.Button(new Rect(20f, Screen.height - 55f, 160f, 40f), "← BACK TO MENU"))
+        {
+            if (NetworkServer.active)
+                NetworkManager.singleton.StopHost();
+            else
+                NetworkManager.singleton.StopClient();
+        }
+    }
+
     private Texture2D _whiteTexture;
 
     private void DrawRhythmHighway()

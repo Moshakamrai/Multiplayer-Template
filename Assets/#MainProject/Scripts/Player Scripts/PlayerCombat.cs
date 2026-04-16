@@ -8,6 +8,7 @@ using UnityEngine.SceneManagement;
 public class PlayerCombat : NetworkBehaviour
 {
     [SyncVar] public int CurrentHealth = 100;
+    [SyncVar] public int MaxHealth = 100;
     [SyncVar] public int CurrentShield = 25;
     public int MaxShield = 25;
     public Text ShieldText;
@@ -46,9 +47,10 @@ public class PlayerCombat : NetworkBehaviour
 
     public override void OnStartServer()
     {
-        // Bots keep the default 100 HP; real players get 250 HP
+        // Bots keep 100 HP; real players get 250 HP
         if (GetComponent<BotController>() == null)
             CurrentHealth = 250;
+        MaxHealth = CurrentHealth;
     }
 
     private void Start()
@@ -387,7 +389,7 @@ public class PlayerCombat : NetworkBehaviour
                 GUI.color = new Color(0.1f, 0.1f, 0.1f, 1f);
                 GUI.DrawTexture(new Rect(posX, posY, barWidth, barHeight), _whiteTexture);
 
-                float healthPercent = (float)oppCombat.CurrentHealth / 100f;
+                float healthPercent = oppCombat.MaxHealth > 0 ? (float)oppCombat.CurrentHealth / oppCombat.MaxHealth : 0f;
                 GUI.color = Color.red;
                 GUI.DrawTexture(new Rect(posX + 5, posY + 5, (barWidth - 10) * healthPercent, barHeight - 10), _whiteTexture);
 

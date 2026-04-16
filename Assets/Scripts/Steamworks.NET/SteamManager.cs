@@ -161,6 +161,9 @@ public class SteamManager : MonoBehaviour {
 			return;
 		}
 
+		// Reset so the next SteamManager that wakes up (e.g. after scene reload)
+		// will call SteamAPI.Init() again cleanly instead of throwing.
+		s_EverInitialized = false;
 		SteamAPI.Shutdown();
 	}
 

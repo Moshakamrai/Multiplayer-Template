@@ -100,36 +100,47 @@ namespace UI
         // ── Transport swap ────────────────────────────────────────────────
         // When Steam is offline the active transport is likely FizzySteamworks
         // which crashes even on StartHost. Swap to KcpTransport first.
+        // The transport MUST live on the persistent NetworkManager GameObject;
+        // if it's on the Menu UI object it will be destroyed on scene load.
         private void SwapToOfflineTransport()
         {
             if (SteamManager.Initialized) return;
 
-            Transport target = offlineTransport;
+            GameObject nmGO = NetworkManager.singleton.gameObject;
 
+            // 1. Prefer a non-steam transport already on the persistent NetworkManager.
+            Transport target = nmGO.GetComponents<Transport>()
+                .FirstOrDefault(t =>
+                {
+                    string n = t.GetType().Name.ToLowerInvariant();
+                    return !n.Contains("steam") && !n.Contains("fizzy");
+                });
+
+            // 2. Fall back to the Inspector-assigned field.
             if (target == null)
-            {
-                // Auto-discover: grab the first transport on the NetworkManager
-                // that isn't a Steam/Fizzy one.
-                target = NetworkManager.singleton
-                    .GetComponents<Transport>()
-                    .FirstOrDefault(t =>
-                    {
-                        string name = t.GetType().Name.ToLowerInvariant();
-                        return !name.Contains("steam") && !name.Contains("fizzy");
-                    });
-            }
+                target = offlineTransport;
 
             if (target == null)
             {
                 Debug.LogError("[MenuUI] No offline transport found. " +
-                    "Add a KcpTransport component to the NetworkManager GameObject " +
-                    "and assign it to the Offline Transport field on MenuUI.");
+                    "Add a KcpTransport component to the GameManager GameObject.");
                 return;
+            }
+
+            // 3. If the chosen transport is NOT on the persistent NetworkManager, copy
+            //    its type onto the NetworkManager so it survives scene loads.
+            if (target.gameObject != nmGO)
+            {
+                Transport existing = nmGO.GetComponent(target.GetType()) as Transport;
+                if (existing == null)
+                    existing = nmGO.AddComponent(target.GetType()) as Transport;
+                target = existing;
+                Debug.Log($"[MenuUI] Added {target.GetType().Name} to persistent NetworkManager for offline play.");
             }
 
             Transport.active = target;
             NetworkManager.singleton.transport = target;
-            Debug.Log($"[MenuUI] Transport swapped to {target.GetType().Name} for offline play.");
+            Debug.Log($"[MenuUI] Transport set to {target.GetType().Name} for offline play.");
         }
 
         private void HostGame()

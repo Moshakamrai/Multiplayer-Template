@@ -98,6 +98,8 @@ public class VoiceCommandManager : NetworkBehaviour
             }
         }
 
+        if (isRhythm && !_myCombat.HasOpenSlot(false) && !_myCombat.HasOpenSlot(true)) return;
+
         string[] words = lowerSegment.Split(' ');
         foreach (string word in words)
         {

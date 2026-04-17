@@ -86,6 +86,18 @@ public class VoiceCommandManager : NetworkBehaviour
         string lowerSegment = segment.ToLower().Trim();
         bool isRhythm = RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive;
 
+        // Block word recognition during the action window (last 0.5s before beat).
+        // Only mic-threshold spike detection (CheckLocalParryTiming) should fire there.
+        if (isRhythm)
+        {
+            float nextBeat = RhythmRoundManager.Instance.GetNextBeatTime();
+            if (nextBeat > 0f)
+            {
+                float timeToNext = nextBeat - RhythmRoundManager.Instance.GetCurrentTrackTime();
+                if (timeToNext >= 0f && timeToNext <= 0.5f) return;
+            }
+        }
+
         string[] words = lowerSegment.Split(' ');
         foreach (string word in words)
         {

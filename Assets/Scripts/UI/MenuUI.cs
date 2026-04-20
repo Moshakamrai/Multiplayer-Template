@@ -14,6 +14,7 @@ namespace UI
         private Button _joinButton;
         private Button _quitButton;
         private Button _beatMapperButton;
+        private Button _autoBeatMapperButton;
         private TextField _nameTextField;
         private TextField _addressTextField;
         private Label _steamStatusLabel;
@@ -45,7 +46,8 @@ namespace UI
             _hostButton       = root.Q<Button>("HostButton");
             _joinButton       = root.Q<Button>("JoinButton");
             _quitButton       = root.Q<Button>("QuitButton");
-            _beatMapperButton = root.Q<Button>("BeatMapperButton");
+            _beatMapperButton     = root.Q<Button>("BeatMapperButton");
+            _autoBeatMapperButton = root.Q<Button>("AutoBeatMapperButton");
             _nameTextField    = root.Q<TextField>("NameTextField");
             _addressTextField = root.Q<TextField>("AddressTextField");
             _steamStatusLabel = root.Q<Label>("SteamStatusLabel");
@@ -64,6 +66,7 @@ namespace UI
 
             _quitButton.clicked += Application.Quit;
             _beatMapperButton.clicked += LoadBeatMapper;
+            if (_autoBeatMapperButton != null) _autoBeatMapperButton.clicked += LoadAutoBeatMapper;
 
             _nameTextField.value = GameManager.PlayerName;
             _addressTextField.value = NetworkManager.singleton.networkAddress;
@@ -90,6 +93,8 @@ namespace UI
 
                 if (_beatMapperButton != null)
                     _beatMapperButton.clicked -= LoadBeatMapper;
+
+                if (_autoBeatMapperButton != null) _autoBeatMapperButton.clicked -= LoadAutoBeatMapper;
 
                 _nameTextField?.UnregisterValueChangedCallback(NameChanged);
                 _addressTextField?.UnregisterValueChangedCallback(AddressChanged);
@@ -177,6 +182,7 @@ namespace UI
         }
 
         private void LoadBeatMapper() => SceneManager.LoadScene("TrackEditor");
+        private void LoadAutoBeatMapper() => SceneManager.LoadScene("RhythmTest");
 
         // ── Value callbacks ───────────────────────────────────────────────
         private void NameChanged(ChangeEvent<string> evt)

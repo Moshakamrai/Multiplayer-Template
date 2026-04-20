@@ -85,7 +85,7 @@ public class VoskSpeechToText : MonoBehaviour
 
         OnStatusUpdated?.Invoke("Loading Model from: " + _decompressedModelPath);
         
-        // Vosk.Vosk.SetLogLevel(0); // Optional: Disable logs for speed
+        Vosk.Vosk.SetLogLevel(-1); // Silence all Vosk logs — they stall the main thread
         _model = new Model(_decompressedModelPath);
 
         OnStatusUpdated?.Invoke("Initialized");
@@ -210,23 +210,22 @@ public class VoskSpeechToText : MonoBehaviour
 
         while (_running)
         {
-            if (_threadedBufferQueue.TryDequeue(out short[] voiceResult))
+            // Drain ALL pending frames per Update instead of one.
+            // Without this, a single slow frame causes audio to pile up and
+            // recognition falls progressively further behind real-time.
+            int processed = 0;
+            while (_threadedBufferQueue.TryDequeue(out short[] voiceResult) && processed < 12)
             {
+                processed++;
                 if (_recognizer.AcceptWaveform(voiceResult, voiceResult.Length))
                 {
-                    var result = _recognizer.Result();
-                    _threadedResultQueue.Enqueue(result);
+                    _threadedResultQueue.Enqueue(_recognizer.Result());
                 }
                 else
                 {
-                    // FAST PATH: Get partial result immediately
                     var partial = _recognizer.PartialResult();
-                    // Only enqueue if it actually contains text to save Main Thread performance
-                    // Check length > 14 to avoid sending empty {"partial" : ""} packets
-                    if (partial.Length > 14) 
-                    {
+                    if (partial.Length > 14)
                         _threadedPartialQueue.Enqueue(partial);
-                    }
                 }
             }
             yield return null;

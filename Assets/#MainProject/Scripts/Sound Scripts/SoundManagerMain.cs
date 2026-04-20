@@ -19,10 +19,20 @@ public class SoundManagerMain : MonoBehaviour
 
     public void PlayCardAccepted()
     {
-        if (audioSource != null && cardAcceptedClip != null)
-        {
-            audioSource.PlayOneShot(cardAcceptedClip);
-        }
+        PlayWithPitch(cardAcceptedClip, Random.Range(0.95f, 1.05f));
+    }
+
+    private void PlayWithPitch(AudioClip clip, float pitch)
+    {
+        if (clip == null) return;
+        GameObject go = new GameObject("SFX_OneShot");
+        AudioSource src = go.AddComponent<AudioSource>();
+        src.clip = clip;
+        src.pitch = pitch;
+        src.spatialBlend = 0f;
+        src.volume = audioSource != null ? audioSource.volume : 1f;
+        src.Play();
+        Destroy(go, clip.length / Mathf.Abs(pitch) + 0.1f);
     }
 
     // Inside SoundManager.cs
@@ -43,9 +53,8 @@ public class SoundManagerMain : MonoBehaviour
         else if (type == "Block") clip = blockClip;
         else if (type == "Parry") clip = parryClip;
         else if (type == "Dash") clip = dashClip;
-        else if (type == "Hurt") clip = hurtClip; // New case for taking damage
+        else if (type == "Hurt") clip = attackClip;
 
-        if (audioSource != null && clip != null)
-            audioSource.PlayOneShot(clip);
+        PlayWithPitch(clip, Random.Range(0.92f, 1.08f));
     }
 }

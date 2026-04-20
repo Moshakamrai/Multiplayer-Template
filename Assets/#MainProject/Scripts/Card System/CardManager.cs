@@ -26,11 +26,19 @@ public class CardManager : NetworkBehaviour
     }
     private List<DiscardAnim> _activeDiscardAnims = new List<DiscardAnim>();
 
+    private struct CardFlash
+    {
+        public float startX;
+        public float baseY;
+        public float startTime;
+    }
+    private List<CardFlash> _activeCardFlashes = new List<CardFlash>();
+
     private Texture2D _whiteTex;
 
     // Card dimensions
     const float cWidth  = 160f;
-    const float cHeight = 150f;
+    const float cHeight = 180f;
     const float cSpace  = 15f;
 
     public override void OnStartServer() { InitializeDeck(); }
@@ -89,6 +97,8 @@ public class CardManager : NetworkBehaviour
     {
         float totalW = (cWidth * 4) + (cSpace * 3);
         float startX = Screen.width / 2f - totalW / 2f + slotIndex * (cWidth + cSpace);
+        float baseY = Screen.height - cHeight - 60f;
+        _activeCardFlashes.Add(new CardFlash { startX = startX, baseY = baseY, startTime = Time.time });
         _activeDiscardAnims.Add(new DiscardAnim { libIndex = libIndex, startX = startX, startTime = Time.time });
     }
 
@@ -147,6 +157,16 @@ public class CardManager : NetworkBehaviour
             DrawCard(r, cardLibrary[index], isRhythm, fillRatio, isShout, pulse, titleStyle, descStyle, 1f);
         }
 
+        // --- Card use flash ---
+        for (int i = _activeCardFlashes.Count - 1; i >= 0; i--)
+        {
+            float t = (Time.time - _activeCardFlashes[i].startTime) / 0.12f;
+            if (t > 1f) { _activeCardFlashes.RemoveAt(i); continue; }
+            Rect r = new Rect(_activeCardFlashes[i].startX, _activeCardFlashes[i].baseY, cWidth, cHeight);
+            GUI.color = new Color(1f, 1f, 1f, (1f - t) * 0.85f);
+            GUI.DrawTexture(r, _whiteTex);
+        }
+
         // --- Discard ghosts ---
         for (int i = _activeDiscardAnims.Count - 1; i >= 0; i--)
         {
@@ -180,9 +200,9 @@ public class CardManager : NetworkBehaviour
             else
                 fillColor = new Color(0f, 0.85f, 1f, 0.62f);  // cyan
 
-            float fillW = isShout ? r.width : r.width * fillRatio;
+            float fillH = isShout ? r.height : r.height * fillRatio;
             GUI.color = fillColor;
-            GUI.DrawTexture(new Rect(r.x, r.y, fillW, r.height), _whiteTex);
+            GUI.DrawTexture(new Rect(r.x, r.y, r.width, fillH), _whiteTex);
 
             if (isShout)
             {

@@ -424,7 +424,8 @@ public class RhythmRoundManager : NetworkBehaviour
 
             bool isUnbreakable = (move.attack == "UnbreakablePunch");
             int baseRef = isUnbreakable ? 15 : ((move.attack == "Hook") ? 25 : 10);
-            attacker.TakeDamage(Mathf.CeilToInt(baseRef * 1.2f));
+            Vector3 parryKbDir = (attacker.transform.position - defender.transform.position).normalized;
+            attacker.TakeDamage(Mathf.CeilToInt(baseRef * 1.2f), parryKbDir);
 
             damageDealt = 0;
             return -1;
@@ -508,7 +509,8 @@ public class RhythmRoundManager : NetworkBehaviour
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Hurt");
                 defender.RpcPlayCombatParticle("Hit");
 
-                defender.TakeDamage(damageDealt);
+                Vector3 kbDir = (defender.transform.position - attacker.transform.position).normalized;
+                defender.TakeDamage(damageDealt, kbDir);
                 return 1;
             }
         }
@@ -724,7 +726,7 @@ public class RhythmRoundManager : NetworkBehaviour
         pc.TargetShowTimingFeedback(rating);
     }
 
-    [ClientRpc] private void RpcTriggerHitStop() { StartCoroutine(HitStopRoutine()); }
+    [ClientRpc] private void RpcTriggerHitStop() { StartCoroutine(HitStopRoutine()); if (CameraShake.Instance != null) CameraShake.Instance.Shake(0.1f, 0.07f); }
     private IEnumerator HitStopRoutine() { Time.timeScale = 0.05f; yield return new WaitForSecondsRealtime(0.06f); Time.timeScale = 1.0f; }
 
     void OnRoundStateChanged(bool oldVal, bool newVal) { if (BeatAnalyzer.Instance != null && BeatAnalyzer.Instance.audioSource != null && currentType != RoundType.CustomTrack) { if (newVal) BeatAnalyzer.Instance.audioSource.Play(); else BeatAnalyzer.Instance.audioSource.Stop(); } }

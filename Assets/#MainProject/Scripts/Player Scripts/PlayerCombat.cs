@@ -45,6 +45,9 @@ public class PlayerCombat : NetworkBehaviour
 
     [SyncVar] public float lastVocalSpikeTime = -1f; // Timestamp of the loudest peak
 
+    private float _hurtFlashFade = 0f;
+    private float _successFlashFade = 0f;
+
     public override void OnStartServer()
     {
         // Bots keep 100 HP; real players get 250 HP
@@ -162,6 +165,18 @@ public class PlayerCombat : NetworkBehaviour
         }
     }
 
+    [TargetRpc]
+    public void TargetShakeCamera(NetworkConnection target, float duration, float magnitude)
+    {
+        CameraShake.Instance?.Shake(duration, magnitude);
+    }
+
+    [TargetRpc]
+    public void TargetFlashSuccess(NetworkConnection target)
+    {
+        _successFlashFade = 1f;
+    }
+
     [Command]
     void CmdConfirmEliteParry(float spikeTime)
     {
@@ -171,6 +186,8 @@ public class PlayerCombat : NetworkBehaviour
         if (animator != null) animator.Play("Parry");
 
         TargetAddEnergy(1);
+        TargetShakeCamera(connectionToClient, 0.2f, 0.28f);
+        TargetFlashSuccess(connectionToClient);
         StartCoroutine(ResetParryFlag());
     }
 
@@ -193,6 +210,8 @@ public class PlayerCombat : NetworkBehaviour
 
         // Return 1 Energy as a reward for the tight timing
         TargetAddEnergy(1);
+        TargetShakeCamera(connectionToClient, 0.2f, 0.28f);
+        TargetFlashSuccess(connectionToClient);
 
         // We keep the hitbox active for 0.3s to match the window
         StartCoroutine(ResetParryFlag());
@@ -352,13 +371,23 @@ public class PlayerCombat : NetworkBehaviour
     [ClientRpc] void RpcTriggerAttack(string t) { if (isLocalPlayer) return; if (animator != null) animator.SetTrigger(t); }
 
     [Server]
-    public void TakeDamage(int damage)
+    public void TakeDamage(int damage, Vector3 knockbackDir = default)
     {
         if (IsDead) return;
         StartCoroutine(FlashEffectRoutine());
         CurrentHealth -= damage;
         if (CurrentHealth <= 0) StartCoroutine(DelayedKnockout(0f));
-        else RpcTriggerHurt("Hurt " + Random.Range(1, 5), 0f);
+        else
+        {
+            RpcTriggerHurt("Hurt " + Random.Range(1, 5), 0f);
+            if (knockbackDir != default) RpcNudgeBack(knockbackDir);
+        }
+    }
+
+    [ClientRpc]
+    void RpcNudgeBack(Vector3 dir)
+    {
+        if (isLocalPlayer) GetComponent<PlayerController>().ApplyKnockback(dir);
     }
 
     [Server] private IEnumerator DelayedKnockout(float delay) { yield return new WaitForSeconds(delay); RpcKnockout(); }
@@ -368,7 +397,9 @@ public class PlayerCombat : NetworkBehaviour
     {
         yield return new WaitForSeconds(delay);
         if (animator) animator.SetTrigger(trigger);
-        if (isLocalPlayer) { _attackQueue.Clear(); _pendingAttackTrigger = ""; _pendingDashDirection = Vector3.zero; isAttacking = false; GetComponent<PlayerController>().InterruptMovement(); StartCoroutine(HurtStunTimer()); }
+        Debug.Log($"<color=orange>[CameraShake] DelayedHurtRoutine — Instance null={CameraShake.Instance == null}, isLocalPlayer={isLocalPlayer}</color>");
+        CameraShake.Instance?.Shake(0.3f, 0.45f);
+        if (isLocalPlayer) { _hurtFlashFade = 1f; _attackQueue.Clear(); _pendingAttackTrigger = ""; _pendingDashDirection = Vector3.zero; isAttacking = false; GetComponent<PlayerController>().InterruptMovement(); StartCoroutine(HurtStunTimer()); }
     }
 
     public bool HasOpenSlot(bool isMovement)
@@ -399,7 +430,25 @@ public class PlayerCombat : NetworkBehaviour
             _whiteTexture.SetPixel(0, 0, Color.white);
             _whiteTexture.Apply();
         }
-        
+
+        // --- HURT FLASH (red vignette) ---
+        if (_hurtFlashFade > 0)
+        {
+            _hurtFlashFade -= Time.deltaTime * 3.5f;
+            GUI.color = new Color(0.9f, 0f, 0f, Mathf.Clamp01(_hurtFlashFade) * 0.45f);
+            GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), _whiteTexture);
+            GUI.color = Color.white;
+        }
+
+        // --- PARRY/BLOCK SUCCESS FLASH (cyan vignette) ---
+        if (_successFlashFade > 0)
+        {
+            _successFlashFade -= Time.deltaTime * 5f;
+            GUI.color = new Color(0f, 0.85f, 1f, Mathf.Clamp01(_successFlashFade) * 0.38f);
+            GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), _whiteTexture);
+            GUI.color = Color.white;
+        }
+
         PlayerController opponent = GetComponent<PlayerController>().GetOpponent();
         if (opponent != null)
         {

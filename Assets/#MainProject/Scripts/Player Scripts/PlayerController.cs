@@ -1,5 +1,6 @@
 using Mirror;
 using UnityEngine;
+using System.Collections;
 using System.Collections.Generic;
 
 [RequireComponent(typeof(CharacterController))]
@@ -133,6 +134,24 @@ public class PlayerController : NetworkBehaviour
     }
 
     public void ApplyDashExternal(Vector3 dir) { ApplyDash(dir); }
+
+    public void ApplyKnockback(Vector3 dir)
+    {
+        if (_characterController != null && _characterController.enabled)
+            StartCoroutine(KnockbackRoutine(dir));
+    }
+
+    private IEnumerator KnockbackRoutine(Vector3 dir)
+    {
+        float elapsed = 0f;
+        const float duration = 0.12f;
+        while (elapsed < duration)
+        {
+            _characterController.Move(dir * 2.5f * (1f - elapsed / duration) * Time.deltaTime);
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+    }
 
     private void Movement()
     {

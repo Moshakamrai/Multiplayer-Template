@@ -11,6 +11,7 @@
             <ui:Button text="Join" display-tooltip-when-elided="true" name="JoinButton" class="ButtonStyle" style="color: rgb(255, 255, 255);" />
             <ui:Button text="Quit" display-tooltip-when-elided="true" name="QuitButton" class="ButtonStyle" />
             <ui:Button text="Beat Mapper" display-tooltip-when-elided="true" name="BeatMapperButton" class="ButtonStyle" style="color: rgb(255, 255, 255);" />
+            <ui:Button text="Automatic Beat Mapper" display-tooltip-when-elided="true" name="AutoBeatMapperButton" class="ButtonStyle" style="color: rgb(255, 255, 255);" />
         </ui:VisualElement>
     </ui:VisualElement>
 </ui:UXML>

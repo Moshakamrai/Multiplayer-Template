@@ -109,18 +109,18 @@ public class VoiceCommandManager : NetworkBehaviour
 
             // 1. RECOGNITION MAPPING - FIXED TRIGGERS
             // 1. RECOGNITION MAPPING - FIXED TRIGGERS WITH ALIASES
-            if (GetSimilarity(word, "punch") > 0.7f || word == "jab") { trigger = "Jab"; recognized = true; }
+            if (GetSimilarity(word, "punch") > 0.64f || word == "jab") { trigger = "Jab"; recognized = true; }
             
             // CROSS FIX: Lowered threshold to 0.60f and added common Vosk mishears!
             // The new "Cross" - using BLAST
-            else if (GetSimilarity(word, "blast") > 0.7f || word == "last" || word == "fast" || word == "cast") { trigger = "Cross"; recognized = true; }
+            else if (GetSimilarity(word, "blast") > 0.64f || word == "last" || word == "fast" || word == "cast") { trigger = "Cross"; recognized = true; }
             
-            else if (GetSimilarity(word, "hook") > 0.7f) { trigger = "Hook"; recognized = true; }
-            else if (GetSimilarity(word, "block") > 0.7f || GetSimilarity(word, "guard") > 0.72f) { trigger = "Block"; recognized = true; }
-            else if (GetSimilarity(word, "cage") > 0.7f || word == "page" || word == "engage") { trigger = "ParryIntent"; recognized = true; }
-            else if (GetSimilarity(word, "boom") > 0.7f || word == "room" || word == "doom") { trigger = "UnbreakablePunch"; recognized = true; }
-            else if (GetSimilarity(word, "left") > 0.7f) { trigger = "Left"; dashDir = Vector3.left; recognized = true; }
-            else if (GetSimilarity(word, "right") > 0.7f) { trigger = "Right"; dashDir = Vector3.right; recognized = true; }
+            else if (GetSimilarity(word, "hook") > 0.64f) { trigger = "Hook"; recognized = true; }
+            else if (GetSimilarity(word, "block") > 0.64 || GetSimilarity(word, "guard") > 0.72f) { trigger = "Block"; recognized = true; }
+            else if (GetSimilarity(word, "cage") > 0.64f || word == "page" || word == "engage") { trigger = "ParryIntent"; recognized = true; }
+            else if (GetSimilarity(word, "boom") > 0.64f || word == "room" || word == "doom") { trigger = "UnbreakablePunch"; recognized = true; }
+            else if (GetSimilarity(word, "left") > 0.6f) { trigger = "Left"; dashDir = Vector3.left; recognized = true; }
+            else if (GetSimilarity(word, "right") > 0.6f) { trigger = "Right"; dashDir = Vector3.right; recognized = true; }
 
             if (recognized)
             {

@@ -107,32 +107,69 @@ public class VoiceCommandManager : NetworkBehaviour
             string trigger = "";
             Vector3 dashDir = Vector3.zero;
 
-            // 1. RECOGNITION MAPPING - FIXED TRIGGERS
-            // 1. RECOGNITION MAPPING - FIXED TRIGGERS WITH ALIASES
+            // 1. RECOGNITION MAPPING
             if (GetSimilarity(word, "punch") > 0.64f || word == "jab") { trigger = "Jab"; recognized = true; }
-            
-            // CROSS FIX: Lowered threshold to 0.60f and added common Vosk mishears!
-            // The new "Cross" - using BLAST
             else if (GetSimilarity(word, "blast") > 0.64f || word == "last" || word == "fast" || word == "cast") { trigger = "Cross"; recognized = true; }
-            
             else if (GetSimilarity(word, "hook") > 0.64f) { trigger = "Hook"; recognized = true; }
             else if (GetSimilarity(word, "block") > 0.64 || GetSimilarity(word, "guard") > 0.72f) { trigger = "Block"; recognized = true; }
             else if (GetSimilarity(word, "cage") > 0.64f || word == "page" || word == "engage") { trigger = "ParryIntent"; recognized = true; }
             else if (GetSimilarity(word, "boom") > 0.64f || word == "room" || word == "doom") { trigger = "UnbreakablePunch"; recognized = true; }
             else if (GetSimilarity(word, "left") > 0.6f) { trigger = "Left"; dashDir = Vector3.left; recognized = true; }
             else if (GetSimilarity(word, "right") > 0.6f) { trigger = "Right"; dashDir = Vector3.right; recognized = true; }
+            // Combo card selection — "one/two/three/four"
+            // Vosk mishears: "three" → "tree",  "four" → "for"
+            else if (word == "one"  || GetSimilarity(word, "one")  > 0.80f) { trigger = "Combo1"; recognized = true; }
+            else if (word == "two"  || GetSimilarity(word, "two")  > 0.80f) { trigger = "Combo2"; recognized = true; }
+            else if (word == "tree" || word == "three" || GetSimilarity(word, "three") > 0.80f) { trigger = "Combo3"; recognized = true; }
+            else if (word == "for"  || word == "four"  || GetSimilarity(word, "four")  > 0.80f) { trigger = "Combo4"; recognized = true; }
 
             if (recognized)
             {
+                bool isComboTrigger = trigger == "Combo1" || trigger == "Combo2" || trigger == "Combo3" || trigger == "Combo4";
+
                 // 2. STRICT CARD CHECK
                 if (_myCards != null && !_myCards.IsCardInHand(trigger))
                 {
+                    if (isComboTrigger)
+                        Debug.Log($"<color=red>[COMBO DEBUG]</color> Word='{word}' → trigger='{trigger}' REJECTED — card not in hand. Hand count={_myCards.currentHandIndices.Count}. IsRhythm={isRhythm}. ComboCount={RhythmRoundManager.Instance?.currentComboCount}");
+                    else
+                        Debug.Log($"<color=red>REJECTED:</color> {trigger} not in hand.");
                     LogExecution("CARD NOT IN HAND");
-                    //if (SoundManagerMain.Instance != null) SoundManagerMain.Instance.PlayCardRejected();
-                    Debug.Log($"<color=red>REJECTED:</color> {trigger} not in hand.");
                     continue;
                 }
 
+                // 3. COMBO CARD PATH — queue the entire attack sequence at once
+                CombatCard matchedCard = _myCards?.GetCardInHand(trigger);
+
+                if (isComboTrigger)
+                    Debug.Log($"<color=cyan>[COMBO DEBUG]</color> Word='{word}' → trigger='{trigger}' | matchedCard={(matchedCard == null ? "NULL" : matchedCard.cardName)} | isCombo={matchedCard?.isCombo} | chainLen={matchedCard?.comboChainLength} | isRhythm={isRhythm} | HasOpenSlot={_myCombat.HasOpenSlot(false)} | ComboCount={RhythmRoundManager.Instance?.currentComboCount}");
+
+                if (matchedCard != null && matchedCard.isCombo && isRhythm)
+                {
+                    if (_myCombat.HasOpenSlot(false))
+                    {
+                        foreach (string atk in matchedCard.comboAttacks)
+                        {
+                            Vector3 dir = atk == "Left" ? Vector3.left : atk == "Right" ? Vector3.right : Vector3.zero;
+                            _myCombat.QueueRhythmMove(atk, dir);
+                        }
+                        CmdUseCardOnServer(trigger);
+                        if (SoundManagerMain.Instance != null) SoundManagerMain.Instance.PlayCardAccepted();
+                        LogExecution("COMBO QUEUED: " + trigger);
+                        Debug.Log($"<color=#FFD700>[COMBO SUCCESS]</color> {trigger} queued: {string.Join(" → ", matchedCard.comboAttacks)}");
+                    }
+                    else
+                    {
+                        LogExecution("COMBO SLOTS FULL");
+                        Debug.Log($"<color=orange>[COMBO DEBUG]</color> {trigger} rejected — combo buffer already full (bufferCount={_myCombat._comboBuffer.Count}, needed={RhythmRoundManager.Instance?.currentComboCount})");
+                    }
+                    continue;
+                }
+
+                if (isComboTrigger)
+                    Debug.Log($"<color=orange>[COMBO DEBUG]</color> {trigger} fell through to normal path — matchedCard.isCombo={matchedCard?.isCombo}, isRhythm={isRhythm}. Card exists but isn't treated as combo.");
+
+                // 4. NORMAL SINGLE-MOVE PATH
                 bool isMovement = (dashDir != Vector3.zero);
                 if (_myCombat.HasOpenSlot(isMovement))
                 {
@@ -149,11 +186,10 @@ public class VoiceCommandManager : NetworkBehaviour
                         else
                         {
                             if (trigger == "ParryIntent") _myCombat.animator.Play("Parry", 0, 0f);
-                            else if (trigger == "Jab") _myCombat.VoiceAttackJab();
+                            else if (trigger == "Jab")   _myCombat.VoiceAttackJab();
                             else if (trigger == "Cross") _myCombat.VoiceAttackCross();
-                            else if (trigger == "Hook") _myCombat.VoiceAttackHook();
+                            else if (trigger == "Hook")  _myCombat.VoiceAttackHook();
                             else if (trigger == "Block") _myCombat.VoiceAttackBlock();
-
                             CmdUseCardOnServer(trigger);
                         }
                     }

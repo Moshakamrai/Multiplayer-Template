@@ -324,9 +324,9 @@ public class RhythmRoundManager : NetworkBehaviour
             int chainCount = 1;
 
             // Look ahead: Gap must be < 1.4s AND the chain cannot exceed 4 hits
-            while (i + chainCount < loadedTaps.Count && 
-                  (loadedTaps[i + chainCount] - loadedTaps[i + chainCount - 1]) < 1.4f && 
-                  chainCount < 4) 
+            while (i + chainCount < loadedTaps.Count &&
+                  (loadedTaps[i + chainCount] - loadedTaps[i + chainCount - 1]) < 1.4f &&
+                  chainCount < 5)
             {
                 chainCount++;
             }
@@ -657,18 +657,20 @@ public class RhythmRoundManager : NetworkBehaviour
                     pc.lastVocalSpikeTime = -1f;
                 pc.IsParryActive = false;
 
-                // 3. REFILL HANDS: Draw cards until the hand is full (4 cards)
-                // This must happen on the Server so the SyncList updates for everyone.
+                // 3. REFILL HANDS: Draw cards until the hand is full (4 cards).
+                // Skip entirely during combo mode — the combo hand is managed by CardManager.Update()
+                // and DrawCard() is blocked, so looping here would spin forever.
                 if (isServer)
                 {
                     CardManager cm = player.GetComponent<CardManager>();
-                    if (cm != null)
+                    if (cm != null && !cm.IsComboHandActive)
                     {
-                        // Draw cards until the player has 4 in hand again
                         while (cm.currentHandIndices.Count < 4)
-                        {
                             cm.DrawCard();
-                        }
+                    }
+                    else if (cm != null && cm.IsComboHandActive)
+                    {
+                        Debug.Log($"<color=yellow>[RhythmRoundManager]</color> Skipping card refill for {player.PlayerName} — combo hand is active.");
                     }
                 }
             }
@@ -968,6 +970,8 @@ public class RhythmRoundManager : NetworkBehaviour
     {
         return (currentType == RoundType.CustomTrack) ? BeatAnalyzer.Instance.audioSource.time : (float)(NetworkTime.time - _startTime);
     }
+
+    public int GetNextClusterSize() => _clusterSizes.Count > 0 ? _clusterSizes[0] : 1;
 
     [TargetRpc]
     public void TargetPlaySuccessSound(string type)

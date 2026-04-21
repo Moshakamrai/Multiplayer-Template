@@ -13,8 +13,8 @@ using UnityEngine.SceneManagement;
 ///   [LOAD PANEL]  [TIMELINE — beats row + chain windows row]  [STATS + SAVE]
 ///
 /// TIMELINE KEY:
-///   Yellow tick  = detected beat / attack trigger
-///   Blue box     = voice input window for that chain  (say command inside here)
+///   Yellow tick  = attack trigger (fires AFTER the voice window)
+///   Blue box     = voice input window (speak here, then attack fires at box right-edge)
 ///   Green box    = currently active voice window (during preview)
 ///   Red line     = playhead (current song position)
 ///
@@ -193,7 +193,7 @@ public class RhythmTestManager : MonoBehaviour
 
             cy += 8f;
             SectionTitle(x+6, ref cy, w-12, "TUNING (Inspector)");
-            Lbl(x+6, cy, w-12, 18*6, $"thresholdMultiplier\n  raise → fewer beats\n\nmaxInChainGapSec\n  lower → fewer chains\n\nminInterChainGapSec\n  raise → more rest time",
+            Lbl(x+6, cy, w-12, 18*5, $"thresholdMultiplier\n  raise → fewer beats\n\nmaxInChainGapSec\n  lower → fewer chains\n\nminInputWindowSec\n  raise → more spacing between triggers",
                 9, FontStyle.Normal, new Color(0.45f,0.45f,0.5f));
         }
     }
@@ -273,17 +273,14 @@ public class RhythmTestManager : MonoBehaviour
             Fill(wx,        winRowY + 18f, 2f,   winRowH - 22f, boxBorder);  // left edge
             Fill(wx+boxW-2, winRowY + 18f, 2f,   winRowH - 22f, boxBorder);  // right edge
 
-            // Beat tick marks inside the window
-            foreach (var b in chain.beats)
-            {
-                float bx = TtoX(b.time, tx, tw);
-                Fill(bx-1f, winRowY+18f, 3f, (winRowH-22f)*0.5f, new Color(1f,0.85f,0.15f,0.8f));
-            }
+            // Arrow pointing right — window ends, then attacks fire
+            if (boxW > 20f)
+                Fill(wx+boxW, winRowY + 18f + (winRowH-22f)*0.4f, 8f, 2f, new Color(1f,0.85f,0.15f,0.6f));
 
             // Label
             if (boxW > 30f)
             {
-                string label = $"#{ci+1}  {chain.chainLength}×  {chain.inputWindowDuration:F1}s";
+                string label = $"#{ci+1}  {chain.chainLength}×  {chain.inputWindowDuration:F1}s  →atk";
                 Lbl(wx+4, winRowY+20f, boxW-6, 16, label,
                     9, FontStyle.Bold, active ? Color.green : new Color(0.55f,0.75f,1f));
             }
@@ -300,7 +297,7 @@ public class RhythmTestManager : MonoBehaviour
         float legY = ty + th - 18f;
         Fill(tx, legY, tw, 18f, new Color(0.03f,0.03f,0.06f));
         Lbl(tx+6, legY+2, tw-12, 14,
-            "  |  Yellow bar = beat trigger   Blue box = voice window (speak inside it)   Red line = playhead (preview only)  |",
+            "  |  Yellow bar = attack trigger   Blue box = voice window (speak here, THEN attack fires)   Red line = playhead  |",
             9, FontStyle.Normal, new Color(0.4f,0.4f,0.45f), TextAnchor.MiddleCenter);
     }
 
@@ -338,22 +335,10 @@ public class RhythmTestManager : MonoBehaviour
         Stat(x+6, ref cy, w-12, "Quad   (4×)", $"{quad}");
         cy += 6f;
 
-        SectionTitle(x+6, ref cy, w-12, "VOICE WINDOW FORMULA");
-        Lbl(x+6, cy, w-12, 18, "  1.5 × beats × beatInterval", 10, FontStyle.Normal, new Color(0.7f,0.85f,1f)); cy += 18f;
-        Lbl(x+6, cy, w-12, 18, $"  floor (per chain): {_engine.minTotalWindowSec:F1}s", 10, FontStyle.Normal, new Color(0.7f,0.85f,1f)); cy += 22f;
-
-        for (int n = 1; n <= 4; n++)
-        {
-            float form = 1.5f * n * _map.beatInterval;
-            float floor = _engine.minTotalWindowSec;
-            float actual = Mathf.Max(form, floor);
-            bool floored = floor > form;
-            Color rc = floored ? new Color(1f,0.65f,0.25f) : new Color(0.6f,0.9f,0.6f);
-            Lbl(x+6, cy, w-12, 17, $"  {n}×  →  {actual:F2}s" + (floored ? " [min floor]" : ""),
-                10, FontStyle.Normal, rc);
-            cy += 17f;
-        }
-        cy += 10f;
+        SectionTitle(x+6, ref cy, w-12, "VOICE WINDOW RULES");
+        Lbl(x+6, cy, w-12, 18, "  Window comes BEFORE the attack fires", 10, FontStyle.Normal, new Color(0.7f,0.85f,1f)); cy += 18f;
+        Lbl(x+6, cy, w-12, 18, $"  Flat {_engine.minInputWindowSec:F1}s window for ALL chains (1–4 beats)", 10, FontStyle.Normal, new Color(0.7f,0.85f,1f)); cy += 18f;
+        Lbl(x+6, cy, w-12, 18, $"  No triggers before {_engine.noTriggerBeforeSec:F0}s (grace period)", 10, FontStyle.Normal, new Color(0.7f,0.85f,1f)); cy += 22f;
 
         // ── SAVE ─────────────────────────────────────────────────────
         SectionTitle(x+6, ref cy, w-12, "SAVE TO GAME");

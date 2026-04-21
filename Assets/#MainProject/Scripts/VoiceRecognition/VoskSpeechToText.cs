@@ -130,9 +130,10 @@ public class VoskSpeechToText : MonoBehaviour
         // JSON array of words your VoiceCommandManager uses.
         // Vosk will instantly stop checking its 100,000 word dictionary.
         
-        _grammar = "[\"punch\", \"jab\", \"blast\", \"last\", \"fast\", \"cast\", \"hook\", \"block\", \"guard\", \"cage\", \"page\", \"engage\", \"boom\", \"room\", \"doom\", \"left\", \"right\", \"[unk]\"]";
-        
-        Debug.Log("<color=cyan>VOSK SPEED HACK:</color> Grammar strictly locked to combat words.");
+        // Combat words + combo-card number words (with real Vosk mishears: "tree"=three, "for"=four)
+        _grammar = "[\"punch\", \"jab\", \"blast\", \"last\", \"fast\", \"cast\", \"hook\", \"block\", \"guard\", \"cage\", \"page\", \"engage\", \"boom\", \"room\", \"doom\", \"left\", \"right\", \"one\", \"two\", \"tree\", \"for\", \"[unk]\"]";
+
+        Debug.Log("<color=cyan>VOSK GRAMMAR:</color> Locked to combat + combo-number words (one/two/tree/for).");
     }
 
     

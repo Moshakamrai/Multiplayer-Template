@@ -11,18 +11,12 @@ using UnityEngine;
 ///   via a strength-percentile filter after onset detection.
 ///
 /// Chain rules:
-///   - Beats within maxInChainGapSec of each other form a chain (fast bursts)
-///   - Max 4 beats per chain (matches RhythmRoundManager hard limit)
-///   - Trigger spacing is measured FIRST-BEAT → FIRST-BEAT so chains are
-///     treated as a single unit — this lets chains form naturally without
-///     being penalised for having multiple beats
-///   - minInterTriggerSec = minimum time between any two trigger start points
-///   - Voice window = max(1.5 × n × beatInterval, minTotalWindowSec)
-///     minTotalWindowSec is a per-CHAIN floor (not per-beat), so even a
-///     4-beat chain only needs the player to say one command
-///   - No triggers before noTriggerBeforeSec (default 5 s)
-///   - Each chain's window is capped so it never bleeds into the next trigger
-/// </summary>
+///   - No attack triggers in the first noTriggerBeforeSec seconds (grace period)
+///   - Voice INPUT WINDOW comes BEFORE the attack fires — player speaks, then attack fires
+///   - Every chain (single or multi) gets a flat minInputWindowSec window before its first beat
+///   - Beats within maxInChainGapSec of each other form a chain (up to 5 beats)
+///   - Windows never overlap — next chain only qualifies if its window fits after the previous one
+///</summary>
 public class BeatAnalysisEngine : MonoBehaviour
 {
     // ── FFT ───────────────────────────────────────────────────────────────
@@ -42,14 +36,11 @@ public class BeatAnalysisEngine : MonoBehaviour
 
     // ── Trigger restrictions ──────────────────────────────────────────────
     [Header("Trigger Restrictions")]
-    [Tooltip("No attack triggers are placed in the first N seconds of the song.")]
+    [Tooltip("No attack triggers are placed in the first N seconds of the song (5–8s recommended).")]
     [Range(0f, 10f)] public float noTriggerBeforeSec = 5f;
 
-    [Tooltip("Minimum rest (seconds) between the INPUT WINDOW closing and the next attack chain firing. Next attack only starts after the player's input window is done.")]
-    [Range(0.1f, 3.0f)] public float minRestAfterWindowSec = 0.5f;
-
-    [Tooltip("Minimum voice window PER BEAT in a chain. 1-beat = 3s, 2-beat = 6s, 3-beat = 9s, 4-beat = 12s.")]
-    [Range(0.5f, 5.0f)] public float minTotalWindowSec = 3.0f;
+    [Tooltip("Flat voice input window duration before ANY attack (single or chain). Player speaks during this window, then the attack fires.")]
+    [Range(1.0f, 8.0f)] public float minInputWindowSec = 3.0f;
 
     // ── Chain formation ───────────────────────────────────────────────────
     [Header("Chain Formation")]
@@ -228,13 +219,14 @@ public class BeatAnalysisEngine : MonoBehaviour
         yield return null;
 
         // ── 6. Build chains with all restrictions ──────────────────────
-        List<BeatChain> chains = BuildChains(beats, beatInterval);
+        List<BeatChain> chains = BuildChains(beats, beatInterval);  // beatInterval still used for BPM display
 
         Debug.Log($"[BeatEngine] Final chains: {chains.Count}  " +
                   $"(singles: {chains.FindAll(c=>c.chainLength==1).Count}, " +
                   $"2×: {chains.FindAll(c=>c.chainLength==2).Count}, " +
                   $"3×: {chains.FindAll(c=>c.chainLength==3).Count}, " +
-                  $"4×: {chains.FindAll(c=>c.chainLength>=4).Count})");
+                  $"4×: {chains.FindAll(c=>c.chainLength==4).Count}, " +
+                  $"5×: {chains.FindAll(c=>c.chainLength>=5).Count})");
 
         Emit(1.0f);
 
@@ -253,40 +245,43 @@ public class BeatAnalysisEngine : MonoBehaviour
     }
 
     // ── Chain builder — greedy single pass ───────────────────────────────
-    // For every beat that fits after the previous window closes, greedily
-    // extend into the longest chain possible (up to 4). If the next beats
-    // aren't close enough to chain, it stays a single. Nothing is wasted —
-    // every qualifying beat is considered as a potential trigger start.
+    // Voice window is placed BEFORE the attack: player speaks → attack fires.
+    // A beat qualifies only if there is room for a full minInputWindowSec window
+    // between the previous window's end and this beat's trigger time.
     private List<BeatChain> BuildChains(List<Beat> beats, float beatInterval)
     {
         var   chains        = new List<BeatChain>();
-        float lastWindowEnd = -999f;
+        float lastWindowEnd = -999f;  // end of previous voice window (= previous chain's FirstBeatTime)
         int   i             = 0;
 
         while (i < beats.Count)
         {
             var beat = beats[i];
 
-            // Skip intro silence or anything inside previous window + rest
-            if (beat.time < noTriggerBeforeSec
-                || beat.time < lastWindowEnd + minRestAfterWindowSec)
+            // Skip intro grace period
+            if (beat.time < noTriggerBeforeSec)
             { i++; continue; }
 
-            // Qualifies — greedily pull in consecutive close beats (chain)
+            // Beat needs minInputWindowSec of free space before it fires
+            // Window would start at (beat.time - minInputWindowSec); must be >= lastWindowEnd
+            if (beat.time - minInputWindowSec < lastWindowEnd)
+            { i++; continue; }
+
+            // Qualifies — greedily pull in consecutive close beats (chain, up to 4)
             var chain = new BeatChain();
             chain.beats.Add(beat);
             int j = i + 1;
-            while (j < beats.Count && chain.chainLength < 4)
+            while (j < beats.Count && chain.chainLength < 5)
             {
                 if (beats[j].time - beats[j - 1].time > maxInChainGapSec) break;
                 chain.beats.Add(beats[j]);
                 j++;
             }
 
-            FinalizeWindow(chain, beatInterval);
+            FinalizeWindow(chain, lastWindowEnd);
             chains.Add(chain);
-            lastWindowEnd = chain.inputWindowEnd;
-            i = j; // skip all beats consumed by this chain
+            lastWindowEnd = chain.inputWindowEnd;  // = chain.FirstBeatTime (window closes when attack fires)
+            i = j;
         }
 
         for (int c = 0; c < chains.Count; c++)
@@ -295,16 +290,13 @@ public class BeatAnalysisEngine : MonoBehaviour
         return chains;
     }
 
-    // Window opens AFTER the last beat fires (attacks done → then player inputs).
-    // Duration = max(1.5 × n × beatInterval,  n × minTotalWindowSec)
-    // so 1 beat = 3s, 2 beats = 6s, 3 beats = 9s, 4 beats = 12s minimum.
-    private void FinalizeWindow(BeatChain chain, float beatInterval)
+    // Window comes BEFORE the first beat: player speaks during the window, then the attack fires.
+    // Duration is always minInputWindowSec (flat, regardless of chain length).
+    private void FinalizeWindow(BeatChain chain, float lastWindowEnd)
     {
-        int   n       = chain.chainLength;
-        float formula = 1.5f * n * beatInterval;
-        chain.inputWindowDuration = Mathf.Max(formula, n * minTotalWindowSec);
-        chain.inputWindowStart    = chain.LastBeatTime;   // opens AFTER last attack fires
-        chain.inputWindowEnd      = chain.inputWindowStart + chain.inputWindowDuration;
+        chain.inputWindowEnd      = chain.FirstBeatTime;
+        chain.inputWindowStart    = Mathf.Max(lastWindowEnd, chain.FirstBeatTime - minInputWindowSec);
+        chain.inputWindowDuration = chain.inputWindowEnd - chain.inputWindowStart;
     }
 
     // ── BPM via IOI histogram ─────────────────────────────────────────────

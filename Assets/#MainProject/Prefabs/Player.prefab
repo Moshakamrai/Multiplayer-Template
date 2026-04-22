@@ -644,6 +644,7 @@ Transform:
   - {fileID: 2746334067084602787}
   - {fileID: 2336148828650443948}
   - {fileID: 3654365218111227925}
+  - {fileID: 7096546388535323248}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!143 &739055069516772721
@@ -785,6 +786,7 @@ MonoBehaviour:
   syncMode: 0
   syncInterval: 0
   CurrentHealth: 100
+  MaxHealth: 100
   CurrentShield: 25
   MaxShield: 25
   ShieldText: {fileID: 1856066874330144664}
@@ -878,27 +880,51 @@ MonoBehaviour:
   - cardName: PUNCH
     triggerName: Jab
     description: Quick lead strike. Reliable base damage.
+    isCombo: 0
+    comboChainLength: 0
+    comboAttacks: []
   - cardName: BLAST
     triggerName: Cross
     description: Straight power hit. Counters enemies trying to dodge.
+    isCombo: 0
+    comboChainLength: 0
+    comboAttacks: []
   - cardName: HOOK
     triggerName: Hook
     description: Heavy side-swing. High damage and grants bonus Energy.
+    isCombo: 0
+    comboChainLength: 0
+    comboAttacks: []
   - cardName: BLOCK
     triggerName: Block
     description: Standard defense. Wider timing window to negate damage.
+    isCombo: 0
+    comboChainLength: 0
+    comboAttacks: []
   - cardName: CAGE
     triggerName: ParryIntent
     description: Elite Parry. Reflects 120% damage back at the attacker.
+    isCombo: 0
+    comboChainLength: 0
+    comboAttacks: []
   - cardName: BOOM
     triggerName: UnbreakablePunch
     description: Unstoppable. Ignores blocks and deals massive 15-25 dmg.
+    isCombo: 0
+    comboChainLength: 0
+    comboAttacks: []
   - cardName: LEFT
     triggerName: Left
     description: Quick dodge to the left. Evades Jabs and Hooks.
+    isCombo: 0
+    comboChainLength: 0
+    comboAttacks: []
   - cardName: RIGHT
     triggerName: Right
     description: Quick dodge to the right. Evades Jabs and Hooks.
+    isCombo: 0
+    comboChainLength: 0
+    comboAttacks: []
 --- !u!1 &8782005603362053964
 GameObject:
   m_ObjectHideFlags: 0
@@ -2021,6 +2047,76 @@ SphereCollider:
 Transform:
   m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: d892b5bc1d8d6104cad8e60fac3b01b0, type: 3}
   m_PrefabInstance: {fileID: 6881469250871577185}
+  m_PrefabAsset: {fileID: 0}
+--- !u!1001 &8105818037154170821
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    serializedVersion: 3
+    m_TransformParent: {fileID: 8718707839533561222}
+    m_Modifications:
+    - target: {fileID: 1298824334076145077, guid: 62f0c49781bc0a646bfc9a3d022907f8, type: 3}
+      propertyPath: m_LocalPosition.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 1298824334076145077, guid: 62f0c49781bc0a646bfc9a3d022907f8, type: 3}
+      propertyPath: m_LocalPosition.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 1298824334076145077, guid: 62f0c49781bc0a646bfc9a3d022907f8, type: 3}
+      propertyPath: m_LocalPosition.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 1298824334076145077, guid: 62f0c49781bc0a646bfc9a3d022907f8, type: 3}
+      propertyPath: m_LocalRotation.w
+      value: -0.021247743
+      objectReference: {fileID: 0}
+    - target: {fileID: 1298824334076145077, guid: 62f0c49781bc0a646bfc9a3d022907f8, type: 3}
+      propertyPath: m_LocalRotation.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 1298824334076145077, guid: 62f0c49781bc0a646bfc9a3d022907f8, type: 3}
+      propertyPath: m_LocalRotation.y
+      value: 0.9997743
+      objectReference: {fileID: 0}
+    - target: {fileID: 1298824334076145077, guid: 62f0c49781bc0a646bfc9a3d022907f8, type: 3}
+      propertyPath: m_LocalRotation.z
+      value: -0
+      objectReference: {fileID: 0}
+    - target: {fileID: 1298824334076145077, guid: 62f0c49781bc0a646bfc9a3d022907f8, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 1298824334076145077, guid: 62f0c49781bc0a646bfc9a3d022907f8, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.y
+      value: 182.435
+      objectReference: {fileID: 0}
+    - target: {fileID: 1298824334076145077, guid: 62f0c49781bc0a646bfc9a3d022907f8, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 8943591542730139556, guid: 62f0c49781bc0a646bfc9a3d022907f8, type: 3}
+      propertyPath: barFootprint.x
+      value: 0.2
+      objectReference: {fileID: 0}
+    - target: {fileID: 8943591542730139556, guid: 62f0c49781bc0a646bfc9a3d022907f8, type: 3}
+      propertyPath: barFootprint.y
+      value: 0.2
+      objectReference: {fileID: 0}
+    - target: {fileID: 9040522698661048577, guid: 62f0c49781bc0a646bfc9a3d022907f8, type: 3}
+      propertyPath: m_Name
+      value: BeatVIsualizerROund
+      objectReference: {fileID: 0}
+    m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: 62f0c49781bc0a646bfc9a3d022907f8, type: 3}
+--- !u!4 &7096546388535323248 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 1298824334076145077, guid: 62f0c49781bc0a646bfc9a3d022907f8, type: 3}
+  m_PrefabInstance: {fileID: 8105818037154170821}
   m_PrefabAsset: {fileID: 0}
 --- !u!1001 &8902419165618262865
 PrefabInstance:

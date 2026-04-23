@@ -36,8 +36,14 @@ public class VoiceProcessor : MonoBehaviour
 
     [Header("Voice Detection Settings")]
     [SerializeField, Range(0.0f, 1.0f)] private float _minimumSpeakingSampleValue = 0.05f;
-    [SerializeField] private float _silenceTimer = 1.0f;
+    [Tooltip("How long silence must persist before audio transmission stops. Keep low for rhythm games (0.2–0.3s).")]
+    [SerializeField] private float _silenceTimer = 0.25f;
     [SerializeField] private bool _autoDetect;
+
+    // Fast volume peek — reads a tiny window every Unity frame so CurrentRawVolume
+    // is never more than one frame stale (~16ms), instead of one Vosk frame (32ms).
+    private const int PEEK_SIZE = 128;
+    private readonly float[] _peekBuffer = new float[PEEK_SIZE];
 
     private float _timeAtSilenceBegan;
     private bool _audioDetected;
@@ -112,6 +118,22 @@ public class VoiceProcessor : MonoBehaviour
             if (curClipPos < startReadPos) curClipPos += _audioClip.samples;
 
             int samplesAvailable = curClipPos - startReadPos;
+
+            // Fast volume peek: read a tiny slice every frame so CurrentRawVolume
+            // is never stale by more than ~16ms, regardless of Vosk frame size.
+            if (samplesAvailable > 0)
+            {
+                int peekLen = Mathf.Min(PEEK_SIZE, samplesAvailable);
+                _audioClip.GetData(_peekBuffer, startReadPos % _audioClip.samples);
+                float peekMax = 0f;
+                for (int i = 0; i < peekLen; i++)
+                {
+                    float a = Mathf.Abs(_peekBuffer[i]);
+                    if (a > peekMax) peekMax = a;
+                }
+                CurrentRawVolume = peekMax;
+            }
+
             if (samplesAvailable < FrameLength) { yield return null; continue; }
 
             int endReadPos = startReadPos + FrameLength;
@@ -132,13 +154,15 @@ public class VoiceProcessor : MonoBehaviour
 
             startReadPos = endReadPos % _audioClip.samples;
             
+            // Full-frame peak for VAD decision (CurrentRawVolume already updated by fast peek above)
             float maxVolume = 0.0f;
             for (int i = 0; i < sampleBuffer.Length; i++)
             {
                 float absVal = Mathf.Abs(sampleBuffer[i]);
                 if (absVal > maxVolume) maxVolume = absVal;
             }
-            CurrentRawVolume = maxVolume;
+            // Keep CurrentRawVolume as the freshest value (peek may be more recent than full frame)
+            if (maxVolume > CurrentRawVolume) CurrentRawVolume = maxVolume;
 
             // --- THE VAD FIX ---
             if (_autoDetect == false) 

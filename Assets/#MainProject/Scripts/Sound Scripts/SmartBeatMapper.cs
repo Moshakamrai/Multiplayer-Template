@@ -6,11 +6,16 @@ using UnityEngine.Networking;
 using UnityEngine.SceneManagement;
 using System.Linq;
 
+[RequireComponent(typeof(BeatAnalysisEngine))]
 public class SmartBeatMapper : MonoBehaviour
 {
     public AudioSource audioSource;
 
-    [Header("Quantize Settings")]
+    [Header("Beat-Snap Settings")]
+    [Tooltip("Max distance (seconds) a tap can be from a detected beat and still snap to it. Taps farther than this keep their raw time.")]
+    [Range(0.03f, 0.4f)] public float maxSnapDistance = 0.12f;
+
+    [Header("BPM Reference (fallback if analysis not ready)")]
     public float targetBPM = 100f;
 
     [Tooltip("1 = Full Beats, 2 = Half Beats, 4 = 16th Notes")]
@@ -45,7 +50,34 @@ public class SmartBeatMapper : MonoBehaviour
     private float _lastRawTime     = -1f;
     private float _lastSnappedTime = -1f;
 
+    // ── Beat analysis ─────────────────────────────────────────────────────
+    private BeatAnalysisEngine _engine;
+    private List<float>        _analyzedBeats  = new List<float>();
+    private bool               _analysisReady  = false;
+    private string             _analysisStatus = "";
+
     // ─────────────────────────────────────────────────────────────────────
+    void Awake()
+    {
+        _engine = GetComponent<BeatAnalysisEngine>();
+        _engine.OnAnalysisProgress += p => _analysisStatus = $"Analysing beats… {Mathf.RoundToInt(p * 100f)}%";
+        _engine.OnAnalysisComplete += map =>
+        {
+            _analyzedBeats.Clear();
+            foreach (var b in map.allBeats) _analyzedBeats.Add(b.time);
+            _analyzedBeats.Sort();
+            _analysisReady  = true;
+            _analysisStatus = $"Ready — {_analyzedBeats.Count} beats detected  ({map.bpm:F1} BPM)";
+            targetBPM       = map.bpm; // keep BPM display in sync
+            Debug.Log($"[SmartBeatMapper] Beat analysis done: {_analyzedBeats.Count} snap targets, {map.bpm:F1} BPM");
+        };
+        _engine.OnAnalysisError += msg =>
+        {
+            _analysisStatus = $"Analysis failed: {msg} — using BPM grid fallback";
+            _analysisReady  = false;
+        };
+    }
+
     void Update()
     {
         if (_tapFlashTimer > 0f)
@@ -64,38 +96,93 @@ public class SmartBeatMapper : MonoBehaviour
         {
             float t = audioSource.time;
             _rawTaps.Add(t);
-            _lastTapTime = t;
-
-            float snapGrid = (60f / targetBPM) / quantizeDivisor;
-            _lastTapOffset = t - Mathf.Round(t / snapGrid) * snapGrid;
+            _lastTapTime   = t;
+            _lastTapOffset = NearestBeatOffset(t);
             _tapFlashTimer = FLASH_DURATION;
 
-            Debug.Log($"Raw Tap: {t:F3}s | Grid offset: {_lastTapOffset * 1000f:+0.0;-0.0}ms");
+            Debug.Log($"Raw Tap: {t:F3}s | Beat offset: {_lastTapOffset * 1000f:+0.0;-0.0}ms");
         }
 
         audioSource.GetSpectrumData(_spectrumData, 0, FFTWindow.BlackmanHarris);
     }
 
-    // ─── BPM grid quantization ────────────────────────────────────────────
-    private void QuantizeTaps()
+    // ── Beat-snap: snaps each tap to the nearest analyzed beat ───────────
+    // Falls back to BPM grid if analysis hasn't completed yet.
+    // Taps farther than maxSnapDistance from any beat keep their raw time.
+    private void SnapTapsToBeats()
     {
         _quantizedBeats.Clear();
         if (_rawTaps.Count == 0) return;
 
-        float snapGrid = (60f / targetBPM) / quantizeDivisor;
+        int snapped = 0, fallback = 0, unanchored = 0;
 
         foreach (float raw in _rawTaps)
         {
-            float snapped = Mathf.Round(raw / snapGrid) * snapGrid;
-            if (!_quantizedBeats.Contains(snapped))
-                _quantizedBeats.Add(snapped);
+            float result;
+
+            if (_analysisReady && _analyzedBeats.Count > 0)
+            {
+                float nearestBeat = FindNearestBeat(raw);
+                float dist        = Mathf.Abs(raw - nearestBeat);
+
+                if (dist <= maxSnapDistance)
+                {
+                    result = nearestBeat;
+                    snapped++;
+                }
+                else
+                {
+                    // No analyzed beat nearby — fall back to BPM grid, never raw
+                    float grid = (60f / targetBPM) / quantizeDivisor;
+                    result = Mathf.Round(raw / grid) * grid;
+                    fallback++;
+                }
+            }
+            else
+            {
+                // Analysis not ready — BPM grid only
+                float grid = (60f / targetBPM) / quantizeDivisor;
+                result = Mathf.Round(raw / grid) * grid;
+                fallback++;
+            }
 
             _lastRawTime     = raw;
-            _lastSnappedTime = snapped;
+            _lastSnappedTime = result;
+
+            if (!_quantizedBeats.Contains(result))
+                _quantizedBeats.Add(result);
         }
 
         _quantizedBeats.Sort();
-        Debug.Log($"<color=cyan>QUANTIZED:</color> {_rawTaps.Count} taps → {_quantizedBeats.Count} beats  (grid: {snapGrid * 1000f:F0} ms)");
+        Debug.Log($"<color=cyan>SNAP:</color> {_rawTaps.Count} taps → {_quantizedBeats.Count} beats " +
+                  $"(beat-snapped: {snapped}, unanchored: {unanchored}, grid-fallback: {fallback})");
+    }
+
+    private float FindNearestBeat(float tapTime)
+    {
+        float nearest = _analyzedBeats[0];
+        float bestDist = Mathf.Abs(tapTime - nearest);
+        foreach (float b in _analyzedBeats)
+        {
+            float d = Mathf.Abs(tapTime - b);
+            if (d < bestDist) { bestDist = d; nearest = b; }
+            if (b > tapTime + maxSnapDistance) break; // list is sorted, can early-exit
+        }
+        return nearest;
+    }
+
+    // Returns signed offset from wherever this tap will actually snap to
+    private float NearestBeatOffset(float tapTime)
+    {
+        if (_analysisReady && _analyzedBeats.Count > 0)
+        {
+            float nearest = FindNearestBeat(tapTime);
+            if (Mathf.Abs(tapTime - nearest) <= maxSnapDistance)
+                return tapTime - nearest;
+        }
+
+        float snapGrid = (60f / targetBPM) / quantizeDivisor;
+        return tapTime - Mathf.Round(tapTime / snapGrid) * snapGrid;
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -145,7 +232,7 @@ public class SmartBeatMapper : MonoBehaviour
             else
             {
                 audioSource.Stop();
-                QuantizeTaps();
+                SnapTapsToBeats();
             }
         }
         GUI.color = Color.white;
@@ -159,7 +246,9 @@ public class SmartBeatMapper : MonoBehaviour
         }
 
         GUI.Label(new Rect(px, py + 182f, pw, 22f),
-            "SPACEBAR = tap a beat  •  set BPM first  •  save when done",
+            _analysisReady
+                ? "SPACEBAR = tap  •  snaps to nearest detected beat  •  save when done"
+                : "SPACEBAR = tap  •  load audio first to enable beat snapping",
             Style(12, FontStyle.Normal, new Color(0.5f, 0.5f, 0.5f), TextAnchor.MiddleCenter));
     }
 
@@ -230,12 +319,24 @@ public class SmartBeatMapper : MonoBehaviour
         }
         y += 10f;
 
-        // ── Grid ──
-        GUI.Label(new Rect(x, y, w, lh), "[ GRID ]", sec); y += lh;
-        float beatInt  = 60f / targetBPM;
-        float snapGrid = beatInt / quantizeDivisor;
-        GUI.Label(new Rect(x, y, w, lh), $"Beat interval : {beatInt * 1000f:F1} ms", val);  y += lh;
-        GUI.Label(new Rect(x, y, w, lh), $"Snap grid :     {snapGrid * 1000f:F1} ms  (1/{quantizeDivisor})", val); y += lh + 10f;
+        // ── Beat analysis status ──
+        GUI.Label(new Rect(x, y, w, lh), "[ BEAT ANALYSIS ]", sec); y += lh;
+        Color statusCol = _analysisReady ? Color.green
+                        : _analysisStatus.StartsWith("Analysis failed") ? Color.red
+                        : Color.yellow;
+        GUI.Label(new Rect(x, y, w, lh * 2), _analysisStatus,
+            Style(12, FontStyle.Normal, statusCol)); y += lh * 2 + 4f;
+        if (_analysisReady)
+        {
+            GUI.Label(new Rect(x, y, w, lh), $"Snap window : ±{maxSnapDistance * 1000f:F0} ms", val); y += lh;
+        }
+        else
+        {
+            float beatInt  = 60f / targetBPM;
+            float snapGrid = beatInt / quantizeDivisor;
+            GUI.Label(new Rect(x, y, w, lh), $"Fallback grid : {snapGrid * 1000f:F0} ms (1/{quantizeDivisor})", dim); y += lh;
+        }
+        y += 6f;
 
         // ── Last tap ──
         if (_isRecording)
@@ -649,9 +750,15 @@ if ($d.ShowDialog() -eq 'OK') { Write-Output $d.FileName }
         _rawTaps.Clear(); _quantizedBeats.Clear();
         _lastTapTime = -1f; _lastRawTime = _lastSnappedTime = -1f;
 
-        audioSource.clip       = clip;
-        _loadStatus            = $"Loaded: {clip.name}  ({clip.length:F1}s)";
-        _loadStatusIsError     = false;
+        audioSource.clip   = clip;
+        _loadStatus        = $"Loaded: {clip.name}  ({clip.length:F1}s)";
+        _loadStatusIsError = false;
+
+        // Auto-analyse for beat snapping
+        _analysisReady  = false;
+        _analyzedBeats.Clear();
+        _analysisStatus = "Analysing beats…";
+        _engine.Analyze(clip);
     }
 
     private static AudioType GetAudioTypeFromPath(string path)

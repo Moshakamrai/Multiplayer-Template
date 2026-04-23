@@ -251,6 +251,7 @@ GameObject:
   - component: {fileID: 1241885372}
   - component: {fileID: 1241885374}
   - component: {fileID: 1241885373}
+  - component: {fileID: 1241885375}
   m_Layer: 0
   m_Name: BeatMapperManager
   m_TagString: Untagged
@@ -382,8 +383,27 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   audioSource: {fileID: 1241885373}
+  maxSnapDistance: 0.12
   targetBPM: 100
   quantizeDivisor: 2
+--- !u!114 &1241885375
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1241885371}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b8cfb07a5a9248a40a4a91e07a5a2d95, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  thresholdMultiplier: 2
+  minOnsetGapSec: 0.12
+  strengthPercentileCutoff: 0
+  noTriggerBeforeSec: 5
+  minInputWindowSec: 3
+  maxInChainGapSec: 0.38
 --- !u!1 &1388852333
 GameObject:
   m_ObjectHideFlags: 0

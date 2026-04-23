@@ -223,12 +223,19 @@ public class CardManager : NetworkBehaviour
     {
         for (int i = 0; i < currentHandIndices.Count; i++)
         {
-            if (cardLibrary[currentHandIndices[i]].triggerName == trigger)
+            if (cardLibrary[currentHandIndices[i]].triggerName != trigger) continue;
+
+            // Combo cards never leave the hand — play the flash but keep the slot.
+            // The hand stays until the chain length changes or the round ends.
+            if (cardLibrary[currentHandIndices[i]].isCombo)
             {
                 TargetRpcPlayDiscardAnim(connectionToClient, currentHandIndices[i], i);
-                currentHandIndices.RemoveAt(i);
-                break;
+                return;
             }
+
+            TargetRpcPlayDiscardAnim(connectionToClient, currentHandIndices[i], i);
+            currentHandIndices.RemoveAt(i);
+            break;
         }
     }
 

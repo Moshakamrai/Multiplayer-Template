@@ -565,6 +565,277 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 343653709}
   m_CullTransparentMesh: 1
+--- !u!1 &400029501
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 400029503}
+  - component: {fileID: 400029502}
+  - component: {fileID: 400029504}
+  m_Layer: 0
+  m_Name: ComentaryManager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &400029502
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 400029501}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f1981b77373a8df478c88849b8adf997, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  holdDuration: 1.84
+  slideInDuration: 0.14
+  fadeOutDuration: 0.3
+  globalCooldown: 1.4
+  screenY: 0.141
+  excellentLines:
+  - TEXTBOOK EXECUTION!
+  - RIGHT ON THE BEAT!
+  - PERFECT TIMING!
+  - FLAWLESS!
+  - THAT IS HOW IT IS DONE!
+  - IMPECCABLE!
+  goodLines:
+  - SOLID HIT!
+  - CLEAN RHYTHM!
+  - GOOD READ!
+  - NICE TIMING!
+  - WELL PLAYED!
+  parryLines:
+  - UNBELIEVABLE CAGE!
+  - READ LIKE A BOOK!
+  - MASTERFUL PARRY!
+  - WHAT A COUNTER!
+  - PERFECT REFLEX!
+  - THAT IS GOING TO COST HIM!
+  dodgeLines:
+  - QUICK FEET!
+  - SLIPPED RIGHT PAST!
+  - NICE DODGE!
+  - OUT OF THE WAY!
+  boomLines:
+  - THE UNBREAKABLE PUNCH!
+  - NOTHING STOPS THAT!
+  - UNSTOPPABLE FORCE!
+  - BOOM! RIGHT THROUGH THE GUARD!
+  - YOU CANNOT BLOCK THAT!
+  comboLines:
+  - CHAIN COMBO!
+  - RAPID FIRE ATTACK!
+  - THEY ARE COOKING NOW!
+  - MULTI-HIT SEQUENCE!
+  - BEAUTIFUL COMBINATION!
+  knockoutLines:
+  - HE IS DOWN!
+  - AND IT IS OVER!
+  - KNOCKOUT!
+  - OUT COLD!
+  - LIGHTS OUT!
+  - GOODNIGHT!
+  badTimingLines:
+  - OFF THE BEAT!
+  - MISTIMED!
+  - NOT QUITE!
+  - NEEDS WORK...
+  heavyHitLines:
+  - MASSIVE DAMAGE!
+  - THAT IS GOING TO HURT!
+  - DEVASTATING BLOW!
+  - OHHH!
+  - WHAT A SHOT!
+  lowHealthLines:
+  - HE IS ON THE ROPES!
+  - RUNNING ON FUMES!
+  - ONE MORE SHOULD DO IT!
+  - DANGEROUSLY LOW!
+  - HE IS HANGING ON!
+  commentaryAudio: {fileID: 400029504}
+  voiceVolume: 1
+  excellentClips:
+  - {fileID: 8300000, guid: 20e8e24770c1e45498591f4fd7047f20, type: 3}
+  - {fileID: 8300000, guid: ba9c584d92f869048b1b77c1e4b40bfe, type: 3}
+  - {fileID: 8300000, guid: 4ee7ee7a7cdc4b846a28ca081476ff56, type: 3}
+  - {fileID: 8300000, guid: 936fe8c4cc1e26a4f8be304f8f8cbac3, type: 3}
+  - {fileID: 8300000, guid: 2f4f8571b15b6cd428273e679b8e8caf, type: 3}
+  - {fileID: 8300000, guid: f39d70cfd6144104ebe975bbd6a9ba27, type: 3}
+  goodClips:
+  - {fileID: 8300000, guid: 3da8298f58d51fc49a5055d7c92e3914, type: 3}
+  - {fileID: 8300000, guid: 02e3b98bc9aeb8e4e850debdeece1b73, type: 3}
+  - {fileID: 8300000, guid: 14375e8c912c1bf4e9d29e0b32c9f01b, type: 3}
+  - {fileID: 8300000, guid: 15bea4a8d0a29b5449275e36b8f8e1d3, type: 3}
+  - {fileID: 8300000, guid: 9da65b86e97d8d44a94e0be731a9ae4e, type: 3}
+  parryClips:
+  - {fileID: 8300000, guid: 1ba5932f32f02864ba5a22ee53ed727f, type: 3}
+  - {fileID: 8300000, guid: f9811d7594f26984c8445ae4e6297c4c, type: 3}
+  - {fileID: 8300000, guid: e8996d4125e2cba4fa0e9abb713816ef, type: 3}
+  - {fileID: 8300000, guid: 316ec5f1a34657d47a9f9af6b7cc8e7e, type: 3}
+  - {fileID: 8300000, guid: 561169e4135e08a43ac1481164cb97ea, type: 3}
+  - {fileID: 8300000, guid: bd1a260679e37b24e8f170fad3c14e18, type: 3}
+  dodgeClips:
+  - {fileID: 8300000, guid: 933bc7852e640bc4b80a9ad5a698fd58, type: 3}
+  - {fileID: 8300000, guid: 3e26ad0a8f5ef8b45948c9b366d7b39c, type: 3}
+  - {fileID: 8300000, guid: 867151cf17005c641966d4a365a0af86, type: 3}
+  - {fileID: 8300000, guid: acc5a3ce53eec294cbbc4fd1acebb6e2, type: 3}
+  boomClips:
+  - {fileID: 8300000, guid: c87f907afd3b9b24c982cc4108730a02, type: 3}
+  - {fileID: 8300000, guid: 8bf172d59819f6b46a4311342fa6f522, type: 3}
+  - {fileID: 8300000, guid: 213bcad487ad671439b2f6fd5c71e8c8, type: 3}
+  - {fileID: 8300000, guid: 4a92055fe23c1be418684761e9163794, type: 3}
+  - {fileID: 8300000, guid: 3509d48471015e64c9dd9a464fa5973d, type: 3}
+  comboClips:
+  - {fileID: 8300000, guid: 4a60eeb3af3fd8f4a8998c6536ecbf75, type: 3}
+  - {fileID: 8300000, guid: 6a09db5d0112b2e41a24061460e6ac8e, type: 3}
+  - {fileID: 8300000, guid: 5116a2d6fc3f340459d16d3c6db5e1ae, type: 3}
+  - {fileID: 8300000, guid: 807110d4bf58e394b90a0eb9052f0f29, type: 3}
+  - {fileID: 8300000, guid: df79ad5c0ae85e144ba120a5113bbbfe, type: 3}
+  knockoutClips:
+  - {fileID: 8300000, guid: bf2e97071e971b34d9b27d1c0e3917ca, type: 3}
+  - {fileID: 8300000, guid: 3401b84f7adef0149a7cb57156c8d131, type: 3}
+  - {fileID: 8300000, guid: 9cdeff3653bee534ba937c562f94d2e4, type: 3}
+  - {fileID: 8300000, guid: a97df983163c49548bd7f0271359fa3b, type: 3}
+  - {fileID: 8300000, guid: 792bdd6b1ee348f4e8fa3d73967c9a1b, type: 3}
+  - {fileID: 8300000, guid: 139d90c221b180740b70169d2d720160, type: 3}
+  badTimingClips:
+  - {fileID: 8300000, guid: 3a64e5c7dd0f87b42a7c8b1f60106e06, type: 3}
+  - {fileID: 8300000, guid: fea541a6125c7ac48aaf261f30a2d8bc, type: 3}
+  - {fileID: 8300000, guid: ddc8969f14027224f89191bff39f4a14, type: 3}
+  - {fileID: 8300000, guid: fbdf60117503e8b47bf57a4ced2e580b, type: 3}
+  - {fileID: 8300000, guid: f0cb1f8734d2f854e9e39e283bc713fd, type: 3}
+  heavyHitClips:
+  - {fileID: 8300000, guid: d332cf16700d6584fa32ab0bc97dc71c, type: 3}
+  - {fileID: 8300000, guid: 735557f818e076e42beda9f67e48bf1e, type: 3}
+  - {fileID: 8300000, guid: ab66e5c540261764c896a900642cff14, type: 3}
+  - {fileID: 8300000, guid: 1c3bce433ebc1ae43a0b6ac0734c0ba5, type: 3}
+  - {fileID: 8300000, guid: 436b8f3ff993ccd42b429672de3eeb49, type: 3}
+  lowHealthClips:
+  - {fileID: 8300000, guid: 9c73432e22020d84692b8701c30b6372, type: 3}
+  - {fileID: 8300000, guid: 6f89291c16be5bb41a039406a7786878, type: 3}
+  - {fileID: 8300000, guid: 003b58e118217944496390b1e3dcb6e2, type: 3}
+  - {fileID: 8300000, guid: 98fcd5ac21b48b24487dfe4066227aae, type: 3}
+  - {fileID: 8300000, guid: f134cc36d0053474a83e282e8ce689dc, type: 3}
+--- !u!4 &400029503
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 400029501}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 5.6059732, y: 2.9179513, z: -2.0249622}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!82 &400029504
+AudioSource:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 400029501}
+  m_Enabled: 1
+  serializedVersion: 4
+  OutputAudioMixerGroup: {fileID: 0}
+  m_audioClip: {fileID: 0}
+  m_PlayOnAwake: 0
+  m_Volume: 1
+  m_Pitch: 1
+  Loop: 0
+  Mute: 0
+  Spatialize: 0
+  SpatializePostEffects: 0
+  Priority: 98
+  DopplerLevel: 1
+  MinDistance: 1
+  MaxDistance: 500
+  Pan2D: 0
+  rolloffMode: 0
+  BypassEffects: 0
+  BypassListenerEffects: 0
+  BypassReverbZones: 0
+  rolloffCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    - serializedVersion: 3
+      time: 1
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  panLevelCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  spreadCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  reverbZoneMixCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
 --- !u!1 &437625957
 GameObject:
   m_ObjectHideFlags: 0
@@ -3471,3 +3742,4 @@ SceneRoots:
   - {fileID: 1771424219}
   - {fileID: 950944208}
   - {fileID: 694119871}
+  - {fileID: 400029503}

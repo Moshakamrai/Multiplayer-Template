@@ -238,11 +238,11 @@ public class PlayerCombat : NetworkBehaviour
     public void TargetShowTimingFeedback(string rating)
     {
         _timingText = rating;
-        _timingFade = 1.0f; // Reset fade timer to max
-        
-        if (rating == "EXCELLENT") _timingColor = Color.cyan;
-        else if (rating == "GOOD") _timingColor = Color.green;
-        else _timingColor = Color.red;
+        _timingFade = 1.0f;
+
+        if (rating == "EXCELLENT") { _timingColor = Color.cyan;  CommentaryManager.Instance?.Trigger(CommentaryEvent.Excellent); }
+        else if (rating == "GOOD") { _timingColor = Color.green; CommentaryManager.Instance?.Trigger(CommentaryEvent.Good); }
+        else                       { _timingColor = Color.red;   CommentaryManager.Instance?.Trigger(CommentaryEvent.BadTiming); }
     }
     public void QueueRhythmMove(string attackTrigger, Vector3 dashDir)
     {
@@ -414,7 +414,7 @@ public class PlayerCombat : NetworkBehaviour
 
     private IEnumerator HurtStunTimer() { IsHurting = true; yield return new WaitForSeconds(0.2f); IsHurting = false; }
     private IEnumerator FlashEffectRoutine() { if (playerRenderer == null || flashMaterial == null) yield break; playerRenderer.material = flashMaterial; yield return new WaitForSeconds(0.1f); playerRenderer.material = _originalMaterial; }
-    [ClientRpc] void RpcKnockout() { IsDead = true; if (animator != null) animator.SetTrigger("Knock out"); if (isServer) StartCoroutine(ServerRestartMatchRoutine()); }
+    [ClientRpc] void RpcKnockout() { IsDead = true; if (animator != null) animator.SetTrigger("Knock out"); CommentaryManager.Instance?.Trigger(CommentaryEvent.Knockout, forceInterrupt: true); if (isServer) StartCoroutine(ServerRestartMatchRoutine()); }
     [Server] private IEnumerator ServerRestartMatchRoutine() { yield return new WaitForSeconds(4f); NetworkManager.singleton.ServerChangeScene(SceneManager.GetActiveScene().name); }
 
     private Texture2D _whiteTexture;

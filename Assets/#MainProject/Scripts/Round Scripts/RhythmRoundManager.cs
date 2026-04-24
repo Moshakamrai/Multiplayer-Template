@@ -625,6 +625,8 @@ public class RhythmRoundManager : NetworkBehaviour
     [ClientRpc]
     private void RpcLogCombatTrade(string p1Name, string p1Move, int p1State, int p1Dmg, string p2Name, string p2Move, int p2State, int p2Dmg)
     {
+        CommentaryManager.Instance?.OnTradeResolved(p1Move, p1Dmg, p2Move, p2Dmg, customIsCombo);
+
         combatLogs.Add(new CombatLogEntry
         {
             p1Name = string.IsNullOrEmpty(p1Name) ? "Player 1" : p1Name,

@@ -43,7 +43,13 @@ public class PlayerCombat : NetworkBehaviour
 
     private VoiceCommandManager _vcm;
 
-    [SyncVar] public float lastVocalSpikeTime = -1f; // Timestamp of the loudest peak
+    [SyncVar] public float lastVocalSpikeTime = -1f;
+
+    // Spike detection guards — prevent holding voice from gaming timing
+    private bool  _spikeLockedThisBeat   = false;
+    private float _lastTrackedBeatFire   = -1f;
+    private const float BEAT_DEAD_ZONE   = 0.2f;  // ignore spikes this long after each beat
+    private const float SHOUT_WINDOW     = 0.5f;  // window before beat where timing is graded
 
     private float _hurtFlashFade = 0f;
     private float _successFlashFade = 0f;
@@ -95,18 +101,30 @@ public class PlayerCombat : NetworkBehaviour
     {
         if (vp == null || _vcm == null || RhythmRoundManager.Instance == null) return;
 
-        bool isChainMode = !RhythmRoundManager.Instance.IsSingleMoveMode();
+        var   rmm          = RhythmRoundManager.Instance;
+        float currentTime  = rmm.GetCurrentTrackTime();
+        float beatFireTime = rmm.lastBeatFireTime;
 
-        // --- 1. Logic Gate ---
-        // Single mode: needs a pending attack/dash queued.
-        // Chain mode:  needs at least one move in the combo buffer.
+        // ── Dead zone: silence spike detection for BEAT_DEAD_ZONE seconds after each beat ──
+        // This prevents a shout from the current action bleeding into the next timing window.
+        if (beatFireTime > 0f && currentTime - beatFireTime < BEAT_DEAD_ZONE) return;
+
+        // ── Reset first-spike gate when a new beat cycle begins ───────────────────────────
+        if (beatFireTime != _lastTrackedBeatFire)
+        {
+            _spikeLockedThisBeat  = false;
+            _lastTrackedBeatFire  = beatFireTime;
+        }
+
+        bool isChainMode = !rmm.IsSingleMoveMode();
+
+        // ── Logic gate: need a queued action to care about timing ─────────────────────────
         string currentMove;
         bool   isDashing;
 
         if (isChainMode)
         {
             if (_comboBuffer.Count == 0) return;
-            // Use the most-recently queued chain move for window sizing
             var latest = _comboBuffer[_comboBuffer.Count - 1];
             currentMove = latest.attack;
             isDashing   = (latest.dash != Vector3.zero);
@@ -118,50 +136,35 @@ public class PlayerCombat : NetworkBehaviour
             if (string.IsNullOrEmpty(currentMove) && !isDashing) return;
         }
 
+        float nextBeat        = rmm.GetNextBeatTime();
+        float timeUntilImpact = nextBeat - currentTime;
+
+        // ── Both modes: only accept spikes inside the shout window (last SHOUT_WINDOW seconds) ──
+        // Outside the window = action input stage. Shouts there are for command selection, not timing.
+        bool inShoutWindow = timeUntilImpact > 0f && timeUntilImpact <= SHOUT_WINDOW;
+        if (!inShoutWindow) return;
+
+        // ── First spike only: once locked, ignore further volume until next beat cycle ─────
+        if (_spikeLockedThisBeat) return;
+
         float currentVol = vp.CurrentRawVolume;
         float threshold  = _vcm.parryVolumeThreshold;
-        bool  vocalSpike = currentVol >= threshold;
+        if (currentVol < threshold) return;
 
-        float currentTime      = RhythmRoundManager.Instance.GetCurrentTrackTime();
-        float nextBeat         = RhythmRoundManager.Instance.GetNextBeatTime();
-        float timeUntilImpact  = nextBeat - currentTime;
+        // ── Register the timing spike ─────────────────────────────────────────────────────
+        _spikeLockedThisBeat = true;
 
-        // --- 2. Chain Mode: register spike on every shout while buffer is filling ---
-        // No tight window check — the player shouts all moves before the beat cluster
-        // fires, so any loud-enough shout updates the spike timestamp. The last shout
-        // (closest to the beat) ends up as the timing reference.
-        if (isChainMode)
+        if (!isChainMode && currentMove == "ParryIntent")
         {
-            if (vocalSpike)
-            {
-                CmdRegisterVocalSpike(currentTime);
-                Debug.Log($"<color=cyan>CHAIN SPIKE:</color> registered at {currentTime:F3}s ({timeUntilImpact:F3}s until beat)");
-            }
-            return;
+            CmdConfirmEliteParry(currentTime);
+            Debug.Log($"<color=green>VOCAL SUCCESS:</color> Parry (CAGE) at {timeUntilImpact:F3}s until beat.");
+            _pendingAttackTrigger = "ParryLocked";
         }
-
-        // --- 3. Single Mode: narrow window check (original logic) ---
-        float window = 0.3f;
-        if (currentMove == "ParryIntent")       window = 0.3f;
-        else if (currentMove == "UnbreakablePunch") window = 0.2f;
-        else if (currentMove == "Block")        window = 0.4f;
-        else if (isDashing)                     window = 0.3f;
-
-        bool isInsideWindow = timeUntilImpact > 0 && timeUntilImpact <= window;
-
-        if (vocalSpike && isInsideWindow)
+        else
         {
-            if (currentMove == "ParryIntent")
-            {
-                CmdConfirmEliteParry(currentTime);
-                Debug.Log($"<color=green>VOCAL SUCCESS:</color> Parry (CAGE) verified locally at {timeUntilImpact:F3}s.");
-                _pendingAttackTrigger = "ParryLocked";
-            }
-            else
-            {
-                CmdRegisterVocalSpike(currentTime);
-                Debug.Log($"<color=green>VOCAL SUCCESS:</color> {currentMove} spike registered.");
-            }
+            CmdRegisterVocalSpike(currentTime);
+            string label = isChainMode ? "CHAIN" : currentMove;
+            Debug.Log($"<color=cyan>SPIKE [{label}]:</color> t={currentTime:F3}s  Δbeat={timeUntilImpact:F3}s");
         }
     }
 

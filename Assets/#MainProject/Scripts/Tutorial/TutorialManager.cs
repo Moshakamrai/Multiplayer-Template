@@ -482,71 +482,159 @@ public class TutorialManager : MonoBehaviour
         GUI.DrawTexture(new Rect(0, 0, sw, sh), _px);
         GUI.color = Color.white;
 
+        // Title
         _headStyle.fontSize = Mathf.Clamp((int)(sw / 16f), 30, 64);
         GUI.color = _s2_complete ? new Color(0.2f, 1f, 0.4f) : Color.white;
-        GUI.Label(new Rect(0, sh * 0.08f, sw, 80), _s2_complete ? "TIMING MASTERED!" : "TIMING ONLY", _headStyle);
+        GUI.Label(new Rect(0, sh * 0.05f, sw, 70), _s2_complete ? "TIMING MASTERED!" : "TIMING ONLY", _headStyle);
         GUI.color = Color.white;
 
-        _bodyStyle.fontSize = Mathf.Clamp((int)(sw / 44f), 16, 28);
-        GUI.color = new Color(1f, 1f, 1f, 0.75f);
-        GUI.Label(new Rect(0, sh * 0.18f, sw, 44), _s2_complete ? "MOVING ON..." : "SHOUT ON THE BEAT", _bodyStyle);
+        // Sub-instruction
+        _bodyStyle.fontSize = Mathf.Clamp((int)(sw / 52f), 13, 22);
+        GUI.color = new Color(1f, 1f, 1f, 0.50f);
+        GUI.Label(new Rect(0, sh * 0.14f, sw, 34), _s2_complete ? "MOVING ON..." : "SHOUT WHEN THE BAR REACHES THE GREEN ZONE", _bodyStyle);
         GUI.color = Color.white;
 
-        // Grade text
-        if (_s2_gradeFade > 0f && !string.IsNullOrEmpty(_s2_lastGrade))
+        // ── Timing state ──────────────────────────────────────────────────
+        float beatFrac = Mathf.Clamp01((_s2_elapsed % stage2BeatInterval) / stage2BeatInterval);
+        float goodFrac = Mathf.Clamp01(goodWindow     / stage2BeatInterval);
+        float exFrac   = Mathf.Clamp01(excellentWindow / stage2BeatInterval);
+        bool  inGood   = beatFrac >= (1f - goodFrac);
+        bool  inEx     = beatFrac >= (1f - exFrac);
+        float glow     = Mathf.Pow(beatFrac, 2.2f); // dim → bright as beat approaches
+        float flashT   = _s2_beatFlash / BEAT_FLASH_DUR;
+
+        // ── Card ──────────────────────────────────────────────────────────
+        float cardW = Mathf.Clamp(sw * 0.38f, 260f, 430f);
+        float cardH = Mathf.Clamp(sh * 0.29f, 150f, 210f);
+        float cardX = sw * 0.5f - cardW * 0.5f;
+        float cardY = sh * 0.26f;
+
+        // Card background — shifts green inside zone, flashes white on beat
+        Color cardBg = _s2_beatFlash > 0f
+            ? Color.Lerp(new Color(0.12f, 0.12f, 0.16f, 0.95f), new Color(0.75f, 0.95f, 0.75f, 0.95f), flashT)
+            : inGood
+                ? Color.Lerp(new Color(0.12f, 0.12f, 0.16f, 0.95f), new Color(0.05f, 0.20f, 0.07f, 0.95f),
+                             (beatFrac - (1f - goodFrac)) / Mathf.Max(goodFrac, 0.001f))
+                : new Color(0.12f, 0.12f, 0.16f, 0.95f);
+        GUI.color = cardBg;
+        GUI.DrawTexture(new Rect(cardX, cardY, cardW, cardH), _px);
+
+        // Card border — glows white→green as beat approaches, flashes on hit
+        float bw = Mathf.Lerp(2f, 5f, glow);
+        Color borderCol = inGood
+            ? Color.Lerp(new Color(0.3f, 1f, 0.4f, 0.75f), new Color(0.55f, 1f, 0.55f, 1f),
+                         (beatFrac - (1f - goodFrac)) / Mathf.Max(goodFrac, 0.001f))
+            : Color.Lerp(new Color(1f, 1f, 1f, 0.15f), new Color(0.3f, 1f, 0.4f, 0.75f), glow);
+        if (_s2_beatFlash > 0f) borderCol = Color.Lerp(borderCol, Color.white, flashT);
+        GUI.color = borderCol;
+        GUI.DrawTexture(new Rect(cardX,           cardY,              cardW, bw),    _px);
+        GUI.DrawTexture(new Rect(cardX,           cardY + cardH - bw, cardW, bw),    _px);
+        GUI.DrawTexture(new Rect(cardX,           cardY,              bw,    cardH), _px);
+        GUI.DrawTexture(new Rect(cardX + cardW - bw, cardY,           bw,    cardH), _px);
+
+        // "SHOUT!" label inside card (dims when waiting, lights up in zone)
+        _cardStyle.fontSize = Mathf.Clamp((int)(sw / 20f), 26, 54);
+        Color labelCol = inGood
+            ? Color.Lerp(new Color(0.75f, 0.75f, 0.75f), new Color(0.35f, 1f, 0.45f),
+                         (beatFrac - (1f - goodFrac)) / Mathf.Max(goodFrac, 0.001f))
+            : Color.Lerp(new Color(0.35f, 0.35f, 0.35f), new Color(0.80f, 0.80f, 0.80f), glow);
+        if (_s2_beatFlash > 0f) labelCol = Color.Lerp(labelCol, Color.white, flashT);
+        GUI.color = labelCol;
+        GUI.Label(new Rect(cardX, cardY, cardW, cardH * 0.52f), "SHOUT!", _cardStyle);
+        GUI.color = Color.white;
+
+        // ── Fill bar inside card ──────────────────────────────────────────
+        float pad  = cardW * 0.07f;
+        float barW = cardW - pad * 2f;
+        float barH = Mathf.Clamp(cardH * 0.17f, 12f, 22f);
+        float barX = cardX + pad;
+        float barY = cardY + cardH * 0.65f;
+
+        // Background
+        GUI.color = new Color(0f, 0f, 0f, 0.55f);
+        GUI.DrawTexture(new Rect(barX, barY, barW, barH), _px);
+
+        // Good zone (always visible)
+        GUI.color = new Color(0.1f, 0.7f, 0.15f, 0.30f);
+        GUI.DrawTexture(new Rect(barX + barW * (1f - goodFrac), barY, barW * goodFrac, barH), _px);
+
+        // Excellent zone
+        GUI.color = new Color(0.2f, 1f, 0.3f, 0.58f);
+        GUI.DrawTexture(new Rect(barX + barW * (1f - exFrac), barY, barW * exFrac, barH), _px);
+
+        // Moving fill — yellow → bright green as it enters zone
+        Color fillCol = inGood
+            ? Color.Lerp(new Color(1f, 0.85f, 0.1f, 0.92f), new Color(0.25f, 1f, 0.35f, 0.92f),
+                         (beatFrac - (1f - goodFrac)) / Mathf.Max(goodFrac, 0.001f))
+            : new Color(1f, 0.85f, 0.1f, 0.78f);
+        if (_s2_beatFlash > 0f) fillCol = Color.Lerp(fillCol, Color.white, flashT * 0.85f);
+        GUI.color = fillCol;
+        GUI.DrawTexture(new Rect(barX, barY, barW * beatFrac, barH), _px);
+
+        // Bar border
+        GUI.color = new Color(1f, 1f, 1f, 0.20f);
+        GUI.DrawTexture(new Rect(barX,        barY,        barW,  1.5f),  _px);
+        GUI.DrawTexture(new Rect(barX,        barY + barH, barW,  1.5f),  _px);
+        GUI.DrawTexture(new Rect(barX,        barY,        1.5f,  barH),  _px);
+        GUI.DrawTexture(new Rect(barX + barW, barY,        1.5f,  barH),  _px);
+        GUI.color = Color.white;
+
+        // "SHOUT ZONE" micro-label above the green zone
+        _bodyStyle.fontSize = Mathf.Clamp((int)(sw / 72f), 9, 14);
+        GUI.color = new Color(0.3f, 1f, 0.4f, 0.65f);
+        GUI.Label(new Rect(barX + barW * (1f - goodFrac), barY - 17f, barW * goodFrac, 17f), "SHOUT ZONE", _bodyStyle);
+        GUI.color = Color.white;
+
+        // ── State label below card ─────────────────────────────────────────
+        string statusText;
+        Color  statusCol;
+        if (_s2_beatFlash > 0f)
+        {
+            statusText = _s2_lastGrade;
+            statusCol  = _s2_lastGrade.StartsWith("EX") ? new Color(0.2f, 1f, 0.4f)
+                       : _s2_lastGrade == "GOOD"        ? new Color(0.4f, 0.85f, 1f)
+                       :                                   new Color(1f, 0.35f, 0.2f);
+        }
+        else if (inEx)
+            { statusText = "NOW!";          statusCol = new Color(0.25f, 1f, 0.4f); }
+        else if (inGood)
+            { statusText = "SHOUT!";        statusCol = new Color(0.55f, 1f, 0.6f); }
+        else if (beatFrac > 0.55f)
+        {
+            float ramp = (beatFrac - 0.55f) / 0.45f;
+            statusText = "GET READY...";   statusCol = new Color(1f, Mathf.Lerp(0.7f, 0.95f, ramp), 0.2f, Mathf.Lerp(0.4f, 0.9f, ramp));
+        }
+        else
+            { statusText = "WAIT...";       statusCol = new Color(1f, 1f, 1f, 0.22f); }
+
+        float statusY = cardY + cardH + 14f;
+        _bodyStyle.fontSize = Mathf.Clamp((int)(sw / 30f), 24, 42);
+        GUI.color = statusCol;
+        GUI.Label(new Rect(0, statusY, sw, 50f), statusText, _bodyStyle);
+        GUI.color = Color.white;
+
+        // ── Grade float (above card) ───────────────────────────────────────
+        if (_s2_gradeFade > 0f && _s2_beatFlash <= 0f && !string.IsNullOrEmpty(_s2_lastGrade))
         {
             float alpha    = Mathf.Clamp01(_s2_gradeFade / GRADE_FADE_DUR);
+            float rise     = (1f - alpha) * 28f;
             Color gradeCol = _s2_lastGrade.StartsWith("EX") ? new Color(0.2f, 1f, 0.4f, alpha)
                            : _s2_lastGrade == "GOOD"        ? new Color(0.4f, 0.85f, 1f, alpha)
-                           :                                   new Color(1f, 0.3f, 0.2f, alpha);
-            _headStyle.fontSize = Mathf.Clamp((int)(sw / 18f), 28, 56);
+                           :                                   new Color(1f, 0.35f, 0.2f, alpha);
+            _headStyle.fontSize = Mathf.Clamp((int)(sw / 17f), 28, 58);
             GUI.color = gradeCol;
-            GUI.Label(new Rect(0, sh * 0.35f, sw, 70), _s2_lastGrade, _headStyle);
+            GUI.Label(new Rect(0, cardY - 72f - rise, sw, 68f), _s2_lastGrade, _headStyle);
             GUI.color = Color.white;
         }
 
-        // Timing bar
-        float barW = sw * 0.72f, barH = 28f;
-        float barX = sw * 0.14f, barY = sh * 0.52f;
+        // ── Beat dots ─────────────────────────────────────────────────────
+        float dotsY = statusY + 56f;
+        DrawBeatDots(cardX, dotsY, cardW);
 
-        // Track background
-        GUI.color = new Color(1f, 1f, 1f, 0.08f);
-        GUI.DrawTexture(new Rect(barX, barY, barW, barH), _px);
-
-        // Good zone (green)
-        float goodFrac = Mathf.Clamp01(goodWindow / stage2BeatInterval);
-        float exFrac   = Mathf.Clamp01(excellentWindow / stage2BeatInterval);
-        GUI.color = new Color(0.1f, 0.85f, 0.2f, 0.30f);
-        GUI.DrawTexture(new Rect(barX + barW * (1f - goodFrac), barY, barW * goodFrac, barH), _px);
-
-        // Excellent zone (bright green)
-        GUI.color = new Color(0.2f, 1f, 0.3f, 0.60f);
-        GUI.DrawTexture(new Rect(barX + barW * (1f - exFrac), barY, barW * exFrac, barH), _px);
-
-        // Cursor
-        float cursorFrac = Mathf.Clamp01((_s2_elapsed % stage2BeatInterval) / stage2BeatInterval);
-        float cursorX    = barX + barW * cursorFrac - 3f;
-        Color cursorCol  = _s2_beatFlash > 0f
-            ? Color.Lerp(Color.white, new Color(1f, 0.85f, 0.1f), 1f - _s2_beatFlash / BEAT_FLASH_DUR)
-            : new Color(1f, 0.85f, 0.1f);
-        GUI.color = cursorCol;
-        GUI.DrawTexture(new Rect(cursorX, barY - 7f, 6f, barH + 14f), _px);
-
-        // Border
-        GUI.color = new Color(1f, 1f, 1f, 0.28f);
-        GUI.DrawTexture(new Rect(barX,           barY,           barW, 2f),   _px);
-        GUI.DrawTexture(new Rect(barX,           barY + barH,    barW, 2f),   _px);
-        GUI.DrawTexture(new Rect(barX,           barY,           2f,   barH), _px);
-        GUI.DrawTexture(new Rect(barX + barW,    barY,           2f,   barH), _px);
-        GUI.color = Color.white;
-
-        // Beat dots (progress indicator)
-        DrawBeatDots(barX, barY + barH + 16f, barW);
-
-        // Hit counter
-        _bodyStyle.fontSize = Mathf.Clamp((int)(sw / 36f), 20, 36);
-        GUI.color = new Color(1f, 1f, 1f, 0.85f);
-        GUI.Label(new Rect(0, sh * 0.70f, sw, 50), $"{_s2_hitCount} / {hitsToPassStage2} HITS", _bodyStyle);
+        // ── Hit counter ───────────────────────────────────────────────────
+        _bodyStyle.fontSize = Mathf.Clamp((int)(sw / 40f), 18, 30);
+        GUI.color = new Color(1f, 1f, 1f, 0.78f);
+        GUI.Label(new Rect(0, dotsY + 26f, sw, 40f), $"{_s2_hitCount} / {hitsToPassStage2} HITS", _bodyStyle);
         GUI.color = Color.white;
 
         DrawBackButton();
@@ -555,11 +643,11 @@ public class TutorialManager : MonoBehaviour
     private void DrawBeatDots(float x, float y, float w)
     {
         float spacing = w / MAX_S2_BEATS;
-        float dotSize = Mathf.Clamp(spacing - 4f, 5f, 16f);
+        float dotSize = Mathf.Clamp(spacing - 4f, 5f, 14f);
         for (int i = 0; i < MAX_S2_BEATS; i++)
         {
             bool done = i < _s2_totalBeats;
-            GUI.color = done ? new Color(0.3f, 0.9f, 0.4f, 0.8f) : new Color(1f, 1f, 1f, 0.18f);
+            GUI.color = done ? new Color(0.3f, 0.9f, 0.4f, 0.8f) : new Color(1f, 1f, 1f, 0.16f);
             GUI.DrawTexture(new Rect(x + i * spacing, y, dotSize, dotSize), _px);
         }
         GUI.color = Color.white;

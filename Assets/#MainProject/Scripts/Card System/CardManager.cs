@@ -39,11 +39,15 @@ public class CardManager : NetworkBehaviour
     private List<CardFlash> _activeCardFlashes = new List<CardFlash>();
 
     private Texture2D _whiteTex;
+    private GUIStyle  _titleStyle;
+    private GUIStyle  _descStyle;
+    private GUIStyle  _statusStyle;
+    private GUIStyle  _badgeStyle;
 
     // Card dimensions
-    const float cWidth  = 160f;
-    const float cHeight = 180f;
-    const float cSpace  = 15f;
+    const float cWidth  = 200f;
+    const float cHeight = 230f;
+    const float cSpace  = 18f;
 
     // Combo hand state (server only)
     private bool _comboHandDealt    = false;
@@ -255,53 +259,42 @@ public class CardManager : NetworkBehaviour
         if (cardLibrary == null || cardLibrary.Count == 0) return;
 
         if (_whiteTex == null) { _whiteTex = new Texture2D(1, 1); _whiteTex.SetPixel(0, 0, Color.white); _whiteTex.Apply(); }
-
-        GUIStyle titleStyle = new GUIStyle(GUI.skin.label)
-        {
-            alignment = TextAnchor.UpperCenter,
-            fontStyle = FontStyle.Bold,
-            fontSize = 22
-        };
-        GUIStyle descStyle = new GUIStyle(GUI.skin.label)
-        {
-            alignment = TextAnchor.LowerCenter,
-            fontSize = 11,
-            wordWrap = true
-        };
+        EnsureStyles();
 
         float totalW = (cWidth * 4) + (cSpace * 3);
         float startX = Screen.width / 2f - totalW / 2f;
 
         // --- Timing state ---
-        var rmm = RhythmRoundManager.Instance;
-        bool isRhythm = rmm != null && rmm.isRoundActive;
-        float fillRatio  = 1f;
-        bool  isShout    = false;
-        float pulse      = 0f;
+        var   rmm         = RhythmRoundManager.Instance;
+        bool  isRhythm    = rmm != null && rmm.isRoundActive;
+        float approachFrac = 0f;   // 0 = just after beat, 1 = shout now
+        bool  isShout     = false;
+        float pulse       = 0f;
 
         if (isRhythm)
         {
-            float trackTime  = rmm.GetCurrentTrackTime();
-            float nextBeat   = rmm.GetNextBeatTime();
-            float timeToNext = nextBeat > 0f ? nextBeat - trackTime : 999f;
+            float trackTime   = rmm.GetCurrentTrackTime();
+            float nextBeat    = rmm.GetNextBeatTime();
+            float timeToNext  = nextBeat > 0f ? nextBeat - trackTime : 999f;
             float windowTotal = (nextBeat - rmm.lastBeatFireTime) - 0.5f;
             float elapsed     = trackTime - rmm.lastBeatFireTime;
-            fillRatio = windowTotal > 0.01f ? Mathf.Clamp01(1f - elapsed / windowTotal) : 0f;
-            isShout   = timeToNext <= 0.5f && timeToNext >= -0.2f;
-            pulse     = (Mathf.Sin(Time.time * 14f) + 1f) * 0.5f;
+            float fillRatio   = windowTotal > 0.01f ? Mathf.Clamp01(1f - elapsed / windowTotal) : 0f;
+            isShout       = timeToNext <= 0.5f && timeToNext >= -0.2f;
+            approachFrac  = isShout ? 1f : (1f - fillRatio);
+            pulse         = (Mathf.Sin(Time.time * 14f) + 1f) * 0.5f;
         }
 
         // --- Active hand ---
-        float hoverAmp  = isRhythm ? 3f : 6f;
-        float hoverY    = Mathf.Sin(Time.time * 2.5f) * hoverAmp;
-        float baseY     = Screen.height - cHeight - 60f + hoverY;
+        float hoverAmp = isRhythm ? 2f : 5f;
+        float hoverY   = Mathf.Sin(Time.time * 2.5f) * hoverAmp;
+        float baseY    = Screen.height - cHeight - 60f + hoverY;
 
         for (int i = 0; i < currentHandIndices.Count; i++)
         {
             int index = currentHandIndices[i];
             if (index < 0 || index >= cardLibrary.Count) continue;
             Rect r = new Rect(startX + i * (cWidth + cSpace), baseY, cWidth, cHeight);
-            DrawCard(r, cardLibrary[index], isRhythm, fillRatio, isShout, pulse, titleStyle, descStyle, 1f);
+            DrawCard(r, cardLibrary[index], isRhythm, approachFrac, isShout, pulse, 1f);
         }
 
         // --- Card use flash ---
@@ -322,84 +315,172 @@ public class CardManager : NetworkBehaviour
             Rect r = new Rect(_activeDiscardAnims[i].startX,
                               Screen.height - cHeight - 60f - t * 150f,
                               cWidth, cHeight);
-            DrawCard(r, cardLibrary[_activeDiscardAnims[i].libIndex], false, 1f, false, 0f, titleStyle, descStyle, 1f - t);
+            DrawCard(r, cardLibrary[_activeDiscardAnims[i].libIndex], false, 0f, false, 0f, 1f - t);
         }
 
         GUI.color = Color.white;
     }
 
+    // approachFrac: 0 = just after beat fired, 1 = shout window active
     private void DrawCard(Rect r, CombatCard card,
-                          bool isRhythm, float fillRatio, bool isShout, float pulse,
-                          GUIStyle titleStyle, GUIStyle descStyle, float alpha)
+                          bool isRhythm, float approachFrac, bool isShout, float pulse,
+                          float alpha)
     {
         bool isCombo = card.isCombo;
 
-        // 1. Dark base — slightly warmer for combo cards
-        GUI.color = isCombo
-            ? new Color(0.10f, 0.07f, 0.02f, 0.92f * alpha)
-            : new Color(0.06f, 0.06f, 0.10f, 0.88f * alpha);
+        // ── 1. Background ─────────────────────────────────────────────────
+        Color bgBase = isCombo
+            ? new Color(0.09f, 0.05f, 0.01f, 0.93f * alpha)
+            : new Color(0.04f, 0.04f, 0.09f, 0.90f * alpha);
+        if (isShout)
+            bgBase = Color.Lerp(bgBase,
+                isCombo ? new Color(0.18f, 0.11f, 0f,    0.93f * alpha)
+                        : new Color(0.03f, 0.12f, 0.15f, 0.90f * alpha),
+                pulse * 0.7f);
+        GUI.color = bgBase;
         GUI.DrawTexture(r, _whiteTex);
 
+        // ── 2. Top charge strip ───────────────────────────────────────────
+        // Thin horizontal bar at the very top that lights up as beat approaches
         if (isRhythm)
         {
-            // 2. Timing fill — full card width, depletes from right to left
-            Color fillColor;
-            if (isShout)
-                fillColor = Color.Lerp(new Color(1f, 0.15f, 0f, 0.82f), new Color(1f, 0.6f, 0.1f, 0.82f), pulse);
-            else if (fillRatio < 0.25f)
-                fillColor = new Color(1f, 0.8f, 0f, 0.72f);   // yellow
-            else
-                fillColor = new Color(0f, 0.85f, 1f, 0.62f);  // cyan
-
-            float fillH = isShout ? r.height : r.height * fillRatio;
-            GUI.color = fillColor;
-            GUI.DrawTexture(new Rect(r.x, r.y, r.width, fillH), _whiteTex);
-
-            if (isShout)
-            {
-                // 3b. Pulsing ring in center — signals SHOUT NOW
-                float sz = 28f + pulse * 16f;
-                float cx = r.x + r.width  * 0.5f - sz * 0.5f;
-                float cy = r.y + r.height * 0.5f - sz * 0.5f;
-                GUI.color = new Color(0f, 0f, 0f, 0.9f);
-                GUI.DrawTexture(new Rect(cx, cy, sz, sz), _whiteTex);
-                float inner = sz * 0.42f;
-                GUI.color = new Color(1f, 1f, 1f, 0.65f + pulse * 0.35f);
-                GUI.DrawTexture(new Rect(cx + (sz - inner) * 0.5f, cy + (sz - inner) * 0.5f, inner, inner), _whiteTex);
-            }
+            float chargeAlpha = Mathf.Lerp(0.15f, 0.95f, approachFrac) * alpha;
+            Color chargeCol   = isShout
+                ? Color.Lerp(
+                    isCombo ? new Color(1f, 0.7f, 0f)  : new Color(0.1f, 1f, 0.45f),
+                    Color.white, pulse * 0.45f)
+                : isCombo ? new Color(1f, 0.6f, 0f)    : new Color(0f, 0.85f, 1f);
+            GUI.color = new Color(chargeCol.r, chargeCol.g, chargeCol.b, chargeAlpha);
+            GUI.DrawTexture(new Rect(r.x, r.y, r.width * approachFrac, 3f), _whiteTex);
         }
 
-        // 4. Border — gold for combo, neon magenta for normal
-        GUI.color = isCombo
-            ? new Color(1f, 0.75f, 0f, 0.90f * alpha)
-            : new Color(0.8f, 0f, 1f, 0.72f * alpha);
-        GUI.DrawTexture(new Rect(r.x - 2f,       r.y,            2f,           r.height),  _whiteTex);
-        GUI.DrawTexture(new Rect(r.x + r.width,  r.y,            2f,           r.height),  _whiteTex);
-        GUI.DrawTexture(new Rect(r.x - 2f,       r.y - 2f,       r.width + 4f, 2f),        _whiteTex);
-        GUI.DrawTexture(new Rect(r.x - 2f,       r.y + r.height, r.width + 4f, 2f),        _whiteTex);
+        // ── 3. Approach bar (bottom of card) ──────────────────────────────
+        if (isRhythm)
+        {
+            const float barPad    = 10f;
+            const float barH      = 18f;
+            const float shoutFrac = 0.20f;   // rightmost 20% = shout zone
+            float barW = r.width - barPad * 2f;
+            float barX = r.x  + barPad;
+            float barY = r.y  + r.height - barH - 8f;
 
-        // 5. Text
-        titleStyle.normal.textColor = isCombo
-            ? new Color(1f, 0.9f, 0.25f, alpha)
-            : new Color(1f, 1f, 1f, alpha);
-        descStyle.normal.textColor = isCombo
-            ? new Color(1f, 0.82f, 0.4f, alpha)
-            : new Color(0.88f, 0.88f, 0.88f, alpha);
+            // Track bg
+            GUI.color = new Color(0f, 0f, 0f, 0.55f * alpha);
+            GUI.DrawTexture(new Rect(barX, barY, barW, barH), _whiteTex);
+
+            // Shout zone tint
+            GUI.color = isCombo
+                ? new Color(1f, 0.65f, 0f,  0.28f * alpha)
+                : new Color(0f, 1f,    0.3f, 0.28f * alpha);
+            GUI.DrawTexture(new Rect(barX + barW * (1f - shoutFrac), barY, barW * shoutFrac, barH), _whiteTex);
+
+            // Moving fill  cyan → yellow → neon-green/gold as it approaches
+            Color fillCol;
+            if (isShout)
+                fillCol = Color.Lerp(
+                    isCombo ? new Color(1f, 0.7f,  0f,   0.92f * alpha)
+                            : new Color(0.1f, 1f, 0.45f, 0.92f * alpha),
+                    Color.white, pulse * 0.35f);
+            else if (approachFrac > 0.72f)
+                fillCol = Color.Lerp(
+                    new Color(1f, 0.8f, 0.0f, 0.80f * alpha),
+                    isCombo ? new Color(1f, 0.65f, 0f,   0.90f * alpha)
+                            : new Color(0.1f, 1f, 0.4f, 0.90f * alpha),
+                    (approachFrac - 0.72f) / 0.28f);
+            else
+                fillCol = new Color(0f, 0.85f, 1f, 0.70f * alpha);
+
+            GUI.color = fillCol;
+            GUI.DrawTexture(new Rect(barX, barY, barW * approachFrac, barH), _whiteTex);
+
+            // Bar border
+            GUI.color = new Color(1f, 1f, 1f, 0.18f * alpha);
+            GUI.DrawTexture(new Rect(barX,        barY,        barW,  1.5f), _whiteTex);
+            GUI.DrawTexture(new Rect(barX,        barY + barH, barW,  1.5f), _whiteTex);
+            GUI.DrawTexture(new Rect(barX,        barY,        1.5f,  barH), _whiteTex);
+            GUI.DrawTexture(new Rect(barX + barW, barY,        1.5f,  barH), _whiteTex);
+        }
+
+        // ── 4. Corner bracket borders ─────────────────────────────────────
+        float glowT  = isRhythm ? approachFrac : 0f;
+        float bLen   = isShout ? Mathf.Lerp(24f, 30f, pulse) : 22f;
+        float bThick = isShout ? Mathf.Lerp(2f,  3.5f, pulse) : 2f;
+
+        Color bracketBase = isCombo ? new Color(1f, 0.75f, 0f, alpha)  : new Color(0.85f, 0f, 1f, alpha);
+        Color bracketHot  = isCombo ? new Color(1f, 0.92f, 0.3f, alpha): new Color(0.6f, 0f, 1f, alpha);
+        if (isShout) bracketBase = Color.Lerp(bracketBase, Color.white, pulse * 0.45f);
+        Color bCol = Color.Lerp(bracketBase, bracketHot, glowT);
+        GUI.color = new Color(bCol.r, bCol.g, bCol.b, bCol.a * (0.55f + glowT * 0.45f));
+
+        // top-left
+        GUI.DrawTexture(new Rect(r.x,              r.y,       bLen,   bThick), _whiteTex);
+        GUI.DrawTexture(new Rect(r.x,              r.y,       bThick, bLen),   _whiteTex);
+        // top-right
+        GUI.DrawTexture(new Rect(r.x + r.width - bLen, r.y,   bLen,   bThick), _whiteTex);
+        GUI.DrawTexture(new Rect(r.x + r.width - bThick, r.y, bThick, bLen),   _whiteTex);
+        // bottom-left
+        GUI.DrawTexture(new Rect(r.x,              r.y + r.height - bThick, bLen,   bThick), _whiteTex);
+        GUI.DrawTexture(new Rect(r.x,              r.y + r.height - bLen,   bThick, bLen),   _whiteTex);
+        // bottom-right
+        GUI.DrawTexture(new Rect(r.x + r.width - bLen,   r.y + r.height - bThick, bLen,   bThick), _whiteTex);
+        GUI.DrawTexture(new Rect(r.x + r.width - bThick, r.y + r.height - bLen,   bThick, bLen),   _whiteTex);
+
+        // ── 5. Text ───────────────────────────────────────────────────────
         GUI.color = Color.white;
-        GUI.Label(new Rect(r.x,     r.y + 10,            r.width,      36), card.cardName,    titleStyle);
-        GUI.Label(new Rect(r.x + 5, r.y + r.height - 48, r.width - 10, 42), card.description, descStyle);
 
-        // 6. Chain length badge (combo cards only) — top-right corner
+        // Card name
+        _titleStyle.normal.textColor = isCombo
+            ? new Color(1f, 0.88f, 0.22f, alpha)
+            : new Color(1f,  1f,   1f,    alpha);
+        GUI.Label(new Rect(r.x, r.y + 10f, r.width, 38f), card.cardName, _titleStyle);
+
+        // Description (middle)
+        _descStyle.normal.textColor = isCombo
+            ? new Color(1f,   0.78f, 0.35f, 0.88f * alpha)
+            : new Color(0.72f, 0.88f, 1f,   0.82f * alpha);
+        GUI.Label(new Rect(r.x + 6f, r.y + 58f, r.width - 12f, 60f), card.description, _descStyle);
+
+        // State overlay: WAIT / GET READY / !! SHOUT !!
+        if (isRhythm)
+        {
+            string stateText;
+            Color  stateCol;
+            if (isShout)
+            {
+                stateText = "!! SHOUT !!";
+                stateCol  = isCombo
+                    ? new Color(1f, 0.85f, 0f,   (0.78f + pulse * 0.22f) * alpha)
+                    : new Color(0.2f, 1f, 0.5f,  (0.78f + pulse * 0.22f) * alpha);
+            }
+            else if (approachFrac > 0.68f)
+            {
+                stateText = "GET READY";
+                float ramp = (approachFrac - 0.68f) / 0.32f;
+                stateCol  = new Color(1f, Mathf.Lerp(0.65f, 0.9f, ramp), 0.1f, Mathf.Lerp(0.5f, 0.9f, ramp) * alpha);
+            }
+            else
+            {
+                stateText = "WAIT";
+                stateCol  = new Color(1f, 1f, 1f, 0.18f * alpha);
+            }
+            _statusStyle.normal.textColor = stateCol;
+            GUI.Label(new Rect(r.x, r.y + r.height - 56f, r.width, 24f), stateText, _statusStyle);
+        }
+
+        // Chain length badge — top-right
         if (isCombo)
         {
-            var badgeStyle = new GUIStyle(GUI.skin.label)
-            {
-                alignment = TextAnchor.UpperRight,
-                fontStyle = FontStyle.Bold,
-                fontSize  = 13
-            };
-            badgeStyle.normal.textColor = new Color(1f, 0.75f, 0f, alpha);
-            GUI.Label(new Rect(r.x, r.y + 4, r.width - 5, 20), $"{card.comboChainLength}×", badgeStyle);
+            _badgeStyle.normal.textColor = new Color(1f, 0.75f, 0f, alpha);
+            GUI.Label(new Rect(r.x, r.y + 5f, r.width - 6f, 22f), $"{card.comboChainLength}×", _badgeStyle);
         }
+    }
+
+    private void EnsureStyles()
+    {
+        if (_titleStyle != null) return;
+        _titleStyle  = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.UpperCenter,  fontStyle = FontStyle.Bold, fontSize = 22 };
+        _descStyle   = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.UpperCenter,  fontSize  = 13, wordWrap = true };
+        _statusStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 13 };
+        _badgeStyle  = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.UpperRight,   fontStyle = FontStyle.Bold, fontSize = 14 };
     }
 }

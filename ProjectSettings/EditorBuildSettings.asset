@@ -20,5 +20,8 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/RhythmTest.unity
     guid: 79c669f8839130149bd04ec8ca83c1a4
+  - enabled: 1
+    path: Assets/Scenes/Tutorial Scenes/Tutorial.unity
+    guid: 672b9e8e22141c74c86d3e97e4eddb3a
   m_configObjects:
     com.unity.input.settings: {fileID: 11400000, guid: ac2e9bec2e581d54eb5002277b387897, type: 2}

@@ -12,6 +12,7 @@ namespace UI
     {
         private Button _hostButton;
         private Button _joinButton;
+        private Button _tutorialButton;
         private Button _quitButton;
         private Button _beatMapperButton;
         private Button _autoBeatMapperButton;
@@ -45,6 +46,7 @@ namespace UI
 
             _hostButton       = root.Q<Button>("HostButton");
             _joinButton       = root.Q<Button>("JoinButton");
+            _tutorialButton   = root.Q<Button>("TutorialButton");
             _quitButton       = root.Q<Button>("QuitButton");
             _beatMapperButton     = root.Q<Button>("BeatMapperButton");
             _autoBeatMapperButton = root.Q<Button>("AutoBeatMapperButton");
@@ -64,6 +66,7 @@ namespace UI
 
             _joinButton.clicked += JoinGame;
 
+            if (_tutorialButton != null) _tutorialButton.clicked += LoadTutorial;
             _quitButton.clicked += Application.Quit;
             _beatMapperButton.clicked += LoadBeatMapper;
             if (_autoBeatMapperButton != null) _autoBeatMapperButton.clicked += LoadAutoBeatMapper;
@@ -90,6 +93,9 @@ namespace UI
 
                 if (_quitButton != null)
                     _quitButton.clicked -= Application.Quit;
+
+                if (_tutorialButton != null)
+                    _tutorialButton.clicked -= LoadTutorial;
 
                 if (_beatMapperButton != null)
                     _beatMapperButton.clicked -= LoadBeatMapper;
@@ -181,6 +187,7 @@ namespace UI
                 _joinButton.text = "Join (LAN)";
         }
 
+        private void LoadTutorial() => SceneManager.LoadScene("Tutorial");
         private void LoadBeatMapper() => SceneManager.LoadScene("TrackEditor");
         private void LoadAutoBeatMapper() => SceneManager.LoadScene("RhythmTest");
 

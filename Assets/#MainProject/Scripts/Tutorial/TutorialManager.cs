@@ -51,6 +51,18 @@ public class TutorialManager : MonoBehaviour
     [Tooltip("Animator on a non-networked character placed in the Tutorial scene.")]
     public Animator tutorialPlayerAnimator;
 
+    [Header("Stage 4 — Slow Rhythm")]
+    [Tooltip("AudioSource component that plays looping background music during Stage 4.")]
+    public AudioSource stage4MusicSource;
+    public AudioClip   stage4BeatClip;     // optional override for beat click
+    [Range(1f, 5f)] public float stage4BeatInterval = 3f;
+    public int beatsToPassStage4 = 6;
+
+    [Header("Stage 5 — Counter Fight")]
+    [Tooltip("Animator on the tutorial bot character (non-networked, in Tutorial scene).")]
+    public Animator tutorialBotAnimator;
+    [Range(1f, 4f)] public float stage5BeatInterval = 2.5f;
+
     [Header("Voice (shared)")]
     [Tooltip("Set AutoStart = true on this component. Do not manually start VoiceProcessor.")]
     public VoskSpeechToText voskInstance;
@@ -82,6 +94,7 @@ public class TutorialManager : MonoBehaviour
     private float  _s2_beatFlash        = 0f;
     private bool   _s2_complete         = false;
     private float  _s2_successTimer     = 0f;
+    private int    _s2_animIdx          = 0;
     private const float STAGE2_LINGER   = 2f;
     private const float GRADE_FADE_DUR  = 1.2f;
     private const float BEAT_FLASH_DUR  = 0.18f;
@@ -115,6 +128,53 @@ public class TutorialManager : MonoBehaviour
     private const int S2_INTRO_STEPS = 3;
     private const int S3_INTRO_STEPS = 5;
 
+    // ── Stage 4 runtime ────────────────────────────────────────────────────
+    private float  _s4_elapsed              = 0f;
+    private float  _s4_nextBeat             = 0f;
+    private float  _s4_lastBeatTime         = -999f;
+    private float  _s4_lastSpikeElapsed     = -999f;
+    private bool   _s4_spikeLockedThisCycle = false;
+    private int    _s4_spokenCmdIndex       = -1;   // index into S1_LABELS of the spoken command
+    private float[] _s4_cardFlash;                  // per-card flash timer
+    private bool[]  _s4_cardHit;                    // true = green (hit), false = orange (miss)
+    private int    _s4_hitCount             = 0;
+    private int    _s4_totalBeats           = 0;
+    private string _s4_lastGrade            = "";
+    private float  _s4_gradeFade            = 0f;
+    private float  _s4_beatFlash            = 0f;
+    private bool   _s4_complete             = false;
+    private float  _s4_successTimer         = 0f;
+    private const int   MAX_S4_BEATS        = 12;
+    private const float STAGE4_LINGER       = 2.5f;
+    private const float S4_DEAD_ZONE        = 0.2f;
+    private const float S4_CARD_FLASH       = 0.40f;
+
+    // ── Stage 5 runtime ────────────────────────────────────────────────────
+    private enum S5Phase { Announce, WaitInput, WrongFeedback, CorrectFlash }
+    private S5Phase _s5_phase            = S5Phase.Announce;
+    private int[]   _s5_order            = new int[] { 0, 1, 2, 3, 4, 5 };
+    private int     _s5_round            = 0;
+    private float   _s5_playerHp         = 1f;
+    private float   _s5_botHp            = 1f;
+    private float   _s5_phaseTimer       = 0f;
+    private int     _s5_spokenCtrIdx     = -1;
+    private string  _s5_wrongWord        = "";
+    private float   _s5_lastWordTime     = -999f;
+    private float   _s5_elapsed          = 0f;
+    private float   _s5_nextBeat         = 0f;
+    private float   _s5_lastBeatTime     = -999f;
+    private bool    _s5_spikeLockedThisCycle = false;
+    private float   _s5_lastSpikeElapsed = -999f;
+    private float   _s5_beatFlash        = 0f;
+    private string  _s5_gradeText        = "";
+    private float   _s5_gradeFade        = 0f;
+    private bool    _s5_complete         = false;
+    private float   _s5_successTimer     = 0f;
+    private const float S5_DEAD_ZONE     = 0.2f;
+    private const float S5_WORD_COOLDOWN = 0.5f;
+    private const float S5_CORRECT_FLASH = 1.5f;
+    private const float STAGE5_LINGER   = 2.5f;
+
     // ── Stage 1 runtime ────────────────────────────────────────────────────
     private static readonly string[] S1_LABELS = { "PUNCH", "BLAST", "HOOK", "BLOCK", "CAGE", "BOOM" };
 
@@ -132,6 +192,19 @@ public class TutorialManager : MonoBehaviour
         new[] { "boom", "room", "doom" },
     };
 
+    // S5_COUNTERS[i] = j  →  move j counters move i
+    // Cycle: PUNCH→BLOCK→BOOM→BLAST→CAGE→HOOK→PUNCH
+    private static readonly int[] S5_COUNTERS = { 3, 4, 0, 5, 2, 1 };
+    private static readonly string[] S5_COUNTER_FLAVOR =
+    {
+        "BLOCK absorbs the PUNCH's impact",
+        "CAGE nullifies an energy BLAST",
+        "PUNCH cuts through the wide HOOK",
+        "BOOM shatters through a BLOCK",
+        "HOOK slips inside the CAGE",
+        "BLAST disperses the BOOM",
+    };
+
     private bool[]  _cmdLearned;
     private float[] _cmdFlash;
     private int   _cmdLearnedCount   = 0;
@@ -145,9 +218,11 @@ public class TutorialManager : MonoBehaviour
     {
         if (Instance != null && Instance != this) { Destroy(gameObject); return; }
         Instance = this;
-        _vp         = GetComponent<VoiceProcessor>();
-        _cmdLearned = new bool[S1_LABELS.Length];
-        _cmdFlash   = new float[S1_LABELS.Length];
+        _vp           = GetComponent<VoiceProcessor>();
+        _cmdLearned   = new bool[S1_LABELS.Length];
+        _cmdFlash     = new float[S1_LABELS.Length];
+        _s4_cardFlash = new float[S1_LABELS.Length];
+        _s4_cardHit   = new bool[S1_LABELS.Length];
     }
 
     void Start()
@@ -178,8 +253,9 @@ public class TutorialManager : MonoBehaviour
                         || (CurrentStage == Stage.CommandsTiming  && _s3_introActive);
         if (Input.GetKeyDown(KeyCode.Space))
         {
-            if (introActive) AdvanceIntro();
-            else             SkipCurrentStage();
+            if (introActive)                                          AdvanceIntro();
+            else if (CurrentStage == Stage.ComboCards && !_s5_complete) HandleStage5Space();
+            else                                                       SkipCurrentStage();
         }
 
         switch (CurrentStage)
@@ -188,6 +264,8 @@ public class TutorialManager : MonoBehaviour
             case Stage.ShadowBag:       UpdateStage1(); break;
             case Stage.TimingOnly:      UpdateStage2(); break;
             case Stage.CommandsTiming:  UpdateStage3(); break;
+            case Stage.SlowRhythm:      UpdateStage4(); break;
+            case Stage.ComboCards:      UpdateStage5(); break;
         }
     }
 
@@ -261,6 +339,52 @@ public class TutorialManager : MonoBehaviour
                 _s2_introActive      = true;
                 break;
 
+            case Stage.SlowRhythm:
+                _s4_elapsed              = 0f;
+                _s4_nextBeat             = stage4BeatInterval;
+                _s4_lastBeatTime         = -stage4BeatInterval;
+                _s4_lastSpikeElapsed     = -999f;
+                _s4_spikeLockedThisCycle = false;
+                _s4_spokenCmdIndex       = -1;
+                _s4_hitCount             = 0;
+                _s4_totalBeats           = 0;
+                _s4_lastGrade            = "";
+                _s4_gradeFade            = 0f;
+                _s4_beatFlash            = 0f;
+                _s4_complete             = false;
+                _s4_successTimer         = 0f;
+                for (int i = 0; i < S1_LABELS.Length; i++) { _s4_cardFlash[i] = 0f; _s4_cardHit[i] = false; }
+                if (voskInstance != null)
+                    voskInstance.OnPartialResult += Stage4HandlePartial;
+                if (stage4MusicSource != null)
+                    stage4MusicSource.Play();
+                break;
+
+            case Stage.ComboCards:
+                _s5_phase            = S5Phase.Announce;
+                _s5_order            = ShuffleRange(S1_LABELS.Length);
+                _s5_round            = 0;
+                _s5_playerHp         = 1f;
+                _s5_botHp            = 1f;
+                _s5_phaseTimer       = 0f;
+                _s5_spokenCtrIdx     = -1;
+                _s5_wrongWord        = "";
+                _s5_lastWordTime     = -999f;
+                _s5_elapsed          = 0f;
+                _s5_nextBeat         = stage5BeatInterval;
+                _s5_lastBeatTime     = -stage5BeatInterval;
+                _s5_spikeLockedThisCycle = false;
+                _s5_lastSpikeElapsed = -999f;
+                _s5_beatFlash        = 0f;
+                _s5_gradeText        = "";
+                _s5_gradeFade        = 0f;
+                _s5_complete         = false;
+                _s5_successTimer     = 0f;
+                TriggerBotAnimation(_s5_order[0]);
+                if (voskInstance != null)
+                    voskInstance.OnPartialResult += Stage5HandlePartial;
+                break;
+
             case Stage.CommandsTiming:
                 _s3_elapsed              = 0f;
                 _s3_nextBeat             = stage3BeatInterval;
@@ -289,9 +413,15 @@ public class TutorialManager : MonoBehaviour
 
     private void ExitStage(Stage s)
     {
+        if (s == Stage.SlowRhythm)
+        {
+            if (voskInstance != null)    voskInstance.OnPartialResult -= Stage4HandlePartial;
+            if (stage4MusicSource != null) stage4MusicSource.Stop();
+        }
         if (voskInstance == null) return;
         if (s == Stage.ShadowBag)       voskInstance.OnPartialResult -= Stage1HandlePartial;
         if (s == Stage.CommandsTiming)  voskInstance.OnPartialResult -= Stage3HandlePartial;
+        if (s == Stage.ComboCards)      voskInstance.OnPartialResult -= Stage5HandlePartial;
     }
 
     private void AdvanceTo(Stage next)
@@ -406,6 +536,7 @@ public class TutorialManager : MonoBehaviour
                 float absDelta = Mathf.Abs(_s2_lastSpikeElapsed - _s2_nextBeat);
                 _s2_lastGrade = absDelta <= excellentWindow ? "EXCELLENT!" : "GOOD";
                 _s2_hitCount++;
+                TriggerCommandAnimation(_s2_animIdx++ % S1_LABELS.Length);
             }
             else
             {
@@ -439,6 +570,8 @@ public class TutorialManager : MonoBehaviour
             case Stage.ShadowBag:       DrawStage1(); break;
             case Stage.TimingOnly:      DrawStage2(); break;
             case Stage.CommandsTiming:  DrawStage3(); break;
+            case Stage.SlowRhythm:      DrawStage4(); break;
+            case Stage.ComboCards:      DrawStage5(); break;
         }
     }
 
@@ -807,9 +940,12 @@ public class TutorialManager : MonoBehaviour
     private void Stage3HandlePartial(string json)
     {
         if (_s3_complete) return;
+        // Dead zone: Vosk echoes the previous utterance into the next cycle
+        if (_s3_elapsed - _s3_lastBeatTime < S3_DEAD_ZONE) return;
+        if (_s3_cmdDetectedThisCycle) return;
         string text = ParsePartial(json).ToLower().Trim();
         if (string.IsNullOrEmpty(text)) return;
-        int cmdIdx = _s3_cmdOrder[_s3_orderPos % _s3_cmdOrder.Length];
+        int cmdIdx = _s3_cmdOrder[_s3_cmdOrder != null ? _s3_orderPos % _s3_cmdOrder.Length : 0];
         foreach (string word in text.Split(' '))
         {
             if (string.IsNullOrEmpty(word)) continue;
@@ -826,6 +962,12 @@ public class TutorialManager : MonoBehaviour
     {
         if (tutorialPlayerAnimator == null) return;
         tutorialPlayerAnimator.Play(S3_ANIM_STATES[cmdIdx], 0, 0f);
+    }
+
+    private void TriggerBotAnimation(int cmdIdx)
+    {
+        if (tutorialBotAnimator == null) return;
+        tutorialBotAnimator.Play(S3_ANIM_STATES[cmdIdx], 0, 0f);
     }
 
     private void UpdateStage3()
@@ -1278,6 +1420,848 @@ public class TutorialManager : MonoBehaviour
             SceneManager.LoadScene(menuSceneName);
     }
 
+    // ══════════════════════════════════════════════════════════════════════
+    // STAGE 4 — Slow Rhythm
+    // ══════════════════════════════════════════════════════════════════════
+    private void Stage4HandlePartial(string json)
+    {
+        if (_s4_complete) return;
+        // Dead zone + lock: block Vosk echoes that bleed into the next cycle
+        if (_s4_elapsed - _s4_lastBeatTime < S4_DEAD_ZONE) return;
+        if (_s4_spokenCmdIndex >= 0) return;
+        string text = ParsePartial(json).ToLower().Trim();
+        if (string.IsNullOrEmpty(text)) return;
+        foreach (string word in text.Split(' '))
+        {
+            if (string.IsNullOrEmpty(word)) continue;
+            for (int i = 0; i < S1_WORDS.Length; i++)
+            {
+                if (MatchesCommand(word, S1_WORDS[i]))
+                {
+                    _s4_spokenCmdIndex = i;
+                    return; // animate at beat-fire, not here
+                }
+            }
+        }
+    }
+
+    private void UpdateStage4()
+    {
+        if (_s4_complete)
+        {
+            _s4_successTimer += Time.deltaTime;
+            if (_s4_successTimer >= STAGE4_LINGER) AdvanceTo(Stage.ComboCards);
+            return;
+        }
+
+        _s4_elapsed += Time.deltaTime;
+        if (_s4_gradeFade > 0f) _s4_gradeFade -= Time.deltaTime;
+        if (_s4_beatFlash > 0f) _s4_beatFlash -= Time.deltaTime;
+        for (int i = 0; i < _s4_cardFlash.Length; i++)
+            if (_s4_cardFlash[i] > 0f) _s4_cardFlash[i] -= Time.deltaTime;
+
+        float timeSinceLastBeat = _s4_elapsed - _s4_lastBeatTime;
+        if (timeSinceLastBeat >= S4_DEAD_ZONE && !_s4_spikeLockedThisCycle
+            && _vp.CurrentRawVolume >= micThreshold)
+        {
+            _s4_lastSpikeElapsed     = _s4_elapsed;
+            _s4_spikeLockedThisCycle = true;
+        }
+
+        if (_s4_elapsed < _s4_nextBeat) return;
+
+        // ── Beat fires ────────────────────────────────────────────────────
+        PlayBeat(stage4BeatClip);
+        _s4_beatFlash    = BEAT_FLASH_DUR;
+        _s4_lastBeatTime = _s4_nextBeat;
+        _s4_totalBeats++;
+
+        bool spikeInWindow = _s4_lastSpikeElapsed >= _s4_nextBeat - goodWindow
+                          && _s4_lastSpikeElapsed <= _s4_nextBeat + goodWindow * 0.4f;
+        bool cmdSpoken = _s4_spokenCmdIndex >= 0;
+
+        // Animate the move at beat-fire time, not when word is spoken
+        if (cmdSpoken) TriggerCommandAnimation(_s4_spokenCmdIndex);
+
+        if (cmdSpoken && spikeInWindow)
+        {
+            float delta = Mathf.Abs(_s4_lastSpikeElapsed - _s4_nextBeat);
+            _s4_lastGrade = delta <= excellentWindow ? "EXCELLENT!" : "GOOD";
+            _s4_cardFlash[_s4_spokenCmdIndex] = S4_CARD_FLASH;
+            _s4_cardHit[_s4_spokenCmdIndex]   = true;
+            _s4_hitCount++;
+        }
+        else if (cmdSpoken)
+        {
+            _s4_lastGrade = "WRONG TIME!";
+            _s4_cardFlash[_s4_spokenCmdIndex] = S4_CARD_FLASH;
+            _s4_cardHit[_s4_spokenCmdIndex]   = false;
+        }
+        else
+        {
+            _s4_lastGrade = "MISS";
+        }
+
+        _s4_gradeFade = GRADE_FADE_DUR;
+        _s4_nextBeat += stage4BeatInterval;
+        _s4_spikeLockedThisCycle = false;
+        _s4_spokenCmdIndex       = -1;
+        _s4_lastSpikeElapsed     = -999f;
+
+        if (_s4_hitCount >= beatsToPassStage4 || _s4_totalBeats >= MAX_S4_BEATS)
+            _s4_complete = true;
+    }
+
+    // ── Stage 4 GUI ────────────────────────────────────────────────────────
+    private void DrawStage4()
+    {
+        float sw = Screen.width, sh = Screen.height;
+
+        // ── Title ─────────────────────────────────────────────────────────
+        _headStyle.fontSize = Mathf.Clamp((int)(sw / 16f), 30, 64);
+        GUI.color = _s4_complete ? new Color(0.2f, 1f, 0.4f) : Color.white;
+        GUI.Label(new Rect(0, sh * 0.04f, sw, 70), _s4_complete ? "RHYTHM LOCKED IN!" : "SLOW RHYTHM", _headStyle);
+        GUI.color = Color.white;
+
+        _bodyStyle.fontSize = Mathf.Clamp((int)(sw / 52f), 13, 22);
+        GUI.color = new Color(1f, 1f, 1f, 0.48f);
+        GUI.Label(new Rect(0, sh * 0.13f, sw, 32), _s4_complete ? "MOVING ON..." : "CHOOSE ANY COMMAND — SHOUT IT ON THE BEAT", _bodyStyle);
+        GUI.color = Color.white;
+
+        // ── Global approach bar ───────────────────────────────────────────
+        float beatFrac = Mathf.Clamp01(_s4_elapsed % stage4BeatInterval / stage4BeatInterval);
+        float goodFrac = Mathf.Clamp01(goodWindow / stage4BeatInterval);
+        float exFrac   = Mathf.Clamp01(excellentWindow / stage4BeatInterval);
+        bool  inGood   = beatFrac >= (1f - goodFrac);
+        bool  inEx     = beatFrac >= (1f - exFrac);
+        float glow     = Mathf.Pow(beatFrac, 2.2f);
+        float flashT   = _s4_beatFlash / BEAT_FLASH_DUR;
+
+        float barW = sw * 0.72f, barH = 26f;
+        float barX = sw * 0.14f, barY = sh * 0.22f;
+
+        GUI.color = new Color(0f, 0f, 0f, 0.5f);
+        GUI.DrawTexture(new Rect(barX, barY, barW, barH), _px);
+
+        // Good + excellent zones
+        GUI.color = new Color(0.1f, 0.85f, 0.2f, 0.28f);
+        GUI.DrawTexture(new Rect(barX + barW * (1f - goodFrac), barY, barW * goodFrac, barH), _px);
+        GUI.color = new Color(0.2f, 1f, 0.3f, 0.55f);
+        GUI.DrawTexture(new Rect(barX + barW * (1f - exFrac), barY, barW * exFrac, barH), _px);
+
+        // Moving fill
+        Color fillCol;
+        if (_s4_beatFlash > 0f)
+            fillCol = Color.Lerp(new Color(1f, 0.85f, 0.1f, 0.92f), Color.white, flashT * 0.8f);
+        else if (inGood)
+            fillCol = Color.Lerp(new Color(1f, 0.85f, 0.1f, 0.88f), new Color(0.2f, 1f, 0.35f, 0.92f),
+                                 (beatFrac - (1f - goodFrac)) / Mathf.Max(goodFrac, 0.001f));
+        else
+            fillCol = new Color(0f, 0.75f, 1f, Mathf.Lerp(0.42f, 0.78f, glow));
+        GUI.color = fillCol;
+        GUI.DrawTexture(new Rect(barX, barY, barW * beatFrac, barH), _px);
+
+        // Bar border
+        GUI.color = new Color(1f, 1f, 1f, 0.22f);
+        GUI.DrawTexture(new Rect(barX,        barY,        barW, 1.5f), _px);
+        GUI.DrawTexture(new Rect(barX,        barY + barH, barW, 1.5f), _px);
+        GUI.DrawTexture(new Rect(barX,        barY,        1.5f, barH), _px);
+        GUI.DrawTexture(new Rect(barX + barW, barY,        1.5f, barH), _px);
+        GUI.color = Color.white;
+
+        // ── Beat state label ──────────────────────────────────────────────
+        string stateText;
+        Color  stateCol;
+        if (_s4_beatFlash > 0f)
+        {
+            stateText = _s4_lastGrade;
+            stateCol  = _s4_lastGrade.StartsWith("EX") ? new Color(0.2f, 1f, 0.4f)
+                      : _s4_lastGrade == "GOOD"        ? new Color(0.4f, 0.85f, 1f)
+                      : _s4_lastGrade.Contains("TIME") ? new Color(1f, 0.6f, 0.1f)
+                      :                                   new Color(1f, 0.3f, 0.2f);
+        }
+        else if (inEx)            { stateText = "NOW!";          stateCol = new Color(0.25f, 1f, 0.4f); }
+        else if (inGood)          { stateText = "SHOUT!";        stateCol = new Color(0.5f, 1f, 0.6f); }
+        else if (beatFrac > 0.55f)
+        {
+            float r = (beatFrac - 0.55f) / 0.45f;
+            stateText = "GET READY..."; stateCol = new Color(1f, Mathf.Lerp(0.65f, 0.92f, r), 0.15f, Mathf.Lerp(0.4f, 0.9f, r));
+        }
+        else { stateText = "WAIT..."; stateCol = new Color(1f, 1f, 1f, 0.2f); }
+
+        _bodyStyle.fontSize = Mathf.Clamp((int)(sw / 28f), 26, 46);
+        GUI.color = stateCol;
+        GUI.Label(new Rect(0, barY + barH + 8f, sw, 50f), stateText, _bodyStyle);
+        GUI.color = Color.white;
+
+        // ── Grade float (above bar) ────────────────────────────────────────
+        if (_s4_gradeFade > 0f && _s4_beatFlash <= 0f && !string.IsNullOrEmpty(_s4_lastGrade))
+        {
+            float alpha = Mathf.Clamp01(_s4_gradeFade / GRADE_FADE_DUR);
+            float rise  = (1f - alpha) * 22f;
+            Color gc    = _s4_lastGrade.StartsWith("EX") ? new Color(0.2f, 1f, 0.4f, alpha)
+                        : _s4_lastGrade == "GOOD"        ? new Color(0.4f, 0.85f, 1f, alpha)
+                        : _s4_lastGrade.Contains("TIME") ? new Color(1f, 0.6f, 0.1f, alpha)
+                        :                                   new Color(1f, 0.3f, 0.2f, alpha);
+            _headStyle.fontSize = Mathf.Clamp((int)(sw / 17f), 28, 56);
+            GUI.color = gc;
+            GUI.Label(new Rect(0, barY - 64f - rise, sw, 60f), _s4_lastGrade, _headStyle);
+            GUI.color = Color.white;
+        }
+
+        // ── Command cards (all 6, horizontal) ─────────────────────────────
+        int   numCards  = S1_LABELS.Length;
+        float gridW     = sw * 0.82f;
+        float cW        = (gridW - (numCards - 1) * 14f) / numCards;
+        float cH        = Mathf.Clamp(sh * 0.20f, 80f, 130f);
+        float cStartX   = sw * 0.5f - gridW * 0.5f;
+        float cY        = sh * 0.56f;
+
+        _cardStyle.fontSize  = Mathf.Clamp((int)(cW / 5f), 16, 32);
+        _bodyStyle.fontSize  = Mathf.Clamp((int)(sw / 72f), 9, 14);
+
+        for (int i = 0; i < numCards; i++)
+        {
+            float cx   = cStartX + i * (cW + 14f);
+            Rect  rect = new(cx, cY, cW, cH);
+
+            float flash    = _s4_cardFlash[i];
+            bool  wasHit   = _s4_cardHit[i];
+            float flashP   = Mathf.Clamp01(flash / S4_CARD_FLASH);
+            bool  selected = (i == _s4_spokenCmdIndex) && _s4_beatFlash <= 0f;
+
+            // Card background
+            Color bg = flash > 0f
+                ? Color.Lerp(new Color(0.06f, 0.06f, 0.12f, 0.92f),
+                    wasHit ? new Color(0.05f, 0.22f, 0.08f, 0.92f) : new Color(0.22f, 0.10f, 0.03f, 0.92f),
+                    flashP)
+                : selected
+                    ? new Color(0.03f, 0.16f, 0.22f, 0.95f)
+                    : new Color(0.06f, 0.06f, 0.12f, 0.88f);
+            GUI.color = bg;
+            GUI.DrawTexture(rect, _px);
+
+            // Top charge strip
+            float chargeAlpha = Mathf.Lerp(0.12f, 0.85f, glow);
+            GUI.color = selected
+                ? new Color(0f, 1f, 0.92f, chargeAlpha)
+                : inGood
+                    ? new Color(0.2f, 1f, 0.4f, chargeAlpha)
+                    : new Color(0f, 0.75f, 1f, chargeAlpha);
+            GUI.DrawTexture(new Rect(cx, cY, cW * beatFrac, 3f), _px);
+
+            // Corner brackets
+            float bw   = Mathf.Lerp(1.5f, 3.5f, glow);
+            float bLen = Mathf.Clamp(cW * 0.22f, 10f, 22f);
+            Color bc   = flash > 0f
+                ? Color.Lerp(new Color(1f, 1f, 1f, 0.5f),
+                    wasHit ? new Color(0.3f, 1f, 0.4f) : new Color(1f, 0.55f, 0.1f), flashP)
+                : selected
+                    ? Color.Lerp(new Color(0f, 0.7f, 0.9f, 0.7f), new Color(0f, 1f, 0.95f, 1f), glow)
+                    : Color.Lerp(new Color(0.85f, 0f, 1f, 0.4f), new Color(0.85f, 0f, 1f, 0.9f), glow);
+            GUI.color = bc;
+            // TL
+            GUI.DrawTexture(new Rect(cx,           cY,            bLen, bw),  _px);
+            GUI.DrawTexture(new Rect(cx,           cY,            bw,   bLen),_px);
+            // TR
+            GUI.DrawTexture(new Rect(cx + cW - bLen, cY,          bLen, bw),  _px);
+            GUI.DrawTexture(new Rect(cx + cW - bw,   cY,          bw,   bLen),_px);
+            // BL
+            GUI.DrawTexture(new Rect(cx,           cY + cH - bw,  bLen, bw),  _px);
+            GUI.DrawTexture(new Rect(cx,           cY + cH - bLen,bw,   bLen),_px);
+            // BR
+            GUI.DrawTexture(new Rect(cx + cW - bLen, cY + cH - bw, bLen, bw), _px);
+            GUI.DrawTexture(new Rect(cx + cW - bw,   cY + cH - bLen, bw, bLen),_px);
+
+            // Label
+            Color labelCol = flash > 0f
+                ? Color.Lerp(new Color(0.7f, 0.7f, 0.7f),
+                    wasHit ? new Color(0.4f, 1f, 0.5f) : new Color(1f, 0.65f, 0.2f), flashP)
+                : selected
+                    ? Color.Lerp(new Color(0f, 0.85f, 1f, 0.88f), Color.white, glow)
+                    : Color.Lerp(new Color(0.3f, 0.3f, 0.35f), new Color(0.85f, 0f, 1f), glow);
+            GUI.color = labelCol;
+            GUI.Label(rect, S1_LABELS[i], _cardStyle);
+
+            // READY! overlay when pre-selected
+            if (selected)
+            {
+                float pulse = (Mathf.Sin(Time.time * 5f) + 1f) * 0.5f;
+                _bodyStyle.fontSize = Mathf.Clamp((int)(cW / 7.5f), 9, 15);
+                GUI.color = new Color(0f, 1f, 0.92f, Mathf.Lerp(0.65f, 0.95f, pulse));
+                GUI.Label(new Rect(cx, cY + cH * 0.62f, cW, 22f), "● READY!", _bodyStyle);
+            }
+            GUI.color = Color.white;
+        }
+
+        // ── Beat dots + hit counter ────────────────────────────────────────
+        float dotsY = cY + cH + 16f;
+        DrawBeatDots(cStartX, dotsY, gridW, MAX_S4_BEATS, _s4_totalBeats);
+
+        _bodyStyle.fontSize = Mathf.Clamp((int)(sw / 40f), 18, 30);
+        GUI.color = new Color(1f, 1f, 1f, 0.78f);
+        GUI.Label(new Rect(0, dotsY + 22f, sw, 38f), $"{_s4_hitCount} / {beatsToPassStage4} HITS", _bodyStyle);
+        GUI.color = Color.white;
+
+        DrawBackButton();
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // STAGE 5 — Counter Fight
+    // ══════════════════════════════════════════════════════════════════════
+    private void Stage5HandlePartial(string json)
+    {
+        if (_s5_complete) return;
+        if (_s5_phase != S5Phase.WaitInput) return;
+        if (_s5_spokenCtrIdx >= 0) return;
+        if (Time.time - _s5_lastWordTime < S5_WORD_COOLDOWN) return;
+        string text = ParsePartial(json).ToLower().Trim();
+        if (string.IsNullOrEmpty(text)) return;
+        foreach (string word in text.Split(' '))
+        {
+            if (string.IsNullOrEmpty(word)) continue;
+            for (int i = 0; i < S1_WORDS.Length; i++)
+            {
+                if (MatchesCommand(word, S1_WORDS[i]))
+                { _s5_spokenCtrIdx = i; return; }
+            }
+        }
+    }
+
+    private void HandleStage5Space()
+    {
+        switch (_s5_phase)
+        {
+            case S5Phase.Announce:
+            case S5Phase.CorrectFlash:
+                S5GoToWaitInput();
+                break;
+            case S5Phase.WrongFeedback:
+                _s5_spokenCtrIdx = -1;
+                _s5_lastWordTime = Time.time;
+                S5GoToWaitInput();
+                break;
+            default:
+                SkipCurrentStage();
+                break;
+        }
+    }
+
+    private void S5GoToWaitInput()
+    {
+        _s5_phase            = S5Phase.WaitInput;
+        _s5_phaseTimer       = 0f;
+        _s5_spokenCtrIdx     = -1;
+        _s5_lastWordTime     = Time.time;
+        _s5_elapsed          = 0f;
+        _s5_nextBeat         = stage5BeatInterval;
+        _s5_lastBeatTime     = -stage5BeatInterval;
+        _s5_spikeLockedThisCycle = false;
+        _s5_lastSpikeElapsed = -999f;
+        _s5_beatFlash        = 0f;
+        _s5_gradeText        = "";
+        _s5_gradeFade        = 0f;
+    }
+
+    private void UpdateStage5()
+    {
+        if (_s5_complete)
+        {
+            _s5_successTimer += Time.deltaTime;
+            if (_s5_successTimer >= STAGE5_LINGER)
+                SceneManager.LoadScene(menuSceneName);
+            return;
+        }
+
+        _s5_phaseTimer += Time.deltaTime;
+
+        switch (_s5_phase)
+        {
+            case S5Phase.Announce:
+                // Auto-advance after a pause so player can read
+                if (_s5_phaseTimer >= stage5BeatInterval)
+                    S5GoToWaitInput();
+                break;
+
+            case S5Phase.WaitInput:
+            {
+                _s5_elapsed += Time.deltaTime;
+                if (_s5_beatFlash > 0f) _s5_beatFlash -= Time.deltaTime;
+                if (_s5_gradeFade > 0f) _s5_gradeFade -= Time.deltaTime;
+
+                // Shout spike detection inside shout zone
+                float timeSinceLast = _s5_elapsed - _s5_lastBeatTime;
+                float timeToNext    = _s5_nextBeat - _s5_elapsed;
+                bool  inShoutZone   = timeToNext > 0f && timeToNext <= 0.5f;
+                if (timeSinceLast >= S5_DEAD_ZONE && inShoutZone
+                    && !_s5_spikeLockedThisCycle && _vp.CurrentRawVolume >= micThreshold)
+                {
+                    _s5_lastSpikeElapsed     = _s5_elapsed;
+                    _s5_spikeLockedThisCycle = true;
+                }
+
+                if (_s5_elapsed < _s5_nextBeat) break;
+
+                // ── Beat fires ───────────────────────────────────────────
+                PlayBeat(stage4BeatClip);
+                _s5_beatFlash    = BEAT_FLASH_DUR;
+                _s5_lastBeatTime = _s5_nextBeat;
+
+                int   roundIdx    = _s5_order[_s5_round];
+                int   expectedCtr = S5_COUNTERS[roundIdx];
+                bool  spike       = _s5_lastSpikeElapsed >= _s5_nextBeat - goodWindow
+                                 && _s5_lastSpikeElapsed <= _s5_nextBeat + goodWindow * 0.4f;
+                bool  correctCtr  = _s5_spokenCtrIdx == expectedCtr;
+                bool  anySaid     = _s5_spokenCtrIdx >= 0;
+
+                if (correctCtr && spike)
+                {
+                    TriggerCommandAnimation(expectedCtr);
+                    _s5_botHp      = Mathf.Max(0f, _s5_botHp - 1f / S1_LABELS.Length);
+                    _s5_phase      = S5Phase.CorrectFlash;
+                    _s5_phaseTimer = 0f;
+                }
+                else if (anySaid && spike)
+                {
+                    // Wrong word, shouted on beat → bot attack lands
+                    _s5_wrongWord  = S1_LABELS[_s5_spokenCtrIdx];
+                    TriggerBotAnimation(roundIdx);
+                    _s5_playerHp   = Mathf.Max(0f, _s5_playerHp - 1f / S1_LABELS.Length);
+                    _s5_phase      = S5Phase.WrongFeedback;
+                    _s5_phaseTimer = 0f;
+                }
+                else if (!anySaid && spike)
+                {
+                    // Shouted with no word said → wrong counter (empty)
+                    _s5_wrongWord  = "nothing";
+                    TriggerBotAnimation(roundIdx);
+                    _s5_playerHp   = Mathf.Max(0f, _s5_playerHp - 1f / S1_LABELS.Length);
+                    _s5_phase      = S5Phase.WrongFeedback;
+                    _s5_phaseTimer = 0f;
+                }
+                else
+                {
+                    // No shout (or correct word but no shout) — just retry the beat
+                    _s5_gradeText  = correctCtr ? "SHOUT ON THE BEAT!" : "MISS — SAY THE WORD!";
+                    _s5_gradeFade  = GRADE_FADE_DUR;
+                    _s5_nextBeat  += stage5BeatInterval;
+                    // Keep _s5_spokenCtrIdx if they had the right word so card stays filled
+                    if (!correctCtr) { _s5_spokenCtrIdx = -1; _s5_lastWordTime = Time.time; }
+                }
+
+                _s5_spikeLockedThisCycle = false;
+                _s5_lastSpikeElapsed     = -999f;
+                break;
+            }
+
+            case S5Phase.WrongFeedback:
+                // Paused — only Space (handled in HandleStage5Space) resumes
+                break;
+
+            case S5Phase.CorrectFlash:
+                if (_s5_phaseTimer >= S5_CORRECT_FLASH)
+                    S5AdvanceRound();
+                break;
+        }
+    }
+
+    private void S5AdvanceRound()
+    {
+        _s5_round++;
+        if (_s5_round >= S1_LABELS.Length) { _s5_complete = true; return; }
+        _s5_phase        = S5Phase.Announce;
+        _s5_phaseTimer   = 0f;
+        _s5_spokenCtrIdx = -1;
+        _s5_wrongWord    = "";
+        TriggerBotAnimation(_s5_order[_s5_round]);
+    }
+
+    // ── Stage 5 GUI ────────────────────────────────────────────────────────
+    private void DrawStage5()
+    {
+        float sw = Screen.width, sh = Screen.height;
+
+        GUI.color = new Color(0f, 0f, 0f, 0.46f);
+        GUI.DrawTexture(new Rect(0, 0, sw, sh), _px);
+        GUI.color = Color.white;
+
+        if (_s5_complete)
+        {
+            _headStyle.fontSize = Mathf.Clamp((int)(sw / 14f), 36, 72);
+            GUI.color = new Color(0.2f, 1f, 0.4f);
+            GUI.Label(new Rect(0, sh * 0.38f, sw, 80), "TUTORIAL COMPLETE!", _headStyle);
+            _bodyStyle.fontSize = Mathf.Clamp((int)(sw / 40f), 18, 30);
+            GUI.color = new Color(1f, 1f, 1f, 0.6f);
+            GUI.Label(new Rect(0, sh * 0.52f, sw, 40), "RETURNING TO MENU...", _bodyStyle);
+            GUI.color = Color.white;
+            return;
+        }
+
+        // ── Right panel — counter reference table ─────────────────────────
+        float panelW = Mathf.Clamp(sw * 0.26f, 190f, 280f);
+        float panelH = Mathf.Clamp(sh * 0.62f, 320f, 520f);
+        float panelX = sw - panelW - 22f;
+        float panelY = sh * 0.19f;
+        int   roundIdx = Mathf.Min(_s5_round, S1_LABELS.Length - 1);
+        int   attIdx   = (_s5_order != null && roundIdx < _s5_order.Length) ? _s5_order[roundIdx] : 0;
+        int   ctrIdx   = S5_COUNTERS[attIdx];
+        DrawCounterTablePanel(panelX, panelY, panelW, panelH, sw, attIdx);
+
+        float mainW = sw - panelW - 44f;
+
+        // ── HP bars ────────────────────────────────────────────────────────
+        float hpW = mainW * 0.38f, hpH = 18f, hpY = sh * 0.12f;
+        DrawHpBar(22f,              hpY, hpW, hpH, _s5_botHp,    "BOT", new Color(1f, 0.35f, 0.35f));
+        DrawHpBar(mainW - 22f - hpW, hpY, hpW, hpH, _s5_playerHp, "YOU", new Color(0.3f, 0.8f, 1f));
+
+        // ── Round indicator ────────────────────────────────────────────────
+        _bodyStyle.fontSize = Mathf.Clamp((int)(sw / 72f), 9, 13);
+        GUI.color = new Color(0.6f, 0.6f, 0.7f, 0.55f);
+        GUI.Label(new Rect(0, sh * 0.07f, mainW, 20f), $"COUNTER TRAINING  •  {_s5_round + 1} / {S1_LABELS.Length}", _bodyStyle);
+        GUI.color = Color.white;
+
+        // ── Card layout geometry ───────────────────────────────────────────
+        float cW       = Mathf.Clamp(mainW * 0.30f, 120f, 210f);
+        float cH       = Mathf.Clamp(sh * 0.26f, 120f, 200f);
+        float midX     = mainW * 0.5f;
+        float gap      = Mathf.Clamp(mainW * 0.10f, 42f, 80f);
+        float attCardX = midX - gap * 0.5f - cW;
+        float ctrCardX = midX + gap * 0.5f;
+        float cardsY   = sh * 0.22f;
+
+        switch (_s5_phase)
+        {
+            // ── ANNOUNCE ──────────────────────────────────────────────────
+            case S5Phase.Announce:
+            {
+                _headStyle.fontSize = Mathf.Clamp((int)(sw / 15f), 32, 68);
+                GUI.color = new Color(1f, 0.72f, 0.1f);
+                GUI.Label(new Rect(0, sh * 0.16f, mainW, 60f), "BOT WILL USE:", _headStyle);
+                GUI.color = Color.white;
+
+                // Large single attack card centred
+                float bigW = Mathf.Clamp(mainW * 0.38f, 160f, 280f);
+                float bigH = Mathf.Clamp(sh * 0.30f, 140f, 220f);
+                DrawFightCard(mainW * 0.5f - bigW * 0.5f, cardsY, bigW, bigH, S1_LABELS[attIdx], "INCOMING ATTACK", false, sw, large: true);
+
+                // "Get ready" prompt
+                float alpha = (Mathf.Sin(Time.time * 2.4f) + 1f) * 0.22f + 0.52f;
+                _bodyStyle.fontSize = Mathf.Clamp((int)(sw / 52f), 12, 20);
+                GUI.color = new Color(0f, 0.85f, 1f, alpha);
+                GUI.Label(new Rect(0, cardsY + bigH + 28f, mainW, 28f),
+                    "Get ready to counter — press SPACE when set!", _bodyStyle);
+                GUI.color = Color.white;
+                break;
+            }
+
+            // ── WAIT INPUT ────────────────────────────────────────────────
+            case S5Phase.WaitInput:
+            {
+                _headStyle.fontSize = Mathf.Clamp((int)(sw / 15f), 32, 68);
+                GUI.color = new Color(0f, 1f, 0.85f);
+                GUI.Label(new Rect(0, sh * 0.16f, mainW, 60f), "COUNTER IT!", _headStyle);
+                GUI.color = Color.white;
+
+                DrawFightCard(attCardX, cardsY, cW, cH, S1_LABELS[attIdx], "BOT ATTACKS", false, sw);
+
+                bool spokenAny  = _s5_spokenCtrIdx >= 0;
+                bool spokenGood = spokenAny && _s5_spokenCtrIdx == ctrIdx;
+                string ctrLabel = spokenAny ? S1_LABELS[_s5_spokenCtrIdx] : "???";
+                DrawFightCard(ctrCardX, cardsY, cW, cH, ctrLabel, "YOUR COUNTER", true, sw, isCorrect: spokenGood, hasInput: spokenAny);
+
+                float vsGlow = (Mathf.Sin(Time.time * 2.8f) + 1f) * 0.5f;
+                _headStyle.fontSize = Mathf.Clamp((int)(sw / 24f), 20, 40);
+                GUI.color = Color.Lerp(new Color(1f, 0.75f, 0.1f, 0.6f), new Color(1f, 0.95f, 0.3f, 1f), vsGlow);
+                GUI.Label(new Rect(attCardX + cW, cardsY + cH * 0.35f, gap, cH * 0.3f), "VS", _headStyle);
+                GUI.color = Color.white;
+
+                // ── Approach bar ─────────────────────────────────────────
+                float beatFrac = Mathf.Clamp01((_s5_elapsed - _s5_lastBeatTime) / stage5BeatInterval);
+                float goodFrac = Mathf.Clamp01(goodWindow / stage5BeatInterval);
+                float exFrac   = Mathf.Clamp01(excellentWindow / stage5BeatInterval);
+                bool  inGood   = beatFrac >= (1f - goodFrac);
+                bool  inEx     = beatFrac >= (1f - exFrac);
+                float glow     = Mathf.Pow(beatFrac, 2.2f);
+
+                float barW = mainW * 0.72f, barH = 22f;
+                float barX = mainW * 0.14f, barY = cardsY + cH + 20f;
+
+                GUI.color = new Color(0f, 0f, 0f, 0.5f);
+                GUI.DrawTexture(new Rect(barX, barY, barW, barH), _px);
+                GUI.color = new Color(0.1f, 0.85f, 0.2f, 0.28f);
+                GUI.DrawTexture(new Rect(barX + barW * (1f - goodFrac), barY, barW * goodFrac, barH), _px);
+                GUI.color = new Color(0.2f, 1f, 0.3f, 0.55f);
+                GUI.DrawTexture(new Rect(barX + barW * (1f - exFrac), barY, barW * exFrac, barH), _px);
+                Color fillCol;
+                if (_s5_beatFlash > 0f)
+                    fillCol = Color.Lerp(new Color(1f, 0.85f, 0.1f, 0.92f), Color.white, (_s5_beatFlash / BEAT_FLASH_DUR) * 0.8f);
+                else if (inGood)
+                    fillCol = Color.Lerp(new Color(1f, 0.85f, 0.1f, 0.88f), new Color(0.2f, 1f, 0.35f, 0.92f),
+                                         (beatFrac - (1f - goodFrac)) / Mathf.Max(goodFrac, 0.001f));
+                else
+                    fillCol = new Color(0f, 0.75f, 1f, Mathf.Lerp(0.42f, 0.78f, glow));
+                GUI.color = fillCol;
+                GUI.DrawTexture(new Rect(barX, barY, barW * beatFrac, barH), _px);
+                GUI.color = new Color(1f, 1f, 1f, 0.22f);
+                GUI.DrawTexture(new Rect(barX,        barY,        barW, 1.5f), _px);
+                GUI.DrawTexture(new Rect(barX,        barY + barH, barW, 1.5f), _px);
+                GUI.DrawTexture(new Rect(barX,        barY,        1.5f, barH), _px);
+                GUI.DrawTexture(new Rect(barX + barW, barY,        1.5f, barH), _px);
+                GUI.color = Color.white;
+
+                // Beat state label
+                string stateText; Color stateCol;
+                if (_s5_beatFlash > 0f && !string.IsNullOrEmpty(_s5_gradeText))
+                { stateText = _s5_gradeText; stateCol = new Color(1f, 0.55f, 0.1f); }
+                else if (inEx)   { stateText = "NOW!";         stateCol = new Color(0.25f, 1f, 0.4f); }
+                else if (inGood) { stateText = "SHOUT!";       stateCol = new Color(0.5f, 1f, 0.6f); }
+                else if (beatFrac > 0.55f)
+                {
+                    float r = (beatFrac - 0.55f) / 0.45f;
+                    stateText = "GET READY..."; stateCol = new Color(1f, Mathf.Lerp(0.65f, 0.92f, r), 0.15f, Mathf.Lerp(0.4f, 0.9f, r));
+                }
+                else { stateText = "WAIT..."; stateCol = new Color(1f, 1f, 1f, 0.22f); }
+                _bodyStyle.fontSize = Mathf.Clamp((int)(sw / 30f), 22, 42);
+                GUI.color = stateCol;
+                GUI.Label(new Rect(0, barY + barH + 6f, mainW, 46f), stateText, _bodyStyle);
+
+                // Grade fade
+                if (_s5_gradeFade > 0f && _s5_beatFlash <= 0f && !string.IsNullOrEmpty(_s5_gradeText))
+                {
+                    float a   = Mathf.Clamp01(_s5_gradeFade / GRADE_FADE_DUR);
+                    float rise = (1f - a) * 18f;
+                    _headStyle.fontSize = Mathf.Clamp((int)(sw / 18f), 26, 52);
+                    GUI.color = new Color(1f, 0.6f, 0.1f, a);
+                    GUI.Label(new Rect(0, barY - 60f - rise, mainW, 56f), _s5_gradeText, _headStyle);
+                }
+
+                // Hint text
+                _bodyStyle.fontSize = Mathf.Clamp((int)(sw / 58f), 10, 17);
+                GUI.color = new Color(0f, 0.85f, 1f, 0.52f);
+                GUI.Label(new Rect(0, barY + barH + 52f, mainW, 24f),
+                    $"1. Say \"{S1_LABELS[ctrIdx]}\"   2. Shout on the beat!", _bodyStyle);
+                GUI.color = Color.white;
+                break;
+            }
+
+            // ── WRONG FEEDBACK ────────────────────────────────────────────
+            case S5Phase.WrongFeedback:
+            {
+                // Faded background cards so context is still readable
+                GUI.color = new Color(1f, 1f, 1f, 0.35f);
+                DrawFightCard(attCardX, cardsY, cW, cH, S1_LABELS[attIdx], "BOT ATTACKED", false, sw);
+                DrawFightCard(ctrCardX, cardsY, cW, cH, _s5_wrongWord, "YOU SAID", true, sw, isCorrect: false, hasInput: true);
+                GUI.color = Color.white;
+
+                // Dark overlay behind popup
+                GUI.color = new Color(0f, 0f, 0f, 0.72f);
+                GUI.DrawTexture(new Rect(0, 0, mainW, sh), _px);
+                GUI.color = Color.white;
+
+                // ── Popup box ─────────────────────────────────────────────
+                float bxW = Mathf.Clamp(mainW * 0.80f, 260f, 540f);
+                float bxH = 220f;
+                float bxX = mainW * 0.5f - bxW * 0.5f;
+                float bxY = sh * 0.5f - bxH * 0.5f;
+
+                GUI.color = new Color(0.06f, 0.03f, 0.12f, 0.98f);
+                GUI.DrawTexture(new Rect(bxX, bxY, bxW, bxH), _px);
+
+                // Red top strip
+                GUI.color = new Color(1f, 0.22f, 0.22f, 0.90f);
+                GUI.DrawTexture(new Rect(bxX, bxY, bxW, 4f), _px);
+
+                // Border
+                float bl = 1.5f;
+                GUI.color = new Color(1f, 0.25f, 0.25f, 0.38f);
+                GUI.DrawTexture(new Rect(bxX,        bxY,        bxW, bl),   _px);
+                GUI.DrawTexture(new Rect(bxX,        bxY + bxH,  bxW, bl),   _px);
+                GUI.DrawTexture(new Rect(bxX,        bxY,        bl,  bxH),  _px);
+                GUI.DrawTexture(new Rect(bxX + bxW,  bxY,        bl,  bxH),  _px);
+
+                // Title
+                _headStyle.fontSize = Mathf.Clamp((int)(sw / 20f), 28, 52);
+                GUI.color = new Color(1f, 0.35f, 0.35f);
+                GUI.Label(new Rect(bxX, bxY + 10f, bxW, 52f), "ATTACK LANDED!", _headStyle);
+
+                // Explanation
+                int    correctIdx = ctrIdx;
+                string attackName = S1_LABELS[attIdx];
+                string counterName = S1_LABELS[correctIdx];
+                string explain = $"\"{_s5_wrongWord}\" doesn't counter {attackName}.\n"
+                               + $"{attackName}  ▶  countered by  {counterName}";
+                _bodyStyle.fontSize = Mathf.Clamp((int)(sw / 46f), 14, 24);
+                _bodyStyle.wordWrap = true;
+                GUI.color = new Color(0.90f, 0.88f, 0.95f, 0.92f);
+                GUI.Label(new Rect(bxX + 20f, bxY + 68f, bxW - 40f, 80f), explain, _bodyStyle);
+                _bodyStyle.wordWrap = false;
+
+                // Pulsing retry prompt
+                float pa = (Mathf.Sin(Time.time * 2.6f) + 1f) * 0.22f + 0.52f;
+                _bodyStyle.fontSize = Mathf.Clamp((int)(sw / 60f), 10, 16);
+                GUI.color = new Color(0f, 0.82f, 1f, pa);
+                GUI.Label(new Rect(bxX, bxY + bxH - 32f, bxW, 24f),
+                    $"Press SPACE to try again — say \"{counterName}\" then shout on the beat!", _bodyStyle);
+                GUI.color = Color.white;
+                break;
+            }
+
+            // ── CORRECT FLASH ─────────────────────────────────────────────
+            case S5Phase.CorrectFlash:
+            {
+                DrawFightCard(attCardX, cardsY, cW, cH, S1_LABELS[attIdx], "BOT ATTACKED", false, sw);
+                DrawFightCard(ctrCardX, cardsY, cW, cH, S1_LABELS[ctrIdx], "YOUR COUNTER", true, sw, isCorrect: true, hasInput: true);
+
+                float vsG = (Mathf.Sin(Time.time * 2.8f) + 1f) * 0.5f;
+                _headStyle.fontSize = Mathf.Clamp((int)(sw / 24f), 20, 40);
+                GUI.color = Color.Lerp(new Color(0.2f, 1f, 0.4f, 0.7f), new Color(0.5f, 1f, 0.6f, 1f), vsG);
+                GUI.Label(new Rect(attCardX + cW, cardsY + cH * 0.35f, gap, cH * 0.3f), "✓", _headStyle);
+                GUI.color = Color.white;
+
+                _headStyle.fontSize = Mathf.Clamp((int)(sw / 14f), 36, 72);
+                GUI.color = new Color(0.2f, 1f, 0.4f);
+                GUI.Label(new Rect(0, sh * 0.16f, mainW, 68f), "COUNTER HIT!", _headStyle);
+
+                string flavor = S5_COUNTER_FLAVOR[attIdx];
+                _bodyStyle.fontSize = Mathf.Clamp((int)(sw / 52f), 12, 20);
+                _bodyStyle.wordWrap = true;
+                GUI.color = new Color(0.75f, 0.90f, 0.78f, 0.85f);
+                GUI.Label(new Rect(22f, cardsY + cH + 18f, mainW - 44f, 48f), flavor, _bodyStyle);
+                _bodyStyle.wordWrap = false;
+
+                // Progress strip (auto-advances after S5_CORRECT_FLASH seconds)
+                float prog = Mathf.Clamp01(_s5_phaseTimer / S5_CORRECT_FLASH);
+                float stripW = mainW * 0.60f, stripH = 6f;
+                float stripX = mainW * 0.5f - stripW * 0.5f;
+                float stripY = cardsY + cH + 80f;
+                GUI.color = new Color(0.08f, 0.08f, 0.14f, 0.80f);
+                GUI.DrawTexture(new Rect(stripX, stripY, stripW, stripH), _px);
+                GUI.color = new Color(0.2f, 1f, 0.45f, 0.85f);
+                GUI.DrawTexture(new Rect(stripX, stripY, stripW * prog, stripH), _px);
+                GUI.color = Color.white;
+                break;
+            }
+        }
+
+        DrawBackButton();
+    }
+
+    private void DrawCounterTablePanel(float panelX, float panelY, float panelW, float panelH, float sw, int activeIdx)
+    {
+        GUI.color = new Color(0.03f, 0.04f, 0.10f, 0.92f);
+        GUI.DrawTexture(new Rect(panelX, panelY, panelW, panelH), _px);
+        GUI.color = new Color(0f, 0.72f, 1f, 0.50f);
+        GUI.DrawTexture(new Rect(panelX, panelY, panelW, 2.5f), _px);
+        GUI.color = new Color(0f, 0.72f, 1f, 0.18f);
+        GUI.DrawTexture(new Rect(panelX,          panelY, 1.5f, panelH), _px);
+        GUI.DrawTexture(new Rect(panelX + panelW, panelY, 1.5f, panelH), _px);
+        GUI.DrawTexture(new Rect(panelX, panelY + panelH, panelW, 1.5f), _px);
+        GUI.color = Color.white;
+
+        _bodyStyle.fontSize = Mathf.Clamp((int)(sw / 68f), 9, 13);
+        GUI.color = new Color(0f, 0.72f, 1f, 0.70f);
+        GUI.Label(new Rect(panelX, panelY + 8f, panelW, 20f), "COUNTER TABLE", _bodyStyle);
+        GUI.color = Color.white;
+
+        float rowH = (panelH - 36f) / S1_LABELS.Length;
+        _bodyStyle.fontSize = Mathf.Clamp((int)(panelW / 14f), 10, 16);
+        for (int i = 0; i < S1_LABELS.Length; i++)
+        {
+            float ry       = panelY + 34f + i * rowH;
+            bool  isActive = (i == activeIdx);
+            if (isActive)
+            {
+                GUI.color = new Color(0f, 0.45f, 0.65f, 0.32f);
+                GUI.DrawTexture(new Rect(panelX + 2f, ry, panelW - 4f, rowH - 2f), _px);
+            }
+            GUI.color = isActive ? new Color(1f, 0.35f, 0.35f, 1f) : new Color(0.9f, 0.35f, 0.35f, 0.55f);
+            GUI.Label(new Rect(panelX + 8f, ry, panelW * 0.36f, rowH), S1_LABELS[i], _bodyStyle);
+            GUI.color = isActive ? new Color(0.7f, 0.7f, 0.7f, 0.9f) : new Color(0.5f, 0.5f, 0.5f, 0.40f);
+            GUI.Label(new Rect(panelX + panelW * 0.38f, ry, panelW * 0.16f, rowH), "▶", _bodyStyle);
+            GUI.color = isActive ? new Color(0.25f, 1f, 0.45f, 1f) : new Color(0.25f, 1f, 0.45f, 0.55f);
+            GUI.Label(new Rect(panelX + panelW * 0.54f, ry, panelW * 0.44f, rowH),
+                S1_LABELS[S5_COUNTERS[i]], _bodyStyle);
+        }
+        GUI.color = Color.white;
+    }
+
+    private void DrawHpBar(float x, float y, float w, float h, float pct, string name, Color barColor)
+    {
+        GUI.color = new Color(0.04f, 0.04f, 0.08f, 0.85f);
+        GUI.DrawTexture(new Rect(x, y, w, h), _px);
+        float p = Mathf.Clamp01(pct);
+        if (p > 0f) { GUI.color = barColor; GUI.DrawTexture(new Rect(x, y, w * p, h), _px); }
+        GUI.color = new Color(1f, 1f, 1f, 0.18f);
+        GUI.DrawTexture(new Rect(x,     y,     w,    1.5f), _px);
+        GUI.DrawTexture(new Rect(x,     y + h, w,    1.5f), _px);
+        GUI.DrawTexture(new Rect(x,     y,     1.5f, h),    _px);
+        GUI.DrawTexture(new Rect(x + w, y,     1.5f, h),    _px);
+        _bodyStyle.fontSize  = Mathf.Clamp((int)(w / 8f), 9, 14);
+        _bodyStyle.alignment = TextAnchor.MiddleCenter;
+        GUI.color = new Color(1f, 1f, 1f, 0.70f);
+        GUI.Label(new Rect(x, y - 18f, w, 16f), name, _bodyStyle);
+        GUI.color = Color.white;
+    }
+
+    private void DrawFightCard(float x, float y, float w, float h,
+                               string label, string badge, bool isPlayer, float sw,
+                               bool isCorrect = false, bool hasInput = false, bool large = false)
+    {
+        Color bgC = isPlayer
+            ? (hasInput
+                ? (isCorrect ? new Color(0.03f, 0.18f, 0.06f, 0.95f) : new Color(0.18f, 0.04f, 0.04f, 0.88f))
+                : new Color(0.06f, 0.06f, 0.16f, 0.88f))
+            : new Color(0.18f, 0.04f, 0.04f, 0.88f);
+        GUI.color = bgC;
+        GUI.DrawTexture(new Rect(x, y, w, h), _px);
+
+        float pulse = (Mathf.Sin(Time.time * 3.2f) + 1f) * 0.5f;
+        float bw    = large ? Mathf.Lerp(3f, 6f, pulse) : Mathf.Lerp(2f, 4.5f, pulse);
+        float bLen  = Mathf.Clamp(w * 0.22f, 10f, 26f);
+        Color bc;
+        if      (isPlayer && isCorrect)  bc = Color.Lerp(new Color(0.2f, 1f, 0.4f, 0.65f), new Color(0.4f, 1f, 0.55f, 1f), pulse);
+        else if (isPlayer && hasInput)   bc = new Color(1f, 0.3f, 0.2f, 0.8f);
+        else if (isPlayer)               bc = new Color(0.6f, 0.6f, 0.8f, 0.5f);
+        else if (large)                  bc = Color.Lerp(new Color(1f, 0.28f, 0.28f, 0.6f), new Color(1f, 0.55f, 0.1f, 1f), pulse);
+        else                             bc = new Color(1f, 0.28f, 0.28f, 0.7f);
+        GUI.color = bc;
+        GUI.DrawTexture(new Rect(x,        y,        bLen, bw),   _px);
+        GUI.DrawTexture(new Rect(x,        y,        bw,   bLen), _px);
+        GUI.DrawTexture(new Rect(x+w-bLen, y,        bLen, bw),   _px);
+        GUI.DrawTexture(new Rect(x+w-bw,   y,        bw,   bLen), _px);
+        GUI.DrawTexture(new Rect(x,        y+h-bw,   bLen, bw),   _px);
+        GUI.DrawTexture(new Rect(x,        y+h-bLen, bw,   bLen), _px);
+        GUI.DrawTexture(new Rect(x+w-bLen, y+h-bw,   bLen, bw),   _px);
+        GUI.DrawTexture(new Rect(x+w-bw,   y+h-bLen, bw,   bLen), _px);
+
+        Color stripC = isPlayer
+            ? (isCorrect ? new Color(0.2f, 1f,   0.4f,  0.35f)
+             : hasInput  ? new Color(1f,   0.3f,  0.2f,  0.28f)
+             :              new Color(0.4f, 0.4f,  0.7f,  0.25f))
+            : new Color(1f, 0.28f, 0.28f, 0.28f);
+        GUI.color = stripC;
+        GUI.DrawTexture(new Rect(x, y, w, 4f), _px);
+
+        _bodyStyle.fontSize = Mathf.Clamp((int)(sw / 76f), 8, 12);
+        GUI.color = isPlayer
+            ? (isCorrect ? new Color(0.2f, 1f,   0.4f, 0.80f)
+             : hasInput  ? new Color(1f,   0.4f,  0.3f, 0.80f)
+             :              new Color(0.6f, 0.6f,  0.9f, 0.65f))
+            : new Color(1f, 0.35f, 0.35f, 0.65f);
+        GUI.Label(new Rect(x, y + 10f, w, 18f), badge, _bodyStyle);
+
+        float nameSz = large ? w / 3.8f : w / 4.5f;
+        _cardStyle.fontSize = Mathf.Clamp((int)nameSz, 22, 52);
+        GUI.color = isPlayer
+            ? (isCorrect ? new Color(0.35f, 1f,   0.48f)
+             : hasInput  ? new Color(1f,    0.38f, 0.38f)
+             :              new Color(0.5f,  0.5f,  0.8f))
+            : (large ? Color.Lerp(new Color(1f, 0.45f, 0.1f), new Color(1f, 0.25f, 0.25f), pulse)
+                     : new Color(1f, 0.38f, 0.38f));
+        GUI.Label(new Rect(x, y + h * 0.3f, w, h * 0.45f), label, _cardStyle);
+        GUI.color = Color.white;
+    }
+
     private int[] ShuffleRange(int n)
     {
         int[] arr = new int[n];
@@ -1327,5 +2311,7 @@ public class TutorialManager : MonoBehaviour
         if (voskInstance == null) return;
         voskInstance.OnPartialResult -= Stage1HandlePartial;
         voskInstance.OnPartialResult -= Stage3HandlePartial;
+        voskInstance.OnPartialResult -= Stage4HandlePartial;
+        voskInstance.OnPartialResult -= Stage5HandlePartial;
     }
 }

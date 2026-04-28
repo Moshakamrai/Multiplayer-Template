@@ -20,6 +20,9 @@ public class CommentaryManager : MonoBehaviour
 {
     public static CommentaryManager Instance { get; private set; }
 
+    [Header("Commentary")]
+    public bool commentaryEnabled = false;
+
     [Header("Display")]
     [Range(1f,  4f)] public float holdDuration  = 2f;
     [Range(0.08f, 0.4f)] public float slideInDuration = 0.14f;
@@ -193,6 +196,7 @@ public class CommentaryManager : MonoBehaviour
     /// Trigger a commentary event. forceInterrupt bypasses global cooldown and priority.
     public void Trigger(CommentaryEvent evt, bool forceInterrupt = false)
     {
+        if (!commentaryEnabled) return;
         int idx      = (int)evt;
         int priority = Priority[idx];
 
@@ -216,6 +220,7 @@ public class CommentaryManager : MonoBehaviour
     public void OnTradeResolved(string p1Move, int p1Dmg, string p2Move, int p2Dmg,
                                 bool comboActive)
     {
+        if (!commentaryEnabled) return;
         // Parry
         if (p1Move.Contains("PARRY") || p2Move.Contains("PARRY"))
         { Trigger(CommentaryEvent.Parry); return; }

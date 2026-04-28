@@ -86,14 +86,22 @@ public class VoiceCommandManager : NetworkBehaviour
         string lowerSegment = segment.ToLower().Trim();
         bool isRhythm = RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive;
 
-        // Block word recognition during the action window (last 0.5s before beat).
-        // Only mic-threshold spike detection (CheckLocalParryTiming) should fire there.
+        // Block word recognition during the shout window (last 0.5s before beat)
+        // AND for 0.25s after the beat fires — prevents Vosk echoes bleeding into
+        // the next cycle when Vosk keeps emitting the previous utterance as partials.
         if (isRhythm)
         {
-            float nextBeat = RhythmRoundManager.Instance.GetNextBeatTime();
+            float trackTime = RhythmRoundManager.Instance.GetCurrentTrackTime();
+            float nextBeat  = RhythmRoundManager.Instance.GetNextBeatTime();
+            float lastBeat  = RhythmRoundManager.Instance.lastBeatFireTime;
+
+            // Post-beat dead zone
+            if (lastBeat > 0f && trackTime - lastBeat < 0.25f) return;
+
+            // Pre-beat shout window
             if (nextBeat > 0f)
             {
-                float timeToNext = nextBeat - RhythmRoundManager.Instance.GetCurrentTrackTime();
+                float timeToNext = nextBeat - trackTime;
                 if (timeToNext >= 0f && timeToNext <= 0.5f) return;
             }
         }

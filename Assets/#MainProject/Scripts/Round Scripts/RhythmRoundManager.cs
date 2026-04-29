@@ -35,6 +35,8 @@ public class RhythmRoundManager : NetworkBehaviour
     private List<float> _upcomingImpacts = new List<float>();
     private List<int> _clusterSizes = new List<int>();
 
+    private bool _heavyHitThisBeat = false;
+
 
     
 
@@ -172,13 +174,12 @@ public class RhythmRoundManager : NetworkBehaviour
         {
             if (player != null)
             {
-                // Only deal cards to players with a CardManager and NO BotController
                 CardManager cm = player.GetComponent<CardManager>();
                 if (cm != null && player.GetComponent<BotController>() == null)
                 {
                     cm.currentHandIndices.Clear();
-                    cm.DealInitialHand(); // Force DrawCard() x4
-                    Debug.Log($"<color=green>SERVER:</color> Dealt cards to {player.PlayerName}");
+                    cm.ResetSlots();
+                    Debug.Log($"<color=green>SERVER:</color> Reset slots for {player.PlayerName}");
                 }
             }
         }
@@ -294,7 +295,8 @@ public class RhythmRoundManager : NetworkBehaviour
                             customIsCombo = (currentComboCount > 1);
                     }
 
-                    RpcTriggerHitStop();
+                    RpcTriggerHitStop(_heavyHitThisBeat);
+                    _heavyHitThisBeat = false;
                 }
             }
         }
@@ -484,6 +486,18 @@ public class RhythmRoundManager : NetworkBehaviour
             finalDmg += Mathf.RoundToInt(bonus);
         }
 
+        // Voice volume bonus: louder shout = up to +25% damage
+        if (atkSpike > 0f && attacker.lastVocalSpikeVolume > 0f)
+        {
+            const float volThreshold = 0.4f;
+            float vol = attacker.lastVocalSpikeVolume;
+            if (vol > volThreshold)
+            {
+                float t = Mathf.Clamp01((vol - volThreshold) / (1f - volThreshold));
+                finalDmg = Mathf.RoundToInt(finalDmg * Mathf.Lerp(1f, 1.25f, t));
+            }
+        }
+
         // --- 4. HIT DETECTION ---
         bool hits = false;
         if (isInterrupted && !moveIsUnbreakable) hits = false;
@@ -502,10 +516,9 @@ public class RhythmRoundManager : NetworkBehaviour
 
             if (damageDealt > 0)
             {
-                // 1. Attacker gets the "Hit" sound
-                if (attacker.connectionToClient != null) attacker.TargetPlaySuccessSound("Attack");
+                if (move.attack == "UnbreakablePunch") _heavyHitThisBeat = true;
 
-                // 2. Defender gets the "Hurt" sound + hit particle
+                if (attacker.connectionToClient != null) attacker.TargetPlaySuccessSound("Attack");
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Hurt");
                 defender.RpcPlayCombatParticle("Hit");
 
@@ -637,8 +650,9 @@ public class RhythmRoundManager : NetworkBehaviour
             p2Move = p2Move,
             p2State = p2State,
             p2Damage = p2Dmg,
-            timeAdded = Time.time // Stamps the exact moment it appeared
+            timeAdded = Time.time
         });
+        if (combatLogs.Count > 5) combatLogs.RemoveAt(0);
     }
 
     private void ExecutePulseImpact()
@@ -656,24 +670,18 @@ public class RhythmRoundManager : NetworkBehaviour
                 // 2. HARD RESET: Clear all flags so lag cannot roll into the next beat
                 // In chain mode, preserve the spike so hits 2-4 still grade correctly
                 if (!customIsCombo)
-                    pc.lastVocalSpikeTime = -1f;
+                {
+                    pc.lastVocalSpikeTime   = -1f;
+                    pc.lastVocalSpikeVolume = 0f;
+                }
                 pc.IsParryActive = false;
 
-                // 3. REFILL HANDS: Draw cards until the hand is full (4 cards).
-                // Skip entirely during combo mode — the combo hand is managed by CardManager.Update()
-                // and DrawCard() is blocked, so looping here would spin forever.
+                // 3. Refill slots once both pools are empty (combo hand managed by CardManager.Update)
                 if (isServer)
                 {
                     CardManager cm = player.GetComponent<CardManager>();
                     if (cm != null && !cm.IsComboHandActive)
-                    {
-                        while (cm.currentHandIndices.Count < 4)
-                            cm.DrawCard();
-                    }
-                    else if (cm != null && cm.IsComboHandActive)
-                    {
-                        Debug.Log($"<color=yellow>[RhythmRoundManager]</color> Skipping card refill for {player.PlayerName} — combo hand is active.");
-                    }
+                        cm.TryRefillSlots();
                 }
             }
         }
@@ -730,8 +738,14 @@ public class RhythmRoundManager : NetworkBehaviour
         pc.TargetShowTimingFeedback(rating);
     }
 
-    [ClientRpc] private void RpcTriggerHitStop() { StartCoroutine(HitStopRoutine()); if (CameraShake.Instance != null) CameraShake.Instance.Shake(0.1f, 0.07f); }
-    private IEnumerator HitStopRoutine() { Time.timeScale = 0.05f; yield return new WaitForSecondsRealtime(0.06f); Time.timeScale = 1.0f; }
+    [ClientRpc] private void RpcTriggerHitStop(bool heavy)
+    {
+        float dur   = heavy ? 0.12f : 0.06f;
+        float scale = heavy ? 0.02f : 0.05f;
+        StartCoroutine(HitStopRoutine(dur, scale));
+        if (CameraShake.Instance != null) CameraShake.Instance.Shake(heavy ? 0.18f : 0.10f, heavy ? 0.12f : 0.07f);
+    }
+    private IEnumerator HitStopRoutine(float dur, float scale) { Time.timeScale = scale; yield return new WaitForSecondsRealtime(dur); Time.timeScale = 1.0f; }
 
     void OnRoundStateChanged(bool oldVal, bool newVal) { if (BeatAnalyzer.Instance != null && BeatAnalyzer.Instance.audioSource != null && currentType != RoundType.CustomTrack) { if (newVal) BeatAnalyzer.Instance.audioSource.Play(); else BeatAnalyzer.Instance.audioSource.Stop(); } }
 
@@ -890,16 +904,16 @@ public class RhythmRoundManager : NetworkBehaviour
         }
 
         // --- 4. COMBAT LOG (Right Side) ---
+        // x/width aligned with the health bar and enemy-slots panel (Screen.width-420, w=400)
+        // y=175 starts below enemy-slots panel bottom (88+76=164) with an 11px gap
         if (combatLogs.Count > 0)
         {
-            GUILayout.BeginArea(new Rect(Screen.width - 550, 100, 530, 600));
+            GUILayout.BeginArea(new Rect(Screen.width - 420, 175, 400, 220));
             GUIStyle logStyle = new GUIStyle(GUI.skin.label) { fontSize = 16, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
             GUIStyle boxStyle = new GUIStyle(GUI.skin.box);
             GUILayout.Label("COMBAT LOG", logStyle); GUILayout.Space(5);
 
-            // Show the last 10 entries to keep it clean
-            int start = Mathf.Max(0, combatLogs.Count - 10);
-            for (int i = start; i < combatLogs.Count; i++)
+            for (int i = 0; i < combatLogs.Count; i++)
             {
                 var log = combatLogs[i];
                 GUILayout.BeginHorizontal(boxStyle);

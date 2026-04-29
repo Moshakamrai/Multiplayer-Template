@@ -43,13 +43,19 @@ public class PlayerCombat : NetworkBehaviour
 
     private VoiceCommandManager _vcm;
 
-    [SyncVar] public float lastVocalSpikeTime = -1f;
+    [SyncVar] public float lastVocalSpikeTime   = -1f;
+    [SyncVar] public float lastVocalSpikeVolume = 0f;
 
     // Spike detection guards — prevent holding voice from gaming timing
     private bool  _spikeLockedThisBeat   = false;
     private float _lastTrackedBeatFire   = -1f;
-    private const float BEAT_DEAD_ZONE   = 0.2f;  // ignore spikes this long after each beat
-    private const float SHOUT_WINDOW     = 0.5f;  // window before beat where timing is graded
+    private const float BEAT_DEAD_ZONE   = 0.2f;
+    private const float SHOUT_WINDOW     = 0.5f;
+
+    // Pressure system — recent hits shrink the shout window
+    private float _pressureLevel = 0f;
+    private const float PRESSURE_GAIN  = 0.3f;
+    private const float PRESSURE_DECAY = 0.12f;
 
     private float _hurtFlashFade = 0f;
     private float _successFlashFade = 0f;
@@ -79,9 +85,11 @@ public class PlayerCombat : NetworkBehaviour
 
         // --- Fade the timing text ---
         if (isLocalPlayer && _timingFade > 0)
-        {
-            _timingFade -= Time.deltaTime * 1.5f; // Fades out completely in ~0.66 seconds
-        }
+            _timingFade -= Time.deltaTime * 1.5f;
+
+        // --- Decay pressure level ---
+        if (isLocalPlayer && _pressureLevel > 0f)
+            _pressureLevel = Mathf.Max(0f, _pressureLevel - PRESSURE_DECAY * Time.deltaTime);
 
         // Local Parry Spike Check: Only runs for the local player
         if (isLocalPlayer && !IsDead && !IsHurting)
@@ -139,9 +147,9 @@ public class PlayerCombat : NetworkBehaviour
         float nextBeat        = rmm.GetNextBeatTime();
         float timeUntilImpact = nextBeat - currentTime;
 
-        // ── Both modes: only accept spikes inside the shout window (last SHOUT_WINDOW seconds) ──
-        // Outside the window = action input stage. Shouts there are for command selection, not timing.
-        bool inShoutWindow = timeUntilImpact > 0f && timeUntilImpact <= SHOUT_WINDOW;
+        // Under-pressure players get a tighter shout window (max 40% reduction at full pressure)
+        float effectiveWindow = SHOUT_WINDOW * (1f - _pressureLevel * 0.4f);
+        bool inShoutWindow = timeUntilImpact > 0f && timeUntilImpact <= effectiveWindow;
         if (!inShoutWindow) return;
 
         // ── First spike only: once locked, ignore further volume until next beat cycle ─────
@@ -156,13 +164,13 @@ public class PlayerCombat : NetworkBehaviour
 
         if (!isChainMode && currentMove == "ParryIntent")
         {
-            CmdConfirmEliteParry(currentTime);
+            CmdConfirmEliteParry(currentTime, currentVol);
             Debug.Log($"<color=green>VOCAL SUCCESS:</color> Parry (CAGE) at {timeUntilImpact:F3}s until beat.");
             _pendingAttackTrigger = "ParryLocked";
         }
         else
         {
-            CmdRegisterVocalSpike(currentTime);
+            CmdRegisterVocalSpike(currentTime, currentVol);
             string label = isChainMode ? "CHAIN" : currentMove;
             Debug.Log($"<color=cyan>SPIKE [{label}]:</color> t={currentTime:F3}s  Δbeat={timeUntilImpact:F3}s");
         }
@@ -181,10 +189,11 @@ public class PlayerCombat : NetworkBehaviour
     }
 
     [Command]
-    void CmdConfirmEliteParry(float spikeTime)
+    void CmdConfirmEliteParry(float spikeTime, float vol)
     {
-        lastVocalSpikeTime = spikeTime;
-        IsParryActive = true; // Set instantly on server
+        lastVocalSpikeTime   = spikeTime;
+        lastVocalSpikeVolume = vol;
+        IsParryActive = true;
 
         if (animator != null) animator.Play("Parry");
 
@@ -195,9 +204,10 @@ public class PlayerCombat : NetworkBehaviour
     }
 
     [Command]
-    void CmdRegisterVocalSpike(float time)
+    void CmdRegisterVocalSpike(float time, float vol)
     {
-        lastVocalSpikeTime = time;
+        lastVocalSpikeTime   = time;
+        lastVocalSpikeVolume = vol;
     }
 
     [Command]
@@ -222,10 +232,10 @@ public class PlayerCombat : NetworkBehaviour
 
     IEnumerator ResetParryFlag()
     {
-        // Keep it active long enough for the server pulse to see it
         yield return new WaitForSeconds(0.6f);
-        IsParryActive = false;
-        lastVocalSpikeTime = -1f; // Clear the spike for the next round
+        IsParryActive        = false;
+        lastVocalSpikeTime   = -1f;
+        lastVocalSpikeVolume = 0f;
     }
 
     private IEnumerator PerformAttack(string trigger)
@@ -382,7 +392,7 @@ public class PlayerCombat : NetworkBehaviour
         if (CurrentHealth <= 0) StartCoroutine(DelayedKnockout(0f));
         else
         {
-            RpcTriggerHurt("Hurt " + Random.Range(1, 5), 0f);
+            RpcTriggerHurt("Hurt " + Random.Range(1, 5), 0f, damage);
             if (knockbackDir != default) RpcNudgeBack(knockbackDir);
         }
     }
@@ -394,15 +404,28 @@ public class PlayerCombat : NetworkBehaviour
     }
 
     [Server] private IEnumerator DelayedKnockout(float delay) { yield return new WaitForSeconds(delay); RpcKnockout(); }
-    [ClientRpc] void RpcTriggerHurt(string trigger, float delay) { StartCoroutine(DelayedHurtRoutine(trigger, delay)); }
+    [ClientRpc] void RpcTriggerHurt(string trigger, float delay, int damage) { StartCoroutine(DelayedHurtRoutine(trigger, delay, damage)); }
 
-    private IEnumerator DelayedHurtRoutine(string trigger, float delay)
+    private IEnumerator DelayedHurtRoutine(string trigger, float delay, int damage)
     {
         yield return new WaitForSeconds(delay);
         if (animator) animator.SetTrigger(trigger);
-        Debug.Log($"<color=orange>[CameraShake] DelayedHurtRoutine — Instance null={CameraShake.Instance == null}, isLocalPlayer={isLocalPlayer}</color>");
-        CameraShake.Instance?.Shake(0.3f, 0.45f);
-        if (isLocalPlayer) { _hurtFlashFade = 1f; _attackQueue.Clear(); _pendingAttackTrigger = ""; _pendingDashDirection = Vector3.zero; isAttacking = false; GetComponent<PlayerController>().InterruptMovement(); StartCoroutine(HurtStunTimer()); }
+
+        float shakeDur = damage > 15 ? 0.35f : damage > 8 ? 0.20f : 0.10f;
+        float shakeMag = damage > 15 ? 0.65f : damage > 8 ? 0.38f : 0.18f;
+        CameraShake.Instance?.Shake(shakeDur, shakeMag);
+
+        if (isLocalPlayer)
+        {
+            _pressureLevel = Mathf.Min(1f, _pressureLevel + PRESSURE_GAIN);
+            _hurtFlashFade = 1f;
+            _attackQueue.Clear();
+            _pendingAttackTrigger = "";
+            _pendingDashDirection = Vector3.zero;
+            isAttacking = false;
+            GetComponent<PlayerController>().InterruptMovement();
+            StartCoroutine(HurtStunTimer());
+        }
     }
 
     public bool HasOpenSlot(bool isMovement)
@@ -417,7 +440,7 @@ public class PlayerCombat : NetworkBehaviour
 
     private IEnumerator HurtStunTimer() { IsHurting = true; yield return new WaitForSeconds(0.2f); IsHurting = false; }
     private IEnumerator FlashEffectRoutine() { if (playerRenderer == null || flashMaterial == null) yield break; playerRenderer.material = flashMaterial; yield return new WaitForSeconds(0.1f); playerRenderer.material = _originalMaterial; }
-    [ClientRpc] void RpcKnockout() { IsDead = true; if (animator != null) animator.SetTrigger("Knock out"); CommentaryManager.Instance?.Trigger(CommentaryEvent.Knockout, forceInterrupt: true); if (isServer) StartCoroutine(ServerRestartMatchRoutine()); }
+    [ClientRpc] void RpcKnockout() { IsDead = true; if (animator != null) animator.SetTrigger("Knock out"); CommentaryManager.Instance?.Trigger(CommentaryEvent.Knockout, forceInterrupt: true); CameraShake.Instance?.Shake(0.45f, 0.9f); if (isServer) StartCoroutine(ServerRestartMatchRoutine()); }
     [Server] private IEnumerator ServerRestartMatchRoutine() { yield return new WaitForSeconds(4f); NetworkManager.singleton.ServerChangeScene(SceneManager.GetActiveScene().name); }
 
     private Texture2D _whiteTexture;
@@ -592,14 +615,44 @@ public class PlayerCombat : NetworkBehaviour
             SoundManagerMain.Instance.PlaySuccessSFX(type);
     }
 
-    /// <summary>
-    /// Plays a particle from the pool at this player's position on all clients.
-    /// Pool names to set up in ParticlePoolManager: "Hit", "Block", "Parry", "Dodge"
-    /// </summary>
     [ClientRpc]
     public void RpcPlayCombatParticle(string effectType)
     {
         if (ParticlePoolManager.Instance != null)
             ParticlePoolManager.Instance.PlayParticle(effectType, transform.position);
+    }
+
+    // Removes the last queued input so the player can replace it with something else
+    public void CancelLastInput()
+    {
+        if (!isLocalPlayer) return;
+        var rmm = RhythmRoundManager.Instance;
+        if (rmm == null || !rmm.isRoundActive) return;
+        if (rmm.IsSingleMoveMode())
+        {
+            _pendingAttackTrigger = "";
+            _pendingDashDirection = Vector3.zero;
+        }
+        else if (_comboBuffer.Count > 0)
+        {
+            _comboBuffer.RemoveAt(_comboBuffer.Count - 1);
+        }
+        CmdCancelLastInput();
+    }
+
+    [Command]
+    private void CmdCancelLastInput()
+    {
+        var rmm = RhythmRoundManager.Instance;
+        if (rmm == null || !rmm.isRoundActive) return;
+        if (rmm.IsSingleMoveMode())
+        {
+            _pendingAttackTrigger = "";
+            _pendingDashDirection = Vector3.zero;
+        }
+        else if (_comboBuffer.Count > 0)
+        {
+            _comboBuffer.RemoveAt(_comboBuffer.Count - 1);
+        }
     }
 }

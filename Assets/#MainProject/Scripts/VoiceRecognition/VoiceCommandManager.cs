@@ -72,10 +72,8 @@ public class VoiceCommandManager : NetworkBehaviour
     void CmdUseCardOnServer(string trigger)
     {
         if (_myCards != null)
-        {
             _myCards.DiscardCard(trigger);
-            _myCards.DrawCard(); // <-- NEW: Instantly draw a replacement card!
-        }
+        // Replacement draw happens automatically at next beat (ExecutePulseImpact)
     }
 
    
@@ -95,8 +93,8 @@ public class VoiceCommandManager : NetworkBehaviour
             float nextBeat  = RhythmRoundManager.Instance.GetNextBeatTime();
             float lastBeat  = RhythmRoundManager.Instance.lastBeatFireTime;
 
-            // Post-beat dead zone
-            if (lastBeat > 0f && trackTime - lastBeat < 0.25f) return;
+            // Post-beat dead zone — extended to cover longer Vosk echo tails
+            if (lastBeat > 0f && trackTime - lastBeat < 0.45f) return;
 
             // Pre-beat shout window
             if (nextBeat > 0f)
@@ -106,7 +104,16 @@ public class VoiceCommandManager : NetworkBehaviour
             }
         }
 
-        if (isRhythm && !_myCombat.HasOpenSlot(false) && !_myCombat.HasOpenSlot(true)) return;
+        if (isRhythm)
+        {
+            var rmm = RhythmRoundManager.Instance;
+            if (rmm.IsSingleMoveMode())
+            {
+                // Single-move mode: one input per beat — lock out once either slot is taken
+                if (!_myCombat.HasOpenSlot(false) || !_myCombat.HasOpenSlot(true)) return;
+            }
+            else if (!_myCombat.HasOpenSlot(false) && !_myCombat.HasOpenSlot(true)) return;
+        }
 
         string[] words = lowerSegment.Split(' ');
         foreach (string word in words)
@@ -116,6 +123,13 @@ public class VoiceCommandManager : NetworkBehaviour
             Vector3 dashDir = Vector3.zero;
 
             // 1. RECOGNITION MAPPING
+            if (word == "cancel" || word == "clear" || GetSimilarity(word, "cancel") > 0.72f)
+            {
+                _myCombat.CancelLastInput();
+                LogExecution("CANCELLED");
+                continue;
+            }
+
             if (GetSimilarity(word, "punch") > 0.64f || word == "jab") { trigger = "Jab"; recognized = true; }
             else if (GetSimilarity(word, "blast") > 0.64f || word == "last" || word == "fast" || word == "cast") { trigger = "Cross"; recognized = true; }
             else if (GetSimilarity(word, "hook") > 0.64f) { trigger = "Hook"; recognized = true; }

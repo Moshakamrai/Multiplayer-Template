@@ -17,7 +17,9 @@ public class PlayerCombat : NetworkBehaviour
     public bool IsDead { get; private set; }
     public bool IsHurting { get; private set; }
 
-    [SyncVar] public bool IsParryActive = false;
+    [SyncVar] public bool IsParryActive  = false;
+    [SyncVar] public bool IsStaggered    = false;
+    [SyncVar] public int  StaggerBeatsRemaining = 0;
 
     private Queue<string> _attackQueue = new Queue<string>();
     public SphereCollider weaponGloveLeft;
@@ -229,6 +231,23 @@ public class PlayerCombat : NetworkBehaviour
         // We keep the hitbox active for 0.3s to match the window
         StartCoroutine(ResetParryFlag());
     }
+
+    [Server]
+    public void TriggerStagger(int beats = 3)
+    {
+        IsStaggered            = true;
+        StaggerBeatsRemaining  = beats;
+        RpcTriggerStaggerAnim();
+    }
+
+    [ClientRpc]
+    private void RpcTriggerStaggerAnim()
+    {
+        if (animator != null) animator.SetTrigger("Stagger");
+    }
+
+    [Server]
+    public void ClearStagger() { IsStaggered = false; StaggerBeatsRemaining = 0; }
 
     IEnumerator ResetParryFlag()
     {

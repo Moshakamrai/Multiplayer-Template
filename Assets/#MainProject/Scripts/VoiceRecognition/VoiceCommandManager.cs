@@ -17,15 +17,14 @@ public class VoiceCommandManager : NetworkBehaviour
     private CardManager _myCards; // Add this reference
 
     [Header("Parry Settings")]
-    public float parryVolumeThreshold = 0.4f; // Adjust this in Inspector
-
+    public float parryVolumeThreshold = 0.4f;
 
     void Start()
     {
         _myController = GetComponent<PlayerController>();
         _myCombat = GetComponent<PlayerCombat>();
         _myEnergy = GetComponent<PlayerEnergy>();
-        _myCards = GetComponent<CardManager>(); // Initialize the reference
+        _myCards = GetComponent<CardManager>();
 
         if (!_myController.isLocalPlayer) { if (VoskInstance != null) Destroy(VoskInstance); this.enabled = false; return; }
 
@@ -54,11 +53,12 @@ public class VoiceCommandManager : NetworkBehaviour
         // Grab the very last word Vosk is currently guessing
         string newestWord = currentWords[currentWords.Length - 1];
 
-        // If Vosk guessed a new word, or updated its current guess, process it INSTANTLY
+        // Only mark the word as processed if timing wasn't the blocker.
+        // If timing blocked it, keep retrying until the window opens.
         if (newestWord != _lastProcessedWord)
         {
-            _lastProcessedWord = newestWord;
-            ProcessWords(newestWord); 
+            bool consumed = ProcessWords(newestWord);
+            if (consumed) _lastProcessedWord = newestWord;
         }
     }
 
@@ -78,29 +78,28 @@ public class VoiceCommandManager : NetworkBehaviour
 
    
 
-    void ProcessWords(string segment)
+    // Returns true  = word was consumed (timing OK, slot check, or not-in-hand — don't retry)
+    // Returns false = timing blocked (dead zone) — keep retrying until the window opens
+    bool ProcessWords(string segment)
     {
-        if (_myCombat.IsHurting || _myCombat.IsDead) return;
+        if (_myCombat.IsHurting || _myCombat.IsDead) return true;
         string lowerSegment = segment.ToLower().Trim();
         bool isRhythm = RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive;
 
-        // Block word recognition during the shout window (last 0.5s before beat)
-        // AND for 0.25s after the beat fires — prevents Vosk echoes bleeding into
-        // the next cycle when Vosk keeps emitting the previous utterance as partials.
         if (isRhythm)
         {
             float trackTime = RhythmRoundManager.Instance.GetCurrentTrackTime();
             float nextBeat  = RhythmRoundManager.Instance.GetNextBeatTime();
             float lastBeat  = RhythmRoundManager.Instance.lastBeatFireTime;
 
-            // Post-beat dead zone — extended to cover longer Vosk echo tails
-            if (lastBeat > 0f && trackTime - lastBeat < 0.45f) return;
+            // Post-beat dead zone — return FALSE so the word can be retried when zone ends
+            if (lastBeat > 0f && trackTime - lastBeat < 1.5f) return false;
 
-            // Pre-beat shout window
+            // Pre-beat shout window — return TRUE (consume but don't queue; this beat is closing)
             if (nextBeat > 0f)
             {
                 float timeToNext = nextBeat - trackTime;
-                if (timeToNext >= 0f && timeToNext <= 0.5f) return;
+                if (timeToNext >= 0f && timeToNext <= 0.5f) return true;
             }
         }
 
@@ -110,9 +109,9 @@ public class VoiceCommandManager : NetworkBehaviour
             if (rmm.IsSingleMoveMode())
             {
                 // Single-move mode: one input per beat — lock out once either slot is taken
-                if (!_myCombat.HasOpenSlot(false) || !_myCombat.HasOpenSlot(true)) return;
+                if (!_myCombat.HasOpenSlot(false) || !_myCombat.HasOpenSlot(true)) return true;
             }
-            else if (!_myCombat.HasOpenSlot(false) && !_myCombat.HasOpenSlot(true)) return;
+            else if (!_myCombat.HasOpenSlot(false) && !_myCombat.HasOpenSlot(true)) return true;
         }
 
         string[] words = lowerSegment.Split(' ');
@@ -130,14 +129,14 @@ public class VoiceCommandManager : NetworkBehaviour
                 continue;
             }
 
-            if (GetSimilarity(word, "punch") > 0.64f || word == "jab") { trigger = "Jab"; recognized = true; }
-            else if (GetSimilarity(word, "blast") > 0.64f || word == "last" || word == "fast" || word == "cast") { trigger = "Cross"; recognized = true; }
-            else if (GetSimilarity(word, "hook") > 0.64f) { trigger = "Hook"; recognized = true; }
-            else if (GetSimilarity(word, "block") > 0.64 || GetSimilarity(word, "guard") > 0.72f) { trigger = "Block"; recognized = true; }
-            else if (GetSimilarity(word, "cage") > 0.64f || word == "page" || word == "engage") { trigger = "ParryIntent"; recognized = true; }
-            else if (GetSimilarity(word, "boom") > 0.64f || word == "room" || word == "doom") { trigger = "UnbreakablePunch"; recognized = true; }
-            else if (GetSimilarity(word, "left") > 0.6f) { trigger = "Left"; dashDir = Vector3.left; recognized = true; }
-            else if (GetSimilarity(word, "right") > 0.6f) { trigger = "Right"; dashDir = Vector3.right; recognized = true; }
+            if (GetSimilarity(word, "punch") > 0.75f || word == "jab") { trigger = "Jab"; recognized = true; }
+            else if (GetSimilarity(word, "blast") > 0.75f || word == "last" || word == "fast" || word == "cast") { trigger = "Cross"; recognized = true; }
+            else if (GetSimilarity(word, "hook") > 0.75f) { trigger = "Hook"; recognized = true; }
+            else if (GetSimilarity(word, "block") > 0.75f || GetSimilarity(word, "guard") > 0.75f) { trigger = "Block"; recognized = true; }
+            else if (GetSimilarity(word, "cage") > 0.70f || word == "page" || word == "engage") { trigger = "ParryIntent"; recognized = true; }
+            else if (word == "boom" || GetSimilarity(word, "boom") > 0.90f) { trigger = "UnbreakablePunch"; recognized = true; }
+            else if (GetSimilarity(word, "left") > 0.75f) { trigger = "Left"; dashDir = Vector3.left; recognized = true; }
+            else if (GetSimilarity(word, "right") > 0.75f) { trigger = "Right"; dashDir = Vector3.right; recognized = true; }
             // Combo card selection — "one/two/three/four"
             // Vosk mishears: "three" → "tree",  "four" → "for"
             else if (word == "one"  || GetSimilarity(word, "one")  > 0.80f) { trigger = "Combo1"; recognized = true; }
@@ -219,6 +218,7 @@ public class VoiceCommandManager : NetworkBehaviour
                 else LogExecution("SLOTS FULL");
             }
         }
+        return true;
     }
 
 
@@ -255,12 +255,7 @@ public class VoiceCommandManager : NetworkBehaviour
 
     public bool IsVocalSpikeDetected()
     {
-        // Access the actual instance of VoiceProcessor
         VoiceProcessor vp = GetComponent<VoiceProcessor>();
-        if (vp != null && vp.IsRecording)
-        {
-            return vp.CurrentRawVolume >= parryVolumeThreshold;
-        }
-        return false;
+        return vp != null && vp.IsRecording && vp.CurrentRawVolume >= parryVolumeThreshold;
     }
 }

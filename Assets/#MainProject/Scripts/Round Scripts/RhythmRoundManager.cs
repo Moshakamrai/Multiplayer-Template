@@ -25,6 +25,9 @@ public class RhythmRoundManager : NetworkBehaviour
     [Header("Animation Sync")]
     public float windUpTime = 0.53f;
 
+    [Header("Round Music")]
+    public AudioClip slowRhythmMusic;
+
     [Header("Custom Tracks")]
     public AudioClip[] availableTracks; // Drag all your MP3s/WAVs here in the Inspector!
 
@@ -84,7 +87,10 @@ public class RhythmRoundManager : NetworkBehaviour
         _clusterSizes.Clear();
         _isWindUpFired = false;
 
-        // We want 90 seconds total. 
+        if (slowRhythmMusic != null && BeatAnalyzer.Instance != null)
+            BeatAnalyzer.Instance.audioSource.clip = slowRhythmMusic;
+
+        // We want 90 seconds total.
         // At 4-second intervals, i <= 22 gives us 88 seconds.
         for (int i = 1; i <= 22; i++)
         {
@@ -405,11 +411,34 @@ public class RhythmRoundManager : NetworkBehaviour
         p2DamageTaken += dmgToP2;
         p1DamageTaken += dmgToP1;
 
-        // Green if Result is 1 (Hit) or -1 (Successful Parry Reflection)
         int p1State = (p1Result == 1 || p1Result == -1) ? 1 : (p1DamageTaken > 0 ? -1 : 0);
         int p2State = (p2Result == 1 || p2Result == -1) ? 1 : (p2DamageTaken > 0 ? -1 : 0);
 
         RpcLogCombatTrade(pc1.PlayerName, FormatMove(m1), p1State, p1DamageTaken, pc2.PlayerName, FormatMove(m2), p2State, p2DamageTaken);
+
+        // --- COUNTER BONUS: winning a trade gives +1 slot of the opposite type ---
+        CardManager cm1 = pc1.GetComponent<CardManager>();
+        CardManager cm2 = pc2.GetComponent<CardManager>();
+        bool p1UsedAttack = !string.IsNullOrEmpty(m1.attack) && CardManager.IsAttackTrigger(m1.attack);
+        bool p2UsedAttack = !string.IsNullOrEmpty(m2.attack) && CardManager.IsAttackTrigger(m2.attack);
+        bool p1ActiveDef  = (!string.IsNullOrEmpty(m1.attack) && CardManager.IsDefenseTrigger(m1.attack)) || m1.dash != Vector3.zero;
+        bool p2ActiveDef  = (!string.IsNullOrEmpty(m2.attack) && CardManager.IsDefenseTrigger(m2.attack)) || m2.dash != Vector3.zero;
+
+        // Attack landed → attacker gains DEF slot
+        if (p1Result == 1 && dmgToP2 > 0)  GrantCounterBonus(cm1, p1, true);
+        if (p2Result == 1 && dmgToP1 > 0)  GrantCounterBonus(cm2, p2, true);
+
+        // Defense held against an attack → defender gains ATK slot
+        if (p2UsedAttack && dmgToP1 == 0 && p2Result == 0 && p1ActiveDef && !p1UsedAttack) GrantCounterBonus(cm1, p1, false);
+        if (p1UsedAttack && dmgToP2 == 0 && p1Result == 0 && p2ActiveDef && !p2UsedAttack) GrantCounterBonus(cm2, p2, false);
+
+        // Parry success → parrier gains ATK slot (p1Result==-1 means p2's parry reflected p1's attack)
+        if (p1Result == -1) GrantCounterBonus(cm2, p2, false);
+        if (p2Result == -1) GrantCounterBonus(cm1, p1, false);
+
+        // Timing tie win → winner gains opposite slot
+        if (p1WinsTie) GrantCounterBonus(cm1, p1, p1UsedAttack);
+        if (p2WinsTie) GrantCounterBonus(cm2, p2, p2UsedAttack);
     }
 
     [Server]
@@ -417,9 +446,12 @@ public class RhythmRoundManager : NetworkBehaviour
     {
         damageDealt = 0;
         if (string.IsNullOrEmpty(move.attack) || move.attack == "Block") return 0;
+        if (attacker.IsStaggered) return 0;
 
-        // --- 1. PARRY REFLECTION ---
-        if (defender.IsParryActive)
+        bool defenderStaggered = defender.IsStaggered;
+
+        // --- 1. PARRY REFLECTION (bypassed when staggered) ---
+        if (!defenderStaggered && defender.IsParryActive)
         {
             if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Parry");
             defender.RpcPlayCombatParticle("Parry");
@@ -428,16 +460,14 @@ public class RhythmRoundManager : NetworkBehaviour
             int baseRef = isUnbreakable ? 15 : ((move.attack == "Hook") ? 25 : 10);
             Vector3 parryKbDir = (attacker.transform.position - defender.transform.position).normalized;
             attacker.TakeDamage(Mathf.CeilToInt(baseRef * 1.2f), parryKbDir);
-
-            damageDealt = 0;
             return -1;
         }
 
-        // --- 2. MOVEMENT & MITIGATION ---
+        // --- 2. MOVEMENT & MITIGATION (bypassed when staggered) ---
         bool moveSuccessful = false;
         float blockMitigation = 0f;
 
-        if (defMove.dash != Vector3.zero)
+        if (!defenderStaggered && defMove.dash != Vector3.zero)
         {
             float dSpike = defender.lastVocalSpikeTime;
             if (dSpike > 0 && (GetNextBeatTime() - dSpike) <= 0.3f)
@@ -448,24 +478,18 @@ public class RhythmRoundManager : NetworkBehaviour
             }
         }
 
-        if (defMove.attack == "Block")
+        if (!defenderStaggered && defMove.attack == "Block")
         {
-            float bSpike = defender.lastVocalSpikeTime;
-            float targetBeat = GetNextBeatTime();
-            float offset = Mathf.Abs(targetBeat - bSpike);
-
-            blockMitigation = 0f; 
-
+            float bSpike  = defender.lastVocalSpikeTime;
+            float offset  = Mathf.Abs(GetNextBeatTime() - bSpike);
             if (bSpike > 0 && offset <= 0.4f)
             {
-                if (move.attack == "Hook") 
+                if (move.attack == "Hook")
                 {
-                    // Hook wraps around the guard! Block fails entirely.
-                    blockMitigation = 0.0f; 
+                    blockMitigation = 0f; // Hook wraps around the guard
                 }
                 else
                 {
-                    // 100% Mitigation against Jab, Cross, etc.
                     blockMitigation = 1.0f;
                     if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Block");
                     defender.RpcPlayCombatParticle("Block");
@@ -474,19 +498,14 @@ public class RhythmRoundManager : NetworkBehaviour
         }
 
         // --- 3. ATTACK DAMAGE ---
-        float targetBeatTime = GetNextBeatTime();
-        float atkSpike = attacker.lastVocalSpikeTime;
         bool moveIsUnbreakable = (move.attack == "UnbreakablePunch");
         int finalDmg = moveIsUnbreakable ? 15 : 5;
-        float window = moveIsUnbreakable ? 0.2f : 0.3f;
 
-        if (atkSpike > 0 && (targetBeatTime - atkSpike) <= window)
-        {
-            float bonus = Mathf.Lerp(10, 0, Mathf.Max(0, targetBeatTime - atkSpike) / window);
-            finalDmg += Mathf.RoundToInt(bonus);
-        }
+        // Timing grade: EXCELLENT +25%, GOOD base, BAD −50%
+        finalDmg = Mathf.RoundToInt(finalDmg * GetTimingMultiplier(attacker));
 
-        // Voice volume bonus: louder shout = up to +25% damage
+        // Voice volume bonus: louder shout = up to +25%
+        float atkSpike = attacker.lastVocalSpikeTime;
         if (atkSpike > 0f && attacker.lastVocalSpikeVolume > 0f)
         {
             const float volThreshold = 0.4f;
@@ -499,29 +518,35 @@ public class RhythmRoundManager : NetworkBehaviour
         }
 
         // --- 4. HIT DETECTION ---
-        bool hits = false;
-        if (isInterrupted && !moveIsUnbreakable) hits = false;
+        bool hits;
+        if (defenderStaggered)
+        {
+            hits = true; // Staggered — all defenses down, every attack connects
+        }
+        else if (isInterrupted && !moveIsUnbreakable)
+        {
+            hits = false;
+        }
         else
         {
-            if (moveIsUnbreakable) hits = !moveSuccessful;
-            else if (move.attack == "Jab") hits = !moveSuccessful; // Jab misses dodges
-            else if (move.attack == "Cross" || move.attack == "Strike" || move.attack == "Blast") hits = true; // Tracks dodges perfectly!
-            else if (move.attack == "Hook") hits = !moveSuccessful; // Hook misses dodges
+            if (moveIsUnbreakable)                                                             hits = !moveSuccessful;
+            else if (move.attack == "Jab")                                                    hits = !moveSuccessful;
+            else if (move.attack == "Cross" || move.attack == "Strike" || move.attack == "Blast") hits = true;
+            else if (move.attack == "Hook")                                                    hits = !moveSuccessful;
+            else                                                                               hits = false;
         }
 
         if (hits)
         {
-            float multiplier = 1f - blockMitigation;
-            damageDealt = Mathf.RoundToInt(finalDmg * multiplier);
+            float mitigMult = defenderStaggered ? 1f : (1f - blockMitigation);
+            damageDealt = Mathf.RoundToInt(finalDmg * mitigMult);
 
             if (damageDealt > 0)
             {
                 if (move.attack == "UnbreakablePunch") _heavyHitThisBeat = true;
-
                 if (attacker.connectionToClient != null) attacker.TargetPlaySuccessSound("Attack");
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Hurt");
                 defender.RpcPlayCombatParticle("Hit");
-
                 Vector3 kbDir = (defender.transform.position - attacker.transform.position).normalized;
                 defender.TakeDamage(damageDealt, kbDir);
                 return 1;
@@ -665,9 +690,25 @@ public class RhythmRoundManager : NetworkBehaviour
             if (player != null)
             {
                 PlayerCombat pc = player.GetComponent<PlayerCombat>();
+
+                // 2. Idle recharge: no input this window → +1 to both slot pools
+                if (isServer)
+                {
+                    CardManager cm = player.GetComponent<CardManager>();
+                    if (cm != null)
+                    {
+                        var move = pc.PeekNextMove();
+                        if (string.IsNullOrEmpty(move.attack) && move.dash == Vector3.zero)
+                        {
+                            cm.attackSlotsRemaining  = Mathf.Min(cm.attackSlotsTotal,  cm.attackSlotsRemaining  + 1);
+                            cm.defenseSlotsRemaining = Mathf.Min(cm.defenseSlotTotal,  cm.defenseSlotsRemaining + 1);
+                        }
+                    }
+                }
+
                 pc.ConsumeNextMove();
 
-                // 2. HARD RESET: Clear all flags so lag cannot roll into the next beat
+                // 3. HARD RESET: Clear all flags so lag cannot roll into the next beat
                 // In chain mode, preserve the spike so hits 2-4 still grade correctly
                 if (!customIsCombo)
                 {
@@ -676,14 +717,63 @@ public class RhythmRoundManager : NetworkBehaviour
                 }
                 pc.IsParryActive = false;
 
-                // 3. Refill slots once both pools are empty (combo hand managed by CardManager.Update)
+                // 3. Stagger management
                 if (isServer)
                 {
                     CardManager cm = player.GetComponent<CardManager>();
-                    if (cm != null && !cm.IsComboHandActive)
-                        cm.TryRefillSlots();
+                    if (pc != null && cm != null)
+                    {
+                        if (pc.IsStaggered)
+                        {
+                            // Count down dedicated stagger beat counter; clear when it expires
+                            pc.StaggerBeatsRemaining--;
+                            if (pc.StaggerBeatsRemaining <= 0)
+                            {
+                                pc.ClearStagger();
+                                cm.ResetSlots();
+                            }
+                        }
+                        else if (cm.attackSlotsRemaining == 0 && cm.defenseSlotsRemaining == 0)
+                        {
+                            pc.TriggerStagger(3);
+                        }
+                    }
                 }
             }
+        }
+    }
+
+    // Returns a damage multiplier based on how close the attacker's vocal spike was to the beat.
+    // EXCELLENT (≤0.10 s): +25%   GOOD (≤window): base   BAD (no spike / late): −50%
+    [Server]
+    private float GetTimingMultiplier(PlayerCombat attacker)
+    {
+        float spike = attacker.lastVocalSpikeTime;
+        if (spike <= 0f) return 0.50f;
+        float offset = Mathf.Abs(GetNextBeatTime() - spike);
+        if (offset <= 0.10f) return 1.25f;
+        if (offset <= 0.30f) return 1.00f;
+        return 0.50f;
+    }
+
+    // Grants +1 slot of the OPPOSITE type to the winner of a trade.
+    // usedAttack=true → winner attacked → gains DEF slot
+    // usedAttack=false → winner defended → gains ATK slot
+    [Server]
+    private void GrantCounterBonus(CardManager cm, PlayerCombat pc, bool usedAttack)
+    {
+        if (cm == null) return;
+        if (usedAttack) // attacked successfully → gain DEF slot
+        {
+            if (cm.defenseSlotsRemaining >= cm.defenseSlotTotal) return;
+            cm.defenseSlotsRemaining = Mathf.Min(cm.defenseSlotTotal, cm.defenseSlotsRemaining + 1);
+            if (pc.connectionToClient != null) cm.TargetShowSlotBonus(pc.connectionToClient, false);
+        }
+        else // defended successfully → gain ATK slot
+        {
+            if (cm.attackSlotsRemaining >= cm.attackSlotsTotal) return;
+            cm.attackSlotsRemaining = Mathf.Min(cm.attackSlotsTotal, cm.attackSlotsRemaining + 1);
+            if (pc.connectionToClient != null) cm.TargetShowSlotBonus(pc.connectionToClient, true);
         }
     }
 

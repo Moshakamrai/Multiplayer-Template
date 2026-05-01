@@ -22,13 +22,13 @@ public class CardManager : NetworkBehaviour
     public readonly SyncList<int> currentHandIndices = new SyncList<int>();
 
     // ── Slot system ────────────────────────────────────────────────────────
-    [SyncVar] public int attackSlotsTotal      = 4;
+    [SyncVar] public int attackSlotsTotal      = 3;
     [SyncVar] public int defenseSlotTotal      = 2;
-    [SyncVar] public int attackSlotsRemaining  = 4;
+    [SyncVar] public int attackSlotsRemaining  = 3;
     [SyncVar] public int defenseSlotsRemaining = 2;
 
     // Client-side config UI (not synced)
-    private int _cfgAttack  = 4;
+    private int _cfgAttack  = 3;
     private int _cfgDefense = 2;
 
     // ── Classification ─────────────────────────────────────────────────────
@@ -55,6 +55,12 @@ public class CardManager : NetworkBehaviour
     private GUIStyle   _statusStyle;
     private GUIStyle   _badgeStyle;
     private CardManager _oppCardsCache;
+    private PlayerCombat _myPCombat;
+
+    // Slot bonus popup
+    private string _slotBonusText  = "";
+    private Color  _slotBonusColor = Color.white;
+    private float  _slotBonusFade  = 0f;
 
     // Combo-hand cards use full size; normal cards use compact size
     const float cWidth  = 240f;
@@ -139,10 +145,23 @@ public class CardManager : NetworkBehaviour
         {
             CombatCard card = GetCardInHand(trigger);
             if (card == null) return false;
-            return IsComboAttack(card) ? attackSlotsRemaining > 0 : defenseSlotsRemaining > 0;
+            if (IsComboAttack(card)) return IsOpponentStaggered() || attackSlotsRemaining > 0;
+            return defenseSlotsRemaining > 0;
         }
-        if (IsAttackTrigger(trigger))  return attackSlotsRemaining > 0;
+        if (IsAttackTrigger(trigger))  return IsOpponentStaggered() || attackSlotsRemaining > 0;
         if (IsDefenseTrigger(trigger)) return defenseSlotsRemaining > 0;
+        return false;
+    }
+
+    private bool IsOpponentStaggered()
+    {
+        foreach (var p in GameManager.players)
+        {
+            if (p == null) continue;
+            var cm = p.GetComponent<CardManager>();
+            if (cm != null && cm != this)
+                return p.GetComponent<PlayerCombat>()?.IsStaggered ?? false;
+        }
         return false;
     }
 
@@ -157,8 +176,15 @@ public class CardManager : NetworkBehaviour
         }
         else isAttack = IsAttackTrigger(trigger);
 
-        if (isAttack) attackSlotsRemaining  = Mathf.Max(0, attackSlotsRemaining  - 1);
-        else          defenseSlotsRemaining = Mathf.Max(0, defenseSlotsRemaining - 1);
+        if (isAttack)
+        {
+            if (IsOpponentStaggered()) return; // unlimited attack slots while opponent is staggered
+            attackSlotsRemaining = Mathf.Max(0, attackSlotsRemaining - 1);
+        }
+        else
+        {
+            defenseSlotsRemaining = Mathf.Max(0, defenseSlotsRemaining - 1);
+        }
     }
 
     [Server]
@@ -181,10 +207,13 @@ public class CardManager : NetworkBehaviour
     [Command]
     public void CmdSetSlots(int atk, int def)
     {
-        attackSlotsTotal      = Mathf.Clamp(atk, 1, 5);
-        defenseSlotTotal      = Mathf.Clamp(def, 1, 5);
-        attackSlotsRemaining  = attackSlotsTotal;
-        defenseSlotsRemaining = defenseSlotTotal;
+        // Enforce sum-of-5 on the server; clamp each to [1,4]
+        int a = Mathf.Clamp(atk, 1, 4);
+        int d = Mathf.Clamp(5 - a, 1, 4);
+        attackSlotsTotal      = a;
+        defenseSlotTotal      = d;
+        attackSlotsRemaining  = a;
+        defenseSlotsRemaining = d;
     }
 
     // ── Card availability API ──────────────────────────────────────────────
@@ -232,6 +261,14 @@ public class CardManager : NetworkBehaviour
             TargetRpcPlayDiscardAnim(connectionToClient, libIndex);
 
         ConsumeSlot(trigger);
+    }
+
+    [TargetRpc]
+    public void TargetShowSlotBonus(NetworkConnection target, bool isAttackSlot)
+    {
+        _slotBonusText  = isAttackSlot ? "+1 ATK SLOT" : "+1 DEF SLOT";
+        _slotBonusColor = isAttackSlot ? new Color(1f, 0.30f, 0.30f) : new Color(0.25f, 0.75f, 1f);
+        _slotBonusFade  = 1f;
     }
 
     [TargetRpc]
@@ -319,8 +356,20 @@ public class CardManager : NetworkBehaviour
         if (_whiteTex == null) { _whiteTex = new Texture2D(1, 1); _whiteTex.SetPixel(0, 0, Color.white); _whiteTex.Apply(); }
         EnsureStyles();
 
+        if (_myPCombat == null) _myPCombat = GetComponent<PlayerCombat>();
+
         var   rmm        = RhythmRoundManager.Instance;
         bool  isRhythm   = rmm != null && rmm.isRoundActive;
+
+        // True when the player already has an action queued for this beat — dim all cards
+        bool inputLocked = false;
+        if (isRhythm && _myPCombat != null)
+        {
+            if (rmm.IsSingleMoveMode())
+                inputLocked = !_myPCombat.HasOpenSlot(false) || !_myPCombat.HasOpenSlot(true);
+            else
+                inputLocked = _myPCombat._comboBuffer.Count >= rmm.currentComboCount;
+        }
 
         float approachFrac = 0f;
         bool  isShout      = false;
@@ -353,7 +402,7 @@ public class CardManager : NetworkBehaviour
             {
                 int idx = currentHandIndices[i];
                 if (idx < 0 || idx >= cardLibrary.Count) continue;
-                bool slotAvail = HasSlot(cardLibrary[idx].triggerName);
+                bool slotAvail = HasSlot(cardLibrary[idx].triggerName) && !inputLocked;
                 Rect r = new Rect(startX + i * (cWidth + cSpace), baseY, cWidth, cHeight);
                 DrawCard(r, cardLibrary[idx], isRhythm, approachFrac, isShout, pulse, slotAvail ? 1f : 0.30f);
             }
@@ -374,7 +423,7 @@ public class CardManager : NetworkBehaviour
             {
                 int libIdx = cardLibrary.FindIndex(c => c.triggerName == defCards[i] && !c.isCombo);
                 if (libIdx < 0) continue;
-                float alpha = defenseSlotsRemaining > 0 ? 1f : 0.30f;
+                float alpha = (defenseSlotsRemaining > 0 && !inputLocked) ? 1f : 0.30f;
                 Rect r = new Rect(defStartX + i * (nWidth + nSpace), baseY, nWidth, nHeight);
                 DrawCard(r, cardLibrary[libIdx], isRhythm, approachFrac, isShout, pulse, alpha);
             }
@@ -383,7 +432,7 @@ public class CardManager : NetworkBehaviour
             {
                 int libIdx = cardLibrary.FindIndex(c => c.triggerName == atkCards[i] && !c.isCombo);
                 if (libIdx < 0) continue;
-                float alpha = attackSlotsRemaining > 0 ? 1f : 0.30f;
+                float alpha = (attackSlotsRemaining > 0 && !inputLocked) ? 1f : 0.30f;
                 Rect r = new Rect(atkStartX + i * (nWidth + nSpace), baseY, nWidth, nHeight);
                 DrawCard(r, cardLibrary[libIdx], isRhythm, approachFrac, isShout, pulse, alpha);
             }
@@ -399,6 +448,30 @@ public class CardManager : NetworkBehaviour
 
         // Opponent slot display
         if (isRhythm) DrawOpponentSlots();
+
+        // ── Slot bonus popup ──
+        if (_slotBonusFade > 0f)
+        {
+            _slotBonusFade -= Time.deltaTime * 0.7f;
+            float rise = Mathf.Lerp(55f, 0f, _slotBonusFade);
+            Color bc   = _slotBonusColor;
+            bc.a = Mathf.Clamp01(_slotBonusFade * 2f);
+
+            GUIStyle bonusStyle = new GUIStyle(GUI.skin.label)
+                { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 36 };
+            GUIStyle shadow = new GUIStyle(bonusStyle);
+            shadow.normal.textColor  = new Color(0f, 0f, 0f, bc.a * 0.75f);
+            bonusStyle.normal.textColor = bc;
+
+            float bx = Screen.width  / 2f - 210f;
+            float by = Screen.height / 2f - 130f - rise;
+            // Shadow pass
+            GUI.Label(new Rect(bx + 3f, by + 3f, 420f, 64f), _slotBonusText, shadow);
+            GUI.Label(new Rect(bx - 3f, by - 3f, 420f, 64f), _slotBonusText, shadow);
+            // Coloured pass
+            GUI.Label(new Rect(bx, by, 420f, 64f), _slotBonusText, bonusStyle);
+            GUI.color = Color.white;
+        }
 
         // ── Card-use flash ──
         for (int i = _activeCardFlashes.Count - 1; i >= 0; i--)
@@ -428,10 +501,11 @@ public class CardManager : NetworkBehaviour
 
     private void DrawSlotPips(float groupX, float y, int remaining, int total, bool isAttack)
     {
+        const int displaySlots = 4;
         float pip = 18f;
         float gap = 7f;
         float groupW = nWidth * 4 + nSpace * 3;
-        float totalPipW = total * pip + (total - 1) * gap;
+        float totalPipW = displaySlots * pip + (displaySlots - 1) * gap;
         float startX = groupX + groupW / 2f - totalPipW / 2f;
 
         Color filled = isAttack ? new Color(1f, 0.28f, 0.28f, 0.95f)
@@ -444,7 +518,7 @@ public class CardManager : NetworkBehaviour
         s.normal.textColor = isAttack ? new Color(1f, 0.5f, 0.5f) : new Color(0.5f, 0.8f, 1f);
         GUI.Label(new Rect(startX - 36f, y, 34f, pip), label, s);
 
-        for (int i = 0; i < total; i++)
+        for (int i = 0; i < displaySlots; i++)
         {
             GUI.color = (i < remaining) ? filled : empty;
             GUI.DrawTexture(new Rect(startX + i * (pip + gap), y, pip, pip), _whiteTex);
@@ -481,19 +555,19 @@ public class CardManager : NetworkBehaviour
         float row1 = py + 44f;
         float row2 = py + 76f;
 
-        // Defense column
+        // Defense column  (ATK + DEF always = 5, each clamped to [1,4])
         val.normal.textColor = new Color(0.4f, 0.78f, 1f);
         GUI.Label(new Rect(col1, row1, 160f, 24f), $"DEFENSE  {_cfgDefense}", val);
-        if (GUI.Button(new Rect(col1,        row2, 44f, 30f), "−")) _cfgDefense = Mathf.Max(1, _cfgDefense - 1);
+        if (GUI.Button(new Rect(col1,        row2, 44f, 30f), "−")) { _cfgDefense = Mathf.Max(1, _cfgDefense - 1); _cfgAttack = Mathf.Min(4, 5 - _cfgDefense); }
         GUI.Label(new Rect(col1 + 48f,       row2, 30f, 30f), _cfgDefense.ToString(), val);
-        if (GUI.Button(new Rect(col1 + 82f,  row2, 44f, 30f), "+")) _cfgDefense = Mathf.Min(5, _cfgDefense + 1);
+        if (GUI.Button(new Rect(col1 + 82f,  row2, 44f, 30f), "+")) { _cfgDefense = Mathf.Min(4, _cfgDefense + 1); _cfgAttack = Mathf.Max(1, 5 - _cfgDefense); }
 
-        // Attack column
+        // Attack column  (ATK + DEF always = 5, each clamped to [1,4])
         val.normal.textColor = new Color(1f, 0.45f, 0.45f);
         GUI.Label(new Rect(col2, row1, 160f, 24f), $"ATTACK  {_cfgAttack}", val);
-        if (GUI.Button(new Rect(col2,        row2, 44f, 30f), "−")) _cfgAttack = Mathf.Max(1, _cfgAttack - 1);
+        if (GUI.Button(new Rect(col2,        row2, 44f, 30f), "−")) { _cfgAttack = Mathf.Max(1, _cfgAttack - 1); _cfgDefense = Mathf.Min(4, 5 - _cfgAttack); }
         GUI.Label(new Rect(col2 + 48f,       row2, 30f, 30f), _cfgAttack.ToString(), val);
-        if (GUI.Button(new Rect(col2 + 82f,  row2, 44f, 30f), "+")) _cfgAttack = Mathf.Min(5, _cfgAttack + 1);
+        if (GUI.Button(new Rect(col2 + 82f,  row2, 44f, 30f), "+")) { _cfgAttack = Mathf.Min(4, _cfgAttack + 1); _cfgDefense = Mathf.Max(1, 5 - _cfgAttack); }
 
         GUIStyle btn = new GUIStyle(GUI.skin.button) { fontStyle=FontStyle.Bold, fontSize=15 };
         GUI.color = new Color(0.25f, 0.9f, 0.35f);
@@ -694,26 +768,28 @@ public class CardManager : NetworkBehaviour
         GUIStyle lbl = new GUIStyle(GUI.skin.label)
             { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 11 };
 
+        const int displaySlots = 4;
+
         // Defense pips (left half)
-        float defTotalW = opp.defenseSlotTotal * pip + (opp.defenseSlotTotal - 1) * pipGap;
+        float defTotalW = displaySlots * pip + (displaySlots - 1) * pipGap;
         float defStartX = px + panelW * 0.25f - defTotalW * 0.5f;
         lbl.normal.textColor = new Color(0.4f, 0.78f, 1f);
         GUI.Label(new Rect(px, py + 24f, panelW * 0.5f, 16f), "DEF", lbl);
         Color defFilled = new Color(0.28f, 0.68f, 1f,  0.9f);
         Color empty     = new Color(0.15f, 0.15f, 0.15f, 0.65f);
-        for (int i = 0; i < opp.defenseSlotTotal; i++)
+        for (int i = 0; i < displaySlots; i++)
         {
             GUI.color = (i < opp.defenseSlotsRemaining) ? defFilled : empty;
             GUI.DrawTexture(new Rect(defStartX + i * (pip + pipGap), py + 44f, pip, pip), _whiteTex);
         }
 
         // Attack pips (right half)
-        float atkTotalW = opp.attackSlotsTotal * pip + (opp.attackSlotsTotal - 1) * pipGap;
+        float atkTotalW = displaySlots * pip + (displaySlots - 1) * pipGap;
         float atkStartX = px + panelW * 0.75f - atkTotalW * 0.5f;
         lbl.normal.textColor = new Color(1f, 0.45f, 0.45f);
         GUI.Label(new Rect(px + panelW * 0.5f, py + 24f, panelW * 0.5f, 16f), "ATK", lbl);
         Color atkFilled = new Color(1f, 0.28f, 0.28f, 0.9f);
-        for (int i = 0; i < opp.attackSlotsTotal; i++)
+        for (int i = 0; i < displaySlots; i++)
         {
             GUI.color = (i < opp.attackSlotsRemaining) ? atkFilled : empty;
             GUI.DrawTexture(new Rect(atkStartX + i * (pip + pipGap), py + 44f, pip, pip), _whiteTex);

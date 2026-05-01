@@ -595,6 +595,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f1981b77373a8df478c88849b8adf997, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  commentaryEnabled: 0
   holdDuration: 1.84
   slideInDuration: 0.14
   fadeOutDuration: 0.3
@@ -1000,6 +1001,10 @@ PrefabInstance:
       propertyPath: musicSource
       value: 
       objectReference: {fileID: 499465448}
+    - target: {fileID: 5658552433460229877, guid: 108b1f036cc01d2489d08e339e8c3dc2, type: 3}
+      propertyPath: slowRhythmMusic
+      value: 
+      objectReference: {fileID: 8300000, guid: 39f8a31ad625a8f4ba0e14d52204e4ac, type: 3}
     - target: {fileID: 5658552433460229877, guid: 108b1f036cc01d2489d08e339e8c3dc2, type: 3}
       propertyPath: availableTracks.Array.size
       value: 3

@@ -20,8 +20,9 @@ public class TutorialManager : MonoBehaviour
         CommandsTiming  = 3,
         SlowRhythm      = 4,
         ComboCards      = 5,
-        SlotExplain     = 6,
-        BotFight        = 7,
+        SlotExplain      = 6,
+        BotFight         = 7,
+        StaggerRecover   = 8,
     }
     public Stage CurrentStage { get; private set; } = Stage.VoiceCheck;
 
@@ -219,6 +220,16 @@ public class TutorialManager : MonoBehaviour
     private const float STAGE7_LINGER   = 2.5f;
     private const int   S7_ROUNDS        = 8;
 
+    // ── Stage 8 runtime ────────────────────────────────────────────────────
+    private float _s8_charge        = 0f;
+    private bool  _s8_recovered     = false;
+    private bool  _s8_complete      = false;
+    private float _s8_successTimer  = 0f;
+    private const float S8_CHARGE_RATE  = 0.55f; // per second × vol scaling
+    private const float S8_CHARGE_DECAY = 0.15f;
+    private const float S8_VOL_MIN      = 0.28f;
+    private const float STAGE8_LINGER   = 2.5f;
+
     // ── Stage 1 runtime ────────────────────────────────────────────────────
     private static readonly string[] S1_LABELS = { "PUNCH", "BLAST", "HOOK", "BLOCK", "CAGE", "BOOM" };
 
@@ -316,6 +327,7 @@ public class TutorialManager : MonoBehaviour
             case Stage.ComboCards:      UpdateStage5(); break;
             case Stage.SlotExplain:     UpdateStage6(); break;
             case Stage.BotFight:        UpdateStage7(); break;
+            case Stage.StaggerRecover:  UpdateStage8(); break;
         }
     }
 
@@ -344,7 +356,7 @@ public class TutorialManager : MonoBehaviour
     private void SkipCurrentStage()
     {
         Stage next = CurrentStage + 1;
-        if (next > Stage.BotFight) return;
+        if (next > Stage.StaggerRecover) return;
         AdvanceTo(next);
     }
 
@@ -464,6 +476,15 @@ public class TutorialManager : MonoBehaviour
                 _s6_step         = 0;
                 _s6_complete     = false;
                 _s6_successTimer = 0f;
+                break;
+
+            case Stage.StaggerRecover:
+                _s8_charge       = 0f;
+                _s8_recovered    = false;
+                _s8_complete     = false;
+                _s8_successTimer = 0f;
+                if (tutorialPlayerAnimator != null)
+                    tutorialPlayerAnimator.SetTrigger("Stagger");
                 break;
 
             case Stage.BotFight:
@@ -664,6 +685,7 @@ public class TutorialManager : MonoBehaviour
             case Stage.ComboCards:      DrawStage5(); break;
             case Stage.SlotExplain:     DrawStage6(); break;
             case Stage.BotFight:        DrawStage7(); break;
+            case Stage.StaggerRecover:  DrawStage8(); break;
         }
     }
 
@@ -2683,7 +2705,7 @@ public class TutorialManager : MonoBehaviour
         {
             _s7_successTimer += Time.deltaTime;
             if (_s7_successTimer >= STAGE7_LINGER)
-                SceneManager.LoadScene(menuSceneName);
+                AdvanceTo(Stage.StaggerRecover);
             return;
         }
 
@@ -2830,7 +2852,7 @@ public class TutorialManager : MonoBehaviour
             GUI.Label(new Rect(0, sh * 0.38f, sw, 80), "TUTORIAL COMPLETE!", _headStyle);
             _bodyStyle.fontSize = Mathf.Clamp((int)(sw / 40f), 18, 30);
             GUI.color = new Color(1f, 1f, 1f, 0.6f);
-            GUI.Label(new Rect(0, sh * 0.52f, sw, 40), "RETURNING TO MENU...", _bodyStyle);
+            GUI.Label(new Rect(0, sh * 0.52f, sw, 40), "NEXT: STAGGER TRAINING...", _bodyStyle);
             GUI.color = Color.white;
             return;
         }
@@ -3147,5 +3169,125 @@ public class TutorialManager : MonoBehaviour
         }
 
         DrawBackButton();
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // STAGE 8 — Stagger Recovery
+    // ══════════════════════════════════════════════════════════════════════
+    private void UpdateStage8()
+    {
+        if (_s8_complete)
+        {
+            _s8_successTimer += Time.deltaTime;
+            if (_s8_successTimer >= STAGE8_LINGER)
+                SceneManager.LoadScene(menuSceneName);
+            return;
+        }
+
+        if (_s8_recovered)
+        {
+            _s8_successTimer += Time.deltaTime;
+            if (_s8_successTimer >= STAGE8_LINGER)
+                _s8_complete = true;
+            return;
+        }
+
+        if (!_vp.IsRecording) return;
+
+        float vol = _vp.CurrentRawVolume;
+        if (vol >= S8_VOL_MIN)
+        {
+            float volScale = Mathf.Clamp01((vol - S8_VOL_MIN) / (1f - S8_VOL_MIN));
+            _s8_charge = Mathf.Min(1f, _s8_charge + S8_CHARGE_RATE * (0.25f + 0.75f * volScale * volScale) * Time.deltaTime);
+            if (_s8_charge >= 1f)
+            {
+                _s8_charge       = 1f;
+                _s8_recovered    = true;
+                _s8_successTimer = 0f;
+                if (tutorialPlayerAnimator != null)
+                    tutorialPlayerAnimator.Play("Idle", 0, 0f);
+            }
+        }
+        else
+        {
+            _s8_charge = Mathf.Max(0f, _s8_charge - S8_CHARGE_DECAY * Time.deltaTime);
+        }
+    }
+
+    // ── Stage 8 GUI ────────────────────────────────────────────────────────
+    private void DrawStage8()
+    {
+        float sw = Screen.width, sh = Screen.height;
+
+        GUI.color = new Color(0f, 0f, 0f, 0.78f);
+        GUI.DrawTexture(new Rect(0, 0, sw, sh), _px);
+        GUI.color = Color.white;
+
+        if (_s8_recovered || _s8_complete)
+        {
+            _headStyle.fontSize = Mathf.Clamp((int)(sw / 14f), 36, 72);
+            GUI.color = new Color(0.2f, 1f, 0.4f);
+            GUI.Label(new Rect(0, sh * 0.36f, sw, 80), "RECOVERED!", _headStyle);
+            _bodyStyle.fontSize = Mathf.Clamp((int)(sw / 40f), 18, 30);
+            GUI.color = new Color(1f, 1f, 1f, 0.65f);
+            string sub = _s8_complete ? "TUTORIAL COMPLETE — RETURNING TO MENU..." : "BACK IN FIGHTING STANCE!";
+            GUI.Label(new Rect(0, sh * 0.50f, sw, 44), sub, _bodyStyle);
+            GUI.color = Color.white;
+            return;
+        }
+
+        // ── Staggered title ──────────────────────────────────────────────
+        float pulse = (Mathf.Sin(Time.time * 4.5f) + 1f) * 0.5f;
+        _headStyle.fontSize = Mathf.Clamp((int)(sw / 15f), 32, 60);
+        GUI.color = Color.Lerp(new Color(1f, 0.15f, 0.15f), new Color(1f, 0.55f, 0.55f), pulse * 0.5f);
+        GUI.Label(new Rect(0, sh * 0.10f, sw, 72), "!! STAGGERED !!", _headStyle);
+        GUI.color = Color.white;
+
+        // ── Instructions ─────────────────────────────────────────────────
+        _bodyStyle.fontSize = Mathf.Clamp((int)(sw / 42f), 16, 28);
+        GUI.color = new Color(1f, 1f, 1f, 0.82f);
+        GUI.Label(new Rect(0, sh * 0.22f, sw, 40), "SHOUT LOUDLY TO FILL THE RECOVERY BAR", _bodyStyle);
+        GUI.color = Color.white;
+
+        // ── Recovery bar ─────────────────────────────────────────────────
+        float barW = sw * 0.55f, barH = 38f;
+        float barX = sw * 0.5f - barW * 0.5f, barY = sh * 0.34f;
+
+        GUI.color = new Color(0.10f, 0.10f, 0.12f, 0.95f);
+        GUI.DrawTexture(new Rect(barX, barY, barW, barH), _px);
+
+        GUI.color = Color.Lerp(new Color(1f, 0.22f, 0.22f), new Color(0.1f, 1f, 0.45f), _s8_charge);
+        GUI.DrawTexture(new Rect(barX, barY, barW * _s8_charge, barH), _px);
+
+        // Bar border
+        GUI.color = new Color(0.9f, 0.2f, 0.2f, 0.55f);
+        GUI.DrawTexture(new Rect(barX,          barY,          barW,  2f), _px);
+        GUI.DrawTexture(new Rect(barX,          barY + barH,   barW,  2f), _px);
+        GUI.DrawTexture(new Rect(barX,          barY,          2f,    barH), _px);
+        GUI.DrawTexture(new Rect(barX + barW,   barY,          2f,    barH), _px);
+
+        _bodyStyle.fontSize = Mathf.Clamp((int)(sw / 56f), 11, 18);
+        GUI.color = Color.white;
+        _bodyStyle.alignment = TextAnchor.MiddleCenter;
+        GUI.Label(new Rect(barX, barY, barW, barH), "RECOVERY BAR", _bodyStyle);
+        _bodyStyle.alignment = TextAnchor.UpperCenter;
+
+        // ── Volume meter ─────────────────────────────────────────────────
+        float vol  = _vp != null ? _vp.CurrentRawVolume : 0f;
+        float volW = barW * 0.55f;
+        float volX = sw * 0.5f - volW * 0.5f, volY = barY + barH + 22f;
+
+        GUI.color = new Color(1f, 1f, 1f, 0.12f);
+        GUI.DrawTexture(new Rect(volX, volY, volW, 20f), _px);
+        bool aboveMin = vol >= S8_VOL_MIN;
+        GUI.color = aboveMin ? new Color(0.2f, 1f, 0.5f, 0.85f) : new Color(1f, 0.55f, 0.1f, 0.55f);
+        GUI.DrawTexture(new Rect(volX, volY, volW * Mathf.Clamp01(vol), 20f), _px);
+
+        _bodyStyle.fontSize = Mathf.Clamp((int)(sw / 48f), 14, 24);
+        GUI.color = aboveMin
+            ? Color.Lerp(new Color(0.2f, 1f, 0.5f), new Color(0.5f, 1f, 0.7f), pulse * 0.5f)
+            : new Color(1f, 0.78f, 0.25f, 0.80f);
+        GUI.Label(new Rect(0, volY + 28f, sw, 38f), aboveMin ? "KEEP SHOUTING!" : "SHOUT LOUDER!", _bodyStyle);
+        GUI.color = Color.white;
     }
 }

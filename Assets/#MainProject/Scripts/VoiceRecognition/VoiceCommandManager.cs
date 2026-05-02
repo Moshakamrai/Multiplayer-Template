@@ -9,7 +9,9 @@ public class VoiceCommandManager : NetworkBehaviour
     public Text InputText;
     public Text OutputText;
     private string _previousPartialText = "";
-    private string _lastProcessedWord = ""; // NEW: Tracks the exact last word checked
+    private string _lastProcessedWord   = "";
+    private float  _echoGuardUntil      = -999f; // suppresses shout echo after beat execution
+    private const float EXECUTION_ECHO_GUARD = 0.6f;
     private PlayerController _myController;
     private PlayerCombat _myCombat;
     private PlayerEnergy _myEnergy;
@@ -82,7 +84,7 @@ public class VoiceCommandManager : NetworkBehaviour
     // Returns false = timing blocked (dead zone) — keep retrying until the window opens
     bool ProcessWords(string segment)
     {
-        if (_myCombat.IsHurting || _myCombat.IsDead) return true;
+        if (_myCombat.IsHurting || _myCombat.IsDead || _myCombat.IsStaggered) return true;
         string lowerSegment = segment.ToLower().Trim();
         bool isRhythm = RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive;
 
@@ -92,8 +94,18 @@ public class VoiceCommandManager : NetworkBehaviour
             float nextBeat  = RhythmRoundManager.Instance.GetNextBeatTime();
             float lastBeat  = RhythmRoundManager.Instance.lastBeatFireTime;
 
+            // Long dead zone only while a combo chain is actively executing (prevents mid-chain input).
+            // Single-move mode always gets the short dead zone — 1.5f would consume the entire input window.
+            bool comboChainActive = !RhythmRoundManager.Instance.IsSingleMoveMode() && _myCombat._comboBuffer.Count > 0;
+            float deadZone = comboChainActive ? 1.5f : 0.35f;
+
             // Post-beat dead zone — return FALSE so the word can be retried when zone ends
-            if (lastBeat > 0f && trackTime - lastBeat < 1.5f) return false;
+            if (lastBeat > 0f && trackTime - lastBeat < deadZone) return false;
+
+            // Execution shout echo guard — activated after a move is queued and its beat fires.
+            // The shout the player makes to execute stays in Vosk's buffer 0.3-0.6s after the beat;
+            // returning true here consumes it silently so it doesn't become the next command.
+            if (Time.time < _echoGuardUntil) return true;
 
             // Pre-beat shout window — return TRUE (consume but don't queue; this beat is closing)
             if (nextBeat > 0f)
@@ -111,7 +123,7 @@ public class VoiceCommandManager : NetworkBehaviour
                 // Single-move mode: one input per beat — lock out once either slot is taken
                 if (!_myCombat.HasOpenSlot(false) || !_myCombat.HasOpenSlot(true)) return true;
             }
-            else if (!_myCombat.HasOpenSlot(false) && !_myCombat.HasOpenSlot(true)) return true;
+            else if (_myCombat._comboBuffer.Count > 0) return true; // chain in progress — wait for it to fully execute
         }
 
         string[] words = lowerSegment.Split(' ');
@@ -167,7 +179,7 @@ public class VoiceCommandManager : NetworkBehaviour
 
                 if (matchedCard != null && matchedCard.isCombo && isRhythm)
                 {
-                    if (_myCombat.HasOpenSlot(false))
+                    if (_myCombat._comboBuffer.Count == 0) // only queue when buffer is fully empty
                     {
                         foreach (string atk in matchedCard.comboAttacks)
                         {
@@ -175,6 +187,7 @@ public class VoiceCommandManager : NetworkBehaviour
                             _myCombat.QueueRhythmMove(atk, dir);
                         }
                         CmdUseCardOnServer(trigger);
+                        SetEchoGuard();
                         if (SoundManagerMain.Instance != null) SoundManagerMain.Instance.PlayCardAccepted();
                         LogExecution("COMBO QUEUED: " + trigger);
                         Debug.Log($"<color=#FFD700>[COMBO SUCCESS]</color> {trigger} queued: {string.Join(" → ", matchedCard.comboAttacks)}");
@@ -198,6 +211,7 @@ public class VoiceCommandManager : NetworkBehaviour
                     {
                         _myCombat.QueueRhythmMove(trigger, dashDir);
                         CmdUseCardOnServer(trigger);
+                        SetEchoGuard();
                         if (SoundManagerMain.Instance != null) SoundManagerMain.Instance.PlayCardAccepted();
                         LogExecution("QUEUED: " + trigger);
                     }
@@ -222,6 +236,13 @@ public class VoiceCommandManager : NetworkBehaviour
     }
 
 
+
+    private void SetEchoGuard()
+    {
+        var rmm = RhythmRoundManager.Instance;
+        float timeToNext = Mathf.Max(0f, rmm.GetNextBeatTime() - rmm.GetCurrentTrackTime());
+        _echoGuardUntil = Time.time + timeToNext + EXECUTION_ECHO_GUARD;
+    }
 
     private float GetSimilarity(string s, string t)
     {

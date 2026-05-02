@@ -24,6 +24,20 @@ public class BotController : NetworkBehaviour
     {
         if (_combat.IsHurting || _combat.IsDead) return;
 
+        // COMBO MODE: fill buffer with random moves + set semi-pro timing spike
+        var rmm = RhythmRoundManager.Instance;
+        if (rmm != null && !rmm.IsSingleMoveMode())
+        {
+            string[] pool = { "Jab", "Cross", "Hook", "UnbreakablePunch", "ParryIntent" };
+            while (_combat._comboBuffer.Count < rmm.currentComboCount)
+            {
+                string move = pool[Random.Range(0, pool.Length)];
+                _combat._comboBuffer.Add(new PlayerCombat.RhythmAction { attack = move, dash = Vector3.zero });
+            }
+            _combat.lastVocalSpikeTime = rmm.GetNextBeatTime() - Random.Range(0.05f, 0.21f);
+            return;
+        }
+
         // 1. ANALYZE PLAYER
         PlayerController opponent = _controller.GetOpponent();
         if (opponent != null)

@@ -37,6 +37,7 @@ public class PlayerCombat : NetworkBehaviour
 
     private string _pendingAttackTrigger = "";
     private Vector3 _pendingDashDirection = Vector3.zero;
+    public string PendingAttackTrigger => _pendingAttackTrigger;
 
     // --- TIMING FEEDBACK VARIABLES ---
     private string _timingText = "";
@@ -62,6 +63,16 @@ public class PlayerCombat : NetworkBehaviour
     private float _hurtFlashFade = 0f;
     private float _successFlashFade = 0f;
 
+    // --- STAGGER RECOVERY SYSTEM (local player only) ---
+    private float _staggerRecoveryCharge = 0f;   // 0-1 bar fill
+    private bool  _staggerTimingEscaped  = false; // one timing escape per beat cycle
+    private CardManager _cardManager;
+    private const float STAGGER_CHARGE_RATE    = 0.90f; // fallback rate; overridden dynamically on stagger entry
+    private const float STAGGER_CHARGE_DECAY   = 0.18f; // per second while silent
+    private const float STAGGER_CHARGE_VOL_MIN = 0.28f; // mic volume threshold to start charging
+    private bool  _wasStaggered       = false;
+    private float _dynamicStaggerRate = STAGGER_CHARGE_RATE; // recomputed each stagger using beat timing
+
     public override void OnStartServer()
     {
         // Bots keep 100 HP; real players get 250 HP
@@ -74,6 +85,7 @@ public class PlayerCombat : NetworkBehaviour
     {
         if (isLocalPlayer && ShieldText == null) ShieldText = GameObject.Find("ShieldText")?.GetComponent<Text>();
         _vcm = GetComponent<VoiceCommandManager>();
+        _cardManager = GetComponent<CardManager>();
     }
 
     public void VoiceAttackJab() { if (isLocalPlayer && !IsDead) _attackQueue.Enqueue("Jab"); }
@@ -93,10 +105,12 @@ public class PlayerCombat : NetworkBehaviour
         if (isLocalPlayer && _pressureLevel > 0f)
             _pressureLevel = Mathf.Max(0f, _pressureLevel - PRESSURE_DECAY * Time.deltaTime);
 
-        // Local Parry Spike Check: Only runs for the local player
+        // Local Parry Spike Check + Stagger Recovery: Only runs for the local player
         if (isLocalPlayer && !IsDead && !IsHurting)
         {
             CheckLocalParryTiming();
+            if (IsStaggered) UpdateStaggerRecovery();
+            else             { _staggerRecoveryCharge = 0f; _wasStaggered = false; }
         }
 
         if (!isLocalPlayer || IsDead || IsHurting) return;
@@ -122,8 +136,9 @@ public class PlayerCombat : NetworkBehaviour
         // ── Reset first-spike gate when a new beat cycle begins ───────────────────────────
         if (beatFireTime != _lastTrackedBeatFire)
         {
-            _spikeLockedThisBeat  = false;
-            _lastTrackedBeatFire  = beatFireTime;
+            _spikeLockedThisBeat   = false;
+            _staggerTimingEscaped  = false;
+            _lastTrackedBeatFire   = beatFireTime;
         }
 
         bool isChainMode = !rmm.IsSingleMoveMode();
@@ -176,6 +191,92 @@ public class PlayerCombat : NetworkBehaviour
             string label = isChainMode ? "CHAIN" : currentMove;
             Debug.Log($"<color=cyan>SPIKE [{label}]:</color> t={currentTime:F3}s  Δbeat={timeUntilImpact:F3}s");
         }
+    }
+
+    private void UpdateStaggerRecovery()
+    {
+        var rmm = RhythmRoundManager.Instance;
+        if (rmm == null || !rmm.isRoundActive || vp == null) return;
+
+        // On the first frame of stagger, compute a charge rate achievable within the stagger window.
+        // estimatedInterval ≈ time to next beat; multiply by beats remaining to get total window.
+        // Target: player can fill the bar in 65% of that window at sustained max volume.
+        if (!_wasStaggered)
+        {
+            _wasStaggered = true;
+            float trackTime0    = rmm.GetCurrentTrackTime();
+            float nextBeat0     = rmm.GetNextBeatTime();
+            float estInterval   = (nextBeat0 > 0f) ? Mathf.Max(0.3f, nextBeat0 - trackTime0) : 2.0f;
+            float windowPerBeat = Mathf.Max(0.1f, estInterval - 0.4f); // subtract post-beat dead zone
+            float totalWindow   = StaggerBeatsRemaining * windowPerBeat;
+            _dynamicStaggerRate = Mathf.Clamp(1.0f / (totalWindow * 0.65f), 0.40f, 6.0f);
+        }
+
+        float vol       = vp.CurrentRawVolume;
+        float trackTime = rmm.GetCurrentTrackTime();
+        float lastBeat  = rmm.lastBeatFireTime;
+        float nextBeat  = rmm.GetNextBeatTime();
+
+        // Brief cooldown after beat fires — don't let impact noise charge the bar
+        bool postBeatCooldown = lastBeat > 0f && trackTime - lastBeat < 0.4f;
+
+        if (!postBeatCooldown && vol >= STAGGER_CHARGE_VOL_MIN)
+        {
+            // Quadratic scale from threshold — loud shouting charges significantly faster
+            float volScale = Mathf.Clamp01((vol - STAGGER_CHARGE_VOL_MIN) / (1f - STAGGER_CHARGE_VOL_MIN));
+            _staggerRecoveryCharge = Mathf.Min(1f, _staggerRecoveryCharge + _dynamicStaggerRate * (0.25f + 0.75f * volScale * volScale) * Time.deltaTime);
+            if (_staggerRecoveryCharge >= 1f)
+            {
+                _staggerRecoveryCharge = 0f;
+                CmdEscapeStaggerCharge();
+                return;
+            }
+        }
+        else
+        {
+            _staggerRecoveryCharge = Mathf.Max(0f, _staggerRecoveryCharge - STAGGER_CHARGE_DECAY * Time.deltaTime);
+        }
+
+        // Timing escape: shout with good volume in the shout window before the next beat
+        if (!_staggerTimingEscaped && nextBeat > 0f && _vcm != null)
+        {
+            float timeToNext = nextBeat - trackTime;
+            if (timeToNext >= 0f && timeToNext <= SHOUT_WINDOW && vol >= _vcm.parryVolumeThreshold)
+            {
+                _staggerTimingEscaped = true;
+                CmdEscapeStaggerTiming();
+            }
+        }
+    }
+
+    [Command]
+    private void CmdEscapeStaggerCharge()
+    {
+        if (!IsStaggered) return;
+        ClearStagger();
+        _cardManager?.ResetSlots();
+        RpcOnStaggerEscape(false);
+    }
+
+    [Command]
+    private void CmdEscapeStaggerTiming()
+    {
+        if (!IsStaggered) return;
+        ClearStagger();
+        // Auto-queue a Block so the incoming attack resolves through normal hit detection
+        _pendingAttackTrigger = "Block";
+        _pendingDashDirection = Vector3.zero;
+        _cardManager?.ResetSlots();
+        RpcOnStaggerEscape(true);
+    }
+
+    [ClientRpc]
+    private void RpcOnStaggerEscape(bool wasTiming)
+    {
+        if (!isLocalPlayer) return;
+        _staggerRecoveryCharge = 0f;
+        _staggerTimingEscaped  = false;
+        if (CameraShake.Instance != null) CameraShake.Instance.Shake(0.15f, 0.22f);
     }
 
     [TargetRpc]
@@ -282,13 +383,18 @@ public class PlayerCombat : NetworkBehaviour
 
         if (isLocalPlayer)
         {
-            // --- HUMAN PLAYER LOGIC ---
-            // If you are a pure Client, update locally for the UI.
-            // (If you are the Host, this skips so you don't double-count).
-            if (!isServer) QueueLogic(attackTrigger, dashDir); 
-            
-            // Send the command to the Server.
-            CmdQueueRhythmMove(attackTrigger, dashDir); 
+            if (!isServer)
+            {
+                QueueLogic(attackTrigger, dashDir);
+                // Client-side prediction: play wind-up immediately without waiting for server round-trip
+                if (RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.IsWindUpActive)
+                {
+                    bool isFirstMove = RhythmRoundManager.Instance.IsSingleMoveMode() ||
+                                       _comboBuffer.Count == 1;
+                    if (isFirstMove) ExecuteMoveEffect(attackTrigger, dashDir);
+                }
+            }
+            CmdQueueRhythmMove(attackTrigger, dashDir);
         }
         else if (isServer)
         {
@@ -302,14 +408,18 @@ public class PlayerCombat : NetworkBehaviour
     [Command]
     private void CmdQueueRhythmMove(string attack, Vector3 dash)
     {
-        // This ensures the Server copy of the player also has the full buffer
         QueueLogic(attack, dash);
 
         if (RhythmRoundManager.Instance.IsWindUpActive)
         {
-            // Only trigger wind-up for the first move in a chain
             if (_comboBuffer.Count == 1 || RhythmRoundManager.Instance.IsSingleMoveMode())
-                TargetTriggerRhythmWindUp(attack, dash);
+            {
+                if (connectionToClient == null)
+                    ExecuteMoveEffect(attack, dash); // bot (no client connection)
+                else if (isLocalPlayer)
+                    TargetTriggerRhythmWindUp(attack, dash); // host's own player: TargetRpc is local, no delay
+                // else: pure remote client already ran client-side prediction, skip to avoid double-play
+            }
         }
     }
 
@@ -474,6 +584,67 @@ public class PlayerCombat : NetworkBehaviour
             _whiteTexture = new Texture2D(1, 1);
             _whiteTexture.SetPixel(0, 0, Color.white);
             _whiteTexture.Apply();
+        }
+
+        // --- STAGGER RECOVERY PANEL (right side, above MIC monitor) ---
+        var _staggerRmm = RhythmRoundManager.Instance;
+        if (IsStaggered && _staggerRmm != null && _staggerRmm.isRoundActive)
+        {
+            float sw = 260f, sh = 150f;
+            float sx = Screen.width  - sw - 20f;   // right-aligned with MIC monitor
+            float sy = Screen.height - 140f - 20f - sh - 12f; // 12px gap above MIC monitor
+
+            // Dark red panel background
+            GUI.color = new Color(0.55f, 0f, 0f, 0.82f);
+            GUI.DrawTexture(new Rect(sx, sy, sw, sh), _whiteTexture);
+            GUI.color = Color.white;
+
+            GUIStyle staggerTitle = new GUIStyle(GUI.skin.label)
+                { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 20 };
+            staggerTitle.normal.textColor = Color.white;
+            GUI.Label(new Rect(sx, sy + 6f, sw, 34f), "!! STAGGERED !!", staggerTitle);
+
+            // Recovery bar
+            float bx = sx + 20f, bw = sw - 40f, bh = 26f, by = sy + 50f;
+            GUI.color = new Color(0.12f, 0.12f, 0.12f, 0.95f);
+            GUI.DrawTexture(new Rect(bx, by, bw, bh), _whiteTexture);
+            GUI.color = Color.Lerp(new Color(1f, 0.25f, 0.25f), new Color(0.1f, 1f, 0.45f), _staggerRecoveryCharge);
+            GUI.DrawTexture(new Rect(bx, by, bw * _staggerRecoveryCharge, bh), _whiteTexture);
+            GUI.color = Color.white;
+            GUIStyle barLbl = new GUIStyle(GUI.skin.label)
+                { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 13 };
+            barLbl.normal.textColor = Color.white;
+            GUI.Label(new Rect(bx, by, bw, bh), "SHOUT TO RECOVER", barLbl);
+
+            // Timing escape hint
+            float nextBeat  = _staggerRmm.GetNextBeatTime();
+            float trackTime = _staggerRmm.GetCurrentTrackTime();
+            float timeToNext = nextBeat - trackTime;
+            bool  inWindow   = nextBeat > 0f && timeToNext >= 0f && timeToNext <= SHOUT_WINDOW;
+            float pulse      = (Mathf.Sin(Time.time * 12f) + 1f) * 0.5f;
+
+            GUIStyle hintLbl = new GUIStyle(GUI.skin.label)
+                { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 12 };
+
+            if (inWindow)
+            {
+                hintLbl.normal.textColor = Color.Lerp(new Color(0.2f, 1f, 0.5f), Color.white, pulse * 0.4f);
+                GUI.Label(new Rect(sx, sy + 90f, sw, 28f), ">> SHOUT NOW — ESCAPE! <<", hintLbl);
+            }
+            else
+            {
+                hintLbl.normal.textColor = new Color(1f, 1f, 0.35f, 0.8f);
+                GUI.Label(new Rect(sx, sy + 90f, sw, 28f),
+                    nextBeat > 0f ? $"time your shout: {timeToNext:F1}s" : "SHOUT TO RECOVER", hintLbl);
+            }
+
+            // Thin border
+            GUI.color = new Color(0.9f, 0.2f, 0.2f, 0.7f);
+            GUI.DrawTexture(new Rect(sx,         sy,           sw,   2f), _whiteTexture);
+            GUI.DrawTexture(new Rect(sx,         sy + sh - 2f, sw,   2f), _whiteTexture);
+            GUI.DrawTexture(new Rect(sx,         sy,           2f,   sh), _whiteTexture);
+            GUI.DrawTexture(new Rect(sx + sw-2f, sy,           2f,   sh), _whiteTexture);
+            GUI.color = Color.white;
         }
 
         // --- HURT FLASH (red vignette) ---

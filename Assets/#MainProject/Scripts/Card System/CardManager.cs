@@ -1,6 +1,5 @@
 using UnityEngine;
 using System.Collections.Generic;
-using System.Linq;
 using Mirror;
 
 [System.Serializable]
@@ -18,7 +17,7 @@ public class CardManager : NetworkBehaviour
 {
     public List<CombatCard> cardLibrary = new List<CombatCard>();
 
-    // Used only for combo hand — normal cards are always available
+    // Kept for VoiceCommandManager compatibility — always empty in combo mode
     public readonly SyncList<int> currentHandIndices = new SyncList<int>();
 
     // ── Slot system ────────────────────────────────────────────────────────
@@ -27,7 +26,6 @@ public class CardManager : NetworkBehaviour
     [SyncVar] public int attackSlotsRemaining  = 3;
     [SyncVar] public int defenseSlotsRemaining = 2;
 
-    // Client-side config UI (not synced)
     private int _cfgAttack  = 3;
     private int _cfgDefense = 2;
 
@@ -49,12 +47,12 @@ public class CardManager : NetworkBehaviour
     private List<CardFlash>   _activeCardFlashes  = new List<CardFlash>();
 
     // ── GUI resources ──────────────────────────────────────────────────────
-    private Texture2D  _whiteTex;
-    private GUIStyle   _titleStyle;
-    private GUIStyle   _descStyle;
-    private GUIStyle   _statusStyle;
-    private GUIStyle   _badgeStyle;
-    private CardManager _oppCardsCache;
+    private Texture2D    _whiteTex;
+    private GUIStyle     _titleStyle;
+    private GUIStyle     _descStyle;
+    private GUIStyle     _statusStyle;
+    private GUIStyle     _badgeStyle;
+    private CardManager  _oppCardsCache;
     private PlayerCombat _myPCombat;
 
     // Slot bonus popup
@@ -62,61 +60,23 @@ public class CardManager : NetworkBehaviour
     private Color  _slotBonusColor = Color.white;
     private float  _slotBonusFade  = 0f;
 
-    // Combo-hand cards use full size; normal cards use compact size
-    const float cWidth  = 240f;
-    const float cHeight = 275f;
-    const float cSpace  = 18f;
-    const float nWidth  = 170f;  // normal mode card
+    // Single-mode card sizes
+    const float nWidth  = 170f;
     const float nHeight = 200f;
     const float nSpace  = 14f;
 
-    // ── Combo-hand state (server only) ─────────────────────────────────────
-    private bool _comboHandDealt    = false;
-    private int  _comboHandForChain = 0;
+    // Combo HUD dimensions
+    private const float COMBO_W = 420f;
+    private const float COMBO_H = 170f;
 
-    public bool IsComboHandActive => _comboHandDealt;
+    // Combo HUD styles (separate from single-mode styles)
+    private GUIStyle _comboMoveStyle;
+    private GUIStyle _comboStatusStyle;
+    private GUIStyle _comboLabelStyle;
 
-    // ── Combo card definitions — ALL combos are pure attack OR pure defense ─
-    private static CombatCard[] BuildComboCardDefs() => new[]
-    {
-        // 2-CHAIN — 2 attack, 2 defense
-        new CombatCard { cardName="Combo 1", triggerName="Combo1", isCombo=true, comboChainLength=2,
-            comboAttacks=new[]{"Jab","Cross"},          description="Punch → Blast" },
-        new CombatCard { cardName="Combo 2", triggerName="Combo2", isCombo=true, comboChainLength=2,
-            comboAttacks=new[]{"Cross","Hook"},          description="Blast → Hook" },
-        new CombatCard { cardName="Combo 3", triggerName="Combo3", isCombo=true, comboChainLength=2,
-            comboAttacks=new[]{"Block","ParryIntent"},   description="Guard → Cage" },
-        new CombatCard { cardName="Combo 4", triggerName="Combo4", isCombo=true, comboChainLength=2,
-            comboAttacks=new[]{"Left","Right"},          description="Dodge L → Dodge R" },
-        // 3-CHAIN — 2 attack, 2 defense
-        new CombatCard { cardName="Combo 1", triggerName="Combo1", isCombo=true, comboChainLength=3,
-            comboAttacks=new[]{"Jab","Cross","Hook"},                description="Punch → Blast → Hook" },
-        new CombatCard { cardName="Combo 2", triggerName="Combo2", isCombo=true, comboChainLength=3,
-            comboAttacks=new[]{"Cross","Hook","UnbreakablePunch"},   description="Blast → Hook → Boom" },
-        new CombatCard { cardName="Combo 3", triggerName="Combo3", isCombo=true, comboChainLength=3,
-            comboAttacks=new[]{"ParryIntent","Block","Left"},        description="Cage → Guard → Dodge L" },
-        new CombatCard { cardName="Combo 4", triggerName="Combo4", isCombo=true, comboChainLength=3,
-            comboAttacks=new[]{"Left","Right","Block"},              description="Dodge L → Dodge R → Guard" },
-        // 4-CHAIN — 2 attack, 2 defense
-        new CombatCard { cardName="Combo 1", triggerName="Combo1", isCombo=true, comboChainLength=4,
-            comboAttacks=new[]{"Jab","Jab","Cross","Hook"},               description="Punch→Punch→Blast→Hook" },
-        new CombatCard { cardName="Combo 2", triggerName="Combo2", isCombo=true, comboChainLength=4,
-            comboAttacks=new[]{"Cross","Hook","Jab","UnbreakablePunch"},  description="Blast→Hook→Punch→Boom" },
-        new CombatCard { cardName="Combo 3", triggerName="Combo3", isCombo=true, comboChainLength=4,
-            comboAttacks=new[]{"Left","Block","Right","ParryIntent"},     description="DodgeL→Guard→DodgeR→Cage" },
-        new CombatCard { cardName="Combo 4", triggerName="Combo4", isCombo=true, comboChainLength=4,
-            comboAttacks=new[]{"ParryIntent","Left","Block","Right"},     description="Cage→DodgeL→Guard→DodgeR" },
-        // 5-CHAIN — 2 attack, 2 defense
-        new CombatCard { cardName="Combo 1", triggerName="Combo1", isCombo=true, comboChainLength=5,
-            comboAttacks=new[]{"Jab","Jab","Cross","Hook","UnbreakablePunch"},   description="Punch→Punch→Blast→Hook→Boom" },
-        new CombatCard { cardName="Combo 2", triggerName="Combo2", isCombo=true, comboChainLength=5,
-            comboAttacks=new[]{"Jab","Cross","Cross","Hook","UnbreakablePunch"}, description="Punch→Blast→Blast→Hook→Boom" },
-        new CombatCard { cardName="Combo 3", triggerName="Combo3", isCombo=true, comboChainLength=5,
-            comboAttacks=new[]{"Left","Right","Block","ParryIntent","Left"},     description="DodgeL→DodgeR→Guard→Cage→DodgeL" },
-        new CombatCard { cardName="Combo 4", triggerName="Combo4", isCombo=true, comboChainLength=5,
-            comboAttacks=new[]{"ParryIntent","Block","Left","Right","Block"},    description="Cage→Guard→DodgeL→DodgeR→Guard" },
-    };
+    public bool IsComboHandActive => false;
 
+    // ── Card definitions ───────────────────────────────────────────────────
     private static CombatCard[] BuildNormalCardDefs() => new[]
     {
         new CombatCard { cardName="Block", triggerName="Block",            description="Standard defense. Wider timing window to negate damage." },
@@ -126,21 +86,22 @@ public class CardManager : NetworkBehaviour
         new CombatCard { cardName="Punch", triggerName="Jab",              description="Quick lead strike. Reliable base damage." },
         new CombatCard { cardName="Blast", triggerName="Cross",            description="Straight power hit. Counters enemies trying to dodge." },
         new CombatCard { cardName="Hook",  triggerName="Hook",             description="Heavy side-swing. High damage and grants bonus Energy." },
-        new CombatCard { cardName="Boom",  triggerName="UnbreakablePunch", description="Unstoppable. Ignores blocks and deals massive 15-25 dmg." },
+        new CombatCard { cardName="Boom",  triggerName="UnbreakablePunch", description="Unstoppable. Ignores blocks and deals massive dmg." },
     };
 
     private void Awake()
     {
         if (!cardLibrary.Exists(c => !c.isCombo))
             foreach (var nc in BuildNormalCardDefs()) cardLibrary.Add(nc);
-        if (!cardLibrary.Exists(c => c.isCombo))
-            foreach (var cc in BuildComboCardDefs()) cardLibrary.Add(cc);
     }
 
     // ── Slot API ───────────────────────────────────────────────────────────
 
     public bool HasSlot(string trigger)
     {
+        bool isRhythm = RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive;
+        if (!isRhythm) return IsAttackTrigger(trigger) || IsDefenseTrigger(trigger);
+
         if (trigger.StartsWith("Combo"))
         {
             CombatCard card = GetCardInHand(trigger);
@@ -178,7 +139,7 @@ public class CardManager : NetworkBehaviour
 
         if (isAttack)
         {
-            if (IsOpponentStaggered()) return; // unlimited attack slots while opponent is staggered
+            if (IsOpponentStaggered()) return;
             attackSlotsRemaining = Mathf.Max(0, attackSlotsRemaining - 1);
         }
         else
@@ -207,7 +168,6 @@ public class CardManager : NetworkBehaviour
     [Command]
     public void CmdSetSlots(int atk, int def)
     {
-        // Enforce sum-of-5 on the server; clamp each to [1,4]
         int a = Mathf.Clamp(atk, 1, 4);
         int d = Mathf.Clamp(5 - a, 1, 4);
         attackSlotsTotal      = a;
@@ -220,6 +180,10 @@ public class CardManager : NetworkBehaviour
 
     public bool IsCardInHand(string trigger)
     {
+        // In combo mode, moves are auto-assigned — voice commands cannot queue them
+        var rmm = RhythmRoundManager.Instance;
+        if (rmm != null && rmm.isRoundActive && !rmm.IsSingleMoveMode()) return false;
+
         if (trigger.StartsWith("Combo"))
         {
             foreach (int index in currentHandIndices)
@@ -245,21 +209,9 @@ public class CardManager : NetworkBehaviour
     [Server]
     public void DiscardCard(string trigger)
     {
-        int libIndex;
-        if (trigger.StartsWith("Combo"))
-        {
-            libIndex = -1;
-            foreach (int idx in currentHandIndices)
-                if (cardLibrary[idx].triggerName == trigger) { libIndex = idx; break; }
-        }
-        else
-        {
-            libIndex = cardLibrary.FindIndex(c => c.triggerName == trigger && !c.isCombo);
-        }
-
+        int libIndex = cardLibrary.FindIndex(c => c.triggerName == trigger && !c.isCombo);
         if (libIndex >= 0 && connectionToClient != null)
             TargetRpcPlayDiscardAnim(connectionToClient, libIndex);
-
         ConsumeSlot(trigger);
     }
 
@@ -294,56 +246,7 @@ public class CardManager : NetworkBehaviour
             if (atkCards[i] == trigger) return atkStartX + i * (nWidth + nSpace);
         for (int i = 0; i < defCards.Length; i++)
             if (defCards[i] == trigger) return defStartX + i * (nWidth + nSpace);
-
-        // Combo cards — centered
-        float comboGroupW = cWidth * 4 + cSpace * 3;
-        float comboStart  = Screen.width / 2f - comboGroupW / 2f;
-        for (int i = 0; i < currentHandIndices.Count; i++)
-            if (currentHandIndices[i] >= 0 && cardLibrary[currentHandIndices[i]].triggerName == trigger)
-                return comboStart + i * (cWidth + cSpace);
-
         return Screen.width / 2f;
-    }
-
-    // ── Combo-hand management ──────────────────────────────────────────────
-
-    private void Update()
-    {
-        if (!isServer) return;
-        if (GetComponent<BotController>() != null) return;
-        var rmm = RhythmRoundManager.Instance;
-        if (rmm == null || !rmm.isRoundActive) return;
-
-        int  nextCluster = rmm.GetNextClusterSize();
-        bool isChain     = nextCluster >= 2;
-
-        if (isChain && (!_comboHandDealt || _comboHandForChain != nextCluster))
-        {
-            _comboHandDealt    = true;
-            _comboHandForChain = nextCluster;
-            SwapToComboHand(nextCluster);
-        }
-        else if (!isChain && _comboHandDealt)
-        {
-            _comboHandDealt    = false;
-            _comboHandForChain = 0;
-            currentHandIndices.Clear();
-        }
-    }
-
-    [Server]
-    private void SwapToComboHand(int chainLength)
-    {
-        currentHandIndices.Clear();
-        for (int i = 0; i < cardLibrary.Count; i++)
-        {
-            var c = cardLibrary[i];
-            if (c.isCombo && c.comboChainLength == chainLength)
-                currentHandIndices.Add(i);
-        }
-        Debug.Log($"<color=yellow>[CardManager]</color> Combo hand ({chainLength}×) → {currentHandIndices.Count} cards for {gameObject.name}");
-        if (currentHandIndices.Count != 4)
-            Debug.LogWarning($"[CardManager] Expected 4 combo cards for chainLength={chainLength}, got {currentHandIndices.Count}.");
     }
 
     // ── OnGUI ──────────────────────────────────────────────────────────────
@@ -358,17 +261,17 @@ public class CardManager : NetworkBehaviour
 
         if (_myPCombat == null) _myPCombat = GetComponent<PlayerCombat>();
 
-        var   rmm        = RhythmRoundManager.Instance;
-        bool  isRhythm   = rmm != null && rmm.isRoundActive;
+        var  rmm         = RhythmRoundManager.Instance;
+        bool isRhythm    = rmm != null && rmm.isRoundActive;
+        bool isComboMode = isRhythm && !rmm.IsSingleMoveMode();
 
-        // True when the player already has an action queued for this beat — dim all cards
         bool inputLocked = false;
         if (isRhythm && _myPCombat != null)
         {
             if (rmm.IsSingleMoveMode())
                 inputLocked = !_myPCombat.HasOpenSlot(false) || !_myPCombat.HasOpenSlot(true);
             else
-                inputLocked = _myPCombat._comboBuffer.Count >= rmm.currentComboCount;
+                inputLocked = _myPCombat._comboBuffer.Count > 0;
         }
 
         float approachFrac = 0f;
@@ -391,25 +294,14 @@ public class CardManager : NetworkBehaviour
         float hoverAmp = isRhythm ? 2f : 5f;
         float hoverY   = Mathf.Sin(Time.time * 2.5f) * hoverAmp;
 
-        if (_comboHandDealt)
+        if (isComboMode)
         {
-            // ── Combo mode: 4 combo cards centered ──
-            float baseY  = Screen.height - cHeight - 60f + hoverY;
-            float totalW = cWidth * 4 + cSpace * 3;
-            float startX = Screen.width / 2f - totalW / 2f;
-
-            for (int i = 0; i < currentHandIndices.Count; i++)
-            {
-                int idx = currentHandIndices[i];
-                if (idx < 0 || idx >= cardLibrary.Count) continue;
-                bool slotAvail = HasSlot(cardLibrary[idx].triggerName) && !inputLocked;
-                Rect r = new Rect(startX + i * (cWidth + cSpace), baseY, cWidth, cHeight);
-                DrawCard(r, cardLibrary[idx], isRhythm, approachFrac, isShout, pulse, slotAvail ? 1f : 0.30f);
-            }
+            // ── COMBO MODE: auto-assigned move HUD ─────────────────────────
+            DrawComboModeHUD(rmm, approachFrac, isShout, pulse, hoverY);
         }
         else
         {
-            // ── Normal mode: defense LEFT, attack RIGHT ──
+            // ── SINGLE MODE: original defense LEFT / attack RIGHT ───────────
             float baseY     = Screen.height - nHeight - 60f + hoverY;
             float gap       = 40f;
             float groupW    = nWidth * 4 + nSpace * 3;
@@ -437,17 +329,15 @@ public class CardManager : NetworkBehaviour
                 DrawCard(r, cardLibrary[libIdx], isRhythm, approachFrac, isShout, pulse, alpha);
             }
 
-            // Slot pip indicators above each group
             float pipY = Screen.height - nHeight - 60f + hoverY - 36f;
             DrawSlotPips(defStartX, pipY, defenseSlotsRemaining, defenseSlotTotal, false);
             DrawSlotPips(atkStartX, pipY, attackSlotsRemaining,  attackSlotsTotal,  true);
 
-            // Config UI when round is not active
             if (!isRhythm) DrawSlotConfigUI();
-        }
 
-        // Opponent slot display
-        if (isRhythm) DrawOpponentSlots();
+            // Opponent slot display (single mode only)
+            if (isRhythm) DrawOpponentSlots();
+        }
 
         // ── Slot bonus popup ──
         if (_slotBonusFade > 0f)
@@ -460,16 +350,14 @@ public class CardManager : NetworkBehaviour
             GUIStyle bonusStyle = new GUIStyle(GUI.skin.label)
                 { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 36 };
             GUIStyle shadow = new GUIStyle(bonusStyle);
-            shadow.normal.textColor  = new Color(0f, 0f, 0f, bc.a * 0.75f);
+            shadow.normal.textColor     = new Color(0f, 0f, 0f, bc.a * 0.75f);
             bonusStyle.normal.textColor = bc;
 
             float bx = Screen.width  / 2f - 210f;
             float by = Screen.height / 2f - 130f - rise;
-            // Shadow pass
             GUI.Label(new Rect(bx + 3f, by + 3f, 420f, 64f), _slotBonusText, shadow);
             GUI.Label(new Rect(bx - 3f, by - 3f, 420f, 64f), _slotBonusText, shadow);
-            // Coloured pass
-            GUI.Label(new Rect(bx, by, 420f, 64f), _slotBonusText, bonusStyle);
+            GUI.Label(new Rect(bx,      by,       420f, 64f), _slotBonusText, bonusStyle);
             GUI.color = Color.white;
         }
 
@@ -488,33 +376,188 @@ public class CardManager : NetworkBehaviour
         {
             float t = (Time.time - _activeDiscardAnims[i].startTime) / 0.5f;
             if (t > 1f) { _activeDiscardAnims.RemoveAt(i); continue; }
-            bool isComboGhost = cardLibrary[_activeDiscardAnims[i].libIndex].isCombo;
-            float gw = isComboGhost ? cWidth : nWidth;
-            float gh = isComboGhost ? cHeight : nHeight;
             Rect r = new Rect(_activeDiscardAnims[i].startX,
-                              Screen.height - gh - 60f - t * 150f, gw, gh);
+                              Screen.height - nHeight - 60f - t * 150f, nWidth, nHeight);
             DrawCard(r, cardLibrary[_activeDiscardAnims[i].libIndex], false, 0f, false, 0f, 1f - t);
         }
 
         GUI.color = Color.white;
     }
 
+    // ── Combo Mode HUD ─────────────────────────────────────────────────────
+
+    private void DrawComboModeHUD(RhythmRoundManager rmm, float approachFrac,
+                                  bool inShout, float pulse, float hoverY)
+    {
+        EnsureComboStyles();
+
+        int    chainSize = rmm.currentComboCount;
+        int    chainPos  = rmm.currentChainPosition;
+        string moveId    = GetAssignedMoveId();
+        string moveName  = ComboDisplayName(moveId);
+
+        float px = Screen.width  / 2f - COMBO_W / 2f;
+        float py = Screen.height - COMBO_H - 28f + hoverY;
+
+        // Background
+        Color bg = inShout
+            ? Color.Lerp(new Color(0.07f, 0.03f, 0.14f, 0.95f),
+                         new Color(0.14f, 0.06f, 0.24f, 0.98f), pulse * 0.6f)
+            : new Color(0.04f, 0.04f, 0.10f, 0.92f);
+        GUI.color = bg;
+        GUI.DrawTexture(new Rect(px, py, COMBO_W, COMBO_H), _whiteTex);
+
+        // Top charge strip
+        Color stripCol = inShout
+            ? Color.Lerp(new Color(0.85f, 0.35f, 1f), Color.white, pulse * 0.40f)
+            : new Color(0.60f, 0.15f, 1f);
+        GUI.color = new Color(stripCol.r, stripCol.g, stripCol.b,
+                              Mathf.Lerp(0.15f, 0.95f, approachFrac));
+        GUI.DrawTexture(new Rect(px, py, COMBO_W * approachFrac, 5f), _whiteTex);
+
+        // Corner brackets
+        float bLen   = inShout ? Mathf.Lerp(20f, 30f,  pulse) : 18f;
+        float bThick = inShout ? Mathf.Lerp(2f,  3.5f, pulse) : 2f;
+        Color bCol   = Color.Lerp(new Color(0.70f, 0.20f, 1f), new Color(0.90f, 0.60f, 1f), approachFrac);
+        if (inShout) bCol = Color.Lerp(bCol, Color.white, pulse * 0.45f);
+        GUI.color = new Color(bCol.r, bCol.g, bCol.b, 0.50f + approachFrac * 0.50f);
+        DrawBrackets(px, py, COMBO_W, COMBO_H, bLen, bThick);
+
+        // Combo chain badge
+        GUI.color = Color.white;
+        _comboLabelStyle.normal.textColor = new Color(1f, 0.6f, 0.1f);
+        GUI.Label(new Rect(px + 8f, py + 6f, 200f, 20f),
+                  $"COMBO  {chainPos + 1} / {chainSize}×", _comboLabelStyle);
+
+        // Move name (large)
+        _comboMoveStyle.normal.textColor = inShout
+            ? Color.Lerp(new Color(0.95f, 0.60f, 1f), Color.white, pulse * 0.45f)
+            : Color.white;
+        GUI.Label(new Rect(px, py + 22f, COMBO_W, 52f), moveName, _comboMoveStyle);
+
+        // Status text
+        string statusText;
+        Color  statusCol;
+        if (inShout)
+        {
+            statusText = "!! SHOUT NOW !!";
+            statusCol  = Color.Lerp(new Color(0.85f, 0.45f, 1f), Color.white, pulse * 0.35f);
+            statusCol.a = 0.80f + pulse * 0.20f;
+        }
+        else if (approachFrac > 0.68f)
+        {
+            float ramp = (approachFrac - 0.68f) / 0.32f;
+            statusText = "GET READY";
+            statusCol  = new Color(1f, Mathf.Lerp(0.65f, 0.90f, ramp), 0.15f,
+                                   Mathf.Lerp(0.50f, 0.90f, ramp));
+        }
+        else
+        {
+            statusText = string.IsNullOrEmpty(moveId) ? "INCOMING..." : "SHOUT ON BEAT";
+            statusCol  = new Color(1f, 1f, 1f, 0.32f);
+        }
+        _comboStatusStyle.normal.textColor = statusCol;
+        GUI.Label(new Rect(px, py + 82f, COMBO_W, 24f), statusText, _comboStatusStyle);
+
+        // Approach bar
+        DrawComboBar(px + 8f, py + COMBO_H - 38f, COMBO_W - 16f, 22f, approachFrac, inShout, pulse);
+
+        GUI.color = Color.white;
+    }
+
+    private void DrawComboBar(float bx, float by, float bw, float bh,
+                              float fill, bool inShout, float pulse)
+    {
+        const float shoutZone = 0.20f;
+
+        GUI.color = new Color(0f, 0f, 0f, 0.65f);
+        GUI.DrawTexture(new Rect(bx, by, bw, bh), _whiteTex);
+
+        GUI.color = inShout ? new Color(0.80f, 0.30f, 1f, 0.55f)
+                            : new Color(0.55f, 0.10f, 1f, 0.25f);
+        GUI.DrawTexture(new Rect(bx + bw * (1f - shoutZone), by, bw * shoutZone, bh), _whiteTex);
+
+        GUI.color = new Color(0.75f, 0.40f, 1f, 0.55f);
+        GUI.DrawTexture(new Rect(bx + bw * (1f - shoutZone) - 1f, by, 2f, bh), _whiteTex);
+
+        Color fillCol;
+        if (inShout)
+            fillCol = Color.Lerp(new Color(0.85f, 0.30f, 1f, 0.95f), Color.white, pulse * 0.38f);
+        else if (fill > 0.72f)
+            fillCol = Color.Lerp(new Color(1f, 0.80f, 0f, 0.85f),
+                                 new Color(0.80f, 0.25f, 1f, 0.92f),
+                                 (fill - 0.72f) / 0.28f);
+        else
+            fillCol = new Color(0.30f, 0.50f, 1f, 0.75f);
+
+        GUI.color = fillCol;
+        GUI.DrawTexture(new Rect(bx, by, bw * fill, bh), _whiteTex);
+
+        if (fill > 0.01f)
+        {
+            GUI.color = new Color(1f, 1f, 1f, 0.20f);
+            GUI.DrawTexture(new Rect(bx, by, bw * fill, bh * 0.28f), _whiteTex);
+        }
+
+        GUI.color = new Color(1f, 1f, 1f, 0.18f);
+        GUI.DrawTexture(new Rect(bx,      by,      bw,   1.5f), _whiteTex);
+        GUI.DrawTexture(new Rect(bx,      by + bh, bw,   1.5f), _whiteTex);
+        GUI.DrawTexture(new Rect(bx,      by,      1.5f, bh),   _whiteTex);
+        GUI.DrawTexture(new Rect(bx + bw, by,      1.5f, bh),   _whiteTex);
+
+        GUI.color = Color.white;
+    }
+
+    private void DrawBrackets(float x, float y, float w, float h, float len, float thick)
+    {
+        GUI.DrawTexture(new Rect(x,             y,             len,   thick), _whiteTex);
+        GUI.DrawTexture(new Rect(x,             y,             thick, len),   _whiteTex);
+        GUI.DrawTexture(new Rect(x + w - len,   y,             len,   thick), _whiteTex);
+        GUI.DrawTexture(new Rect(x + w - thick, y,             thick, len),   _whiteTex);
+        GUI.DrawTexture(new Rect(x,             y + h - thick, len,   thick), _whiteTex);
+        GUI.DrawTexture(new Rect(x,             y + h - len,   thick, len),   _whiteTex);
+        GUI.DrawTexture(new Rect(x + w - len,   y + h - thick, len,   thick), _whiteTex);
+        GUI.DrawTexture(new Rect(x + w - thick, y + h - len,   thick, len),   _whiteTex);
+    }
+
+    private string GetAssignedMoveId()
+    {
+        if (_myPCombat == null) return "";
+        var rmm = RhythmRoundManager.Instance;
+        if (rmm == null) return "";
+        return rmm.IsSingleMoveMode()
+            ? _myPCombat.PendingAttackTrigger
+            : (_myPCombat._comboBuffer.Count > 0 ? _myPCombat._comboBuffer[0].attack : "");
+    }
+
+    private static string ComboDisplayName(string trigger) => trigger switch
+    {
+        "Jab"               => "PUNCH",
+        "Cross"             => "BLAST",
+        "Hook"              => "HOOK",
+        "UnbreakablePunch"  => "BOOM",
+        "ParryIntent"       => "CAGE",
+        _                   => string.IsNullOrEmpty(trigger) ? "..." : trigger.ToUpper()
+    };
+
+    // ── Single-mode drawing ────────────────────────────────────────────────
+
     private void DrawSlotPips(float groupX, float y, int remaining, int total, bool isAttack)
     {
         const int displaySlots = 4;
         float pip = 18f;
         float gap = 7f;
-        float groupW = nWidth * 4 + nSpace * 3;
-        float totalPipW = displaySlots * pip + (displaySlots - 1) * gap;
-        float startX = groupX + groupW / 2f - totalPipW / 2f;
+        float groupW     = nWidth * 4 + nSpace * 3;
+        float totalPipW  = displaySlots * pip + (displaySlots - 1) * gap;
+        float startX     = groupX + groupW / 2f - totalPipW / 2f;
 
         Color filled = isAttack ? new Color(1f, 0.28f, 0.28f, 0.95f)
                                 : new Color(0.28f, 0.68f, 1f,   0.95f);
         Color empty  = new Color(0.15f, 0.15f, 0.15f, 0.65f);
 
         string label = isAttack ? "ATK" : "DEF";
-        GUIStyle s = new GUIStyle(GUI.skin.label) { fontSize = 12, fontStyle = FontStyle.Bold,
-                                                    alignment = TextAnchor.MiddleCenter };
+        GUIStyle s = new GUIStyle(GUI.skin.label)
+            { fontSize = 12, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
         s.normal.textColor = isAttack ? new Color(1f, 0.5f, 0.5f) : new Color(0.5f, 0.8f, 1f);
         GUI.Label(new Rect(startX - 36f, y, 34f, pip), label, s);
 
@@ -555,19 +598,17 @@ public class CardManager : NetworkBehaviour
         float row1 = py + 44f;
         float row2 = py + 76f;
 
-        // Defense column  (ATK + DEF always = 5, each clamped to [1,4])
         val.normal.textColor = new Color(0.4f, 0.78f, 1f);
         GUI.Label(new Rect(col1, row1, 160f, 24f), $"DEFENSE  {_cfgDefense}", val);
-        if (GUI.Button(new Rect(col1,        row2, 44f, 30f), "−")) { _cfgDefense = Mathf.Max(1, _cfgDefense - 1); _cfgAttack = Mathf.Min(4, 5 - _cfgDefense); }
-        GUI.Label(new Rect(col1 + 48f,       row2, 30f, 30f), _cfgDefense.ToString(), val);
-        if (GUI.Button(new Rect(col1 + 82f,  row2, 44f, 30f), "+")) { _cfgDefense = Mathf.Min(4, _cfgDefense + 1); _cfgAttack = Mathf.Max(1, 5 - _cfgDefense); }
+        if (GUI.Button(new Rect(col1,       row2, 44f, 30f), "−")) { _cfgDefense = Mathf.Max(1, _cfgDefense - 1); _cfgAttack = Mathf.Min(4, 5 - _cfgDefense); }
+        GUI.Label(new Rect(col1 + 48f,      row2, 30f, 30f), _cfgDefense.ToString(), val);
+        if (GUI.Button(new Rect(col1 + 82f, row2, 44f, 30f), "+")) { _cfgDefense = Mathf.Min(4, _cfgDefense + 1); _cfgAttack = Mathf.Max(1, 5 - _cfgDefense); }
 
-        // Attack column  (ATK + DEF always = 5, each clamped to [1,4])
         val.normal.textColor = new Color(1f, 0.45f, 0.45f);
         GUI.Label(new Rect(col2, row1, 160f, 24f), $"ATTACK  {_cfgAttack}", val);
-        if (GUI.Button(new Rect(col2,        row2, 44f, 30f), "−")) { _cfgAttack = Mathf.Max(1, _cfgAttack - 1); _cfgDefense = Mathf.Min(4, 5 - _cfgAttack); }
-        GUI.Label(new Rect(col2 + 48f,       row2, 30f, 30f), _cfgAttack.ToString(), val);
-        if (GUI.Button(new Rect(col2 + 82f,  row2, 44f, 30f), "+")) { _cfgAttack = Mathf.Min(4, _cfgAttack + 1); _cfgDefense = Mathf.Max(1, 5 - _cfgAttack); }
+        if (GUI.Button(new Rect(col2,       row2, 44f, 30f), "−")) { _cfgAttack = Mathf.Max(1, _cfgAttack - 1); _cfgDefense = Mathf.Min(4, 5 - _cfgAttack); }
+        GUI.Label(new Rect(col2 + 48f,      row2, 30f, 30f), _cfgAttack.ToString(), val);
+        if (GUI.Button(new Rect(col2 + 82f, row2, 44f, 30f), "+")) { _cfgAttack = Mathf.Min(4, _cfgAttack + 1); _cfgDefense = Mathf.Max(1, 5 - _cfgAttack); }
 
         GUIStyle btn = new GUIStyle(GUI.skin.button) { fontStyle=FontStyle.Bold, fontSize=15 };
         GUI.color = new Color(0.25f, 0.9f, 0.35f);
@@ -576,37 +617,28 @@ public class CardManager : NetworkBehaviour
         GUI.color = Color.white;
     }
 
-    // approachFrac: 0=just fired, 1=shout window
     private void DrawCard(Rect r, CombatCard card, bool isRhythm,
                           float approachFrac, bool isShout, float pulse, float alpha)
     {
-        bool isCombo = card.isCombo;
-
-        // 1. Background
-        Color bgBase = isCombo
-            ? new Color(0.09f, 0.05f, 0.01f, 0.93f * alpha)
-            : new Color(0.04f, 0.04f, 0.09f, 0.90f * alpha);
+        // Background
+        Color bgBase = new Color(0.04f, 0.04f, 0.09f, 0.90f * alpha);
         if (isShout)
-            bgBase = Color.Lerp(bgBase,
-                isCombo ? new Color(0.18f, 0.11f, 0f,    0.93f * alpha)
-                        : new Color(0.03f, 0.12f, 0.15f, 0.90f * alpha),
-                pulse * 0.7f);
+            bgBase = Color.Lerp(bgBase, new Color(0.03f, 0.12f, 0.15f, 0.90f * alpha), pulse * 0.7f);
         GUI.color = bgBase;
         GUI.DrawTexture(r, _whiteTex);
 
-        // 2. Top charge strip
+        // Top charge strip
         if (isRhythm)
         {
             float chargeAlpha = Mathf.Lerp(0.15f, 0.95f, approachFrac) * alpha;
             Color chargeCol = isShout
-                ? Color.Lerp(isCombo ? new Color(1f, 0.7f, 0f) : new Color(0.1f, 1f, 0.45f),
-                             Color.white, pulse * 0.45f)
-                : isCombo ? new Color(1f, 0.6f, 0f) : new Color(0f, 0.85f, 1f);
+                ? Color.Lerp(new Color(0.1f, 1f, 0.45f), Color.white, pulse * 0.45f)
+                : new Color(0f, 0.85f, 1f);
             GUI.color = new Color(chargeCol.r, chargeCol.g, chargeCol.b, chargeAlpha);
             GUI.DrawTexture(new Rect(r.x, r.y, r.width * approachFrac, 5f), _whiteTex);
         }
 
-        // 3. Approach bar (bottom)
+        // Approach bar (bottom)
         if (isRhythm)
         {
             const float barPad    = 6f;
@@ -616,45 +648,34 @@ public class CardManager : NetworkBehaviour
             float barX = r.x + barPad;
             float barY = r.y + r.height - barH - 8f;
 
-            // Track background
             GUI.color = new Color(0f, 0f, 0f, 0.65f * alpha);
             GUI.DrawTexture(new Rect(barX, barY, barW, barH), _whiteTex);
 
-            // Shout zone
-            GUI.color = isCombo ? new Color(1f, 0.65f, 0f, 0.30f * alpha)
-                                : new Color(0f, 1f, 0.3f,  0.30f * alpha);
+            GUI.color = new Color(0f, 1f, 0.3f, 0.30f * alpha);
             GUI.DrawTexture(new Rect(barX + barW * (1f - shoutFrac), barY, barW * shoutFrac, barH), _whiteTex);
 
-            // Shout zone divider line
-            GUI.color = isCombo ? new Color(1f, 0.80f, 0.1f, 0.55f * alpha)
-                                : new Color(0.1f, 1f, 0.5f,   0.55f * alpha);
+            GUI.color = new Color(0.1f, 1f, 0.5f, 0.55f * alpha);
             GUI.DrawTexture(new Rect(barX + barW * (1f - shoutFrac) - 1f, barY, 2f, barH), _whiteTex);
 
             Color fillCol;
             if (isShout)
-                fillCol = Color.Lerp(isCombo ? new Color(1f, 0.7f, 0f, 0.95f * alpha)
-                                             : new Color(0.1f, 1f, 0.45f, 0.95f * alpha),
-                                     Color.white, pulse * 0.40f);
+                fillCol = Color.Lerp(new Color(0.1f, 1f, 0.45f, 0.95f * alpha), Color.white, pulse * 0.40f);
             else if (approachFrac > 0.72f)
                 fillCol = Color.Lerp(new Color(1f, 0.8f, 0f, 0.85f * alpha),
-                                     isCombo ? new Color(1f, 0.65f, 0f, 0.92f * alpha)
-                                             : new Color(0.1f, 1f, 0.4f, 0.92f * alpha),
+                                     new Color(0.1f, 1f, 0.4f, 0.92f * alpha),
                                      (approachFrac - 0.72f) / 0.28f);
             else
                 fillCol = new Color(0f, 0.85f, 1f, 0.75f * alpha);
 
-            // Main fill
             GUI.color = fillCol;
             GUI.DrawTexture(new Rect(barX, barY, barW * approachFrac, barH), _whiteTex);
 
-            // Gloss highlight (top 30% of fill)
             if (approachFrac > 0.01f)
             {
                 GUI.color = new Color(1f, 1f, 1f, 0.22f * alpha);
                 GUI.DrawTexture(new Rect(barX, barY, barW * approachFrac, barH * 0.30f), _whiteTex);
             }
 
-            // Border
             GUI.color = new Color(1f, 1f, 1f, 0.20f * alpha);
             GUI.DrawTexture(new Rect(barX,        barY,         barW,  1.5f), _whiteTex);
             GUI.DrawTexture(new Rect(barX,        barY + barH,  barW,  1.5f), _whiteTex);
@@ -662,36 +683,24 @@ public class CardManager : NetworkBehaviour
             GUI.DrawTexture(new Rect(barX + barW, barY,         1.5f,  barH), _whiteTex);
         }
 
-        // 4. Corner bracket borders
+        // Corner brackets
         float glowT  = isRhythm ? approachFrac : 0f;
         float bLen   = isShout ? Mathf.Lerp(20f, 26f, pulse) : 18f;
         float bThick = isShout ? Mathf.Lerp(2f,  3f,  pulse) : 2f;
-
-        Color bracketBase = isCombo ? new Color(1f, 0.75f, 0f, alpha) : new Color(0.85f, 0f, 1f, alpha);
-        Color bracketHot  = isCombo ? new Color(1f, 0.92f, 0.3f, alpha) : new Color(0.6f, 0f, 1f, alpha);
+        Color bracketBase = new Color(0.85f, 0f, 1f, alpha);
+        Color bracketHot  = new Color(0.6f,  0f, 1f, alpha);
         if (isShout) bracketBase = Color.Lerp(bracketBase, Color.white, pulse * 0.45f);
-        Color bCol = Color.Lerp(bracketBase, bracketHot, glowT);
-        GUI.color = new Color(bCol.r, bCol.g, bCol.b, bCol.a * (0.55f + glowT * 0.45f));
+        Color bCol2 = Color.Lerp(bracketBase, bracketHot, glowT);
+        GUI.color = new Color(bCol2.r, bCol2.g, bCol2.b, bCol2.a * (0.55f + glowT * 0.45f));
+        DrawBrackets(r.x, r.y, r.width, r.height, bLen, bThick);
 
-        GUI.DrawTexture(new Rect(r.x,                  r.y,                   bLen,   bThick), _whiteTex);
-        GUI.DrawTexture(new Rect(r.x,                  r.y,                   bThick, bLen),   _whiteTex);
-        GUI.DrawTexture(new Rect(r.x + r.width - bLen, r.y,                   bLen,   bThick), _whiteTex);
-        GUI.DrawTexture(new Rect(r.x + r.width - bThick, r.y,                 bThick, bLen),   _whiteTex);
-        GUI.DrawTexture(new Rect(r.x,                  r.y + r.height - bThick, bLen,   bThick), _whiteTex);
-        GUI.DrawTexture(new Rect(r.x,                  r.y + r.height - bLen,   bThick, bLen),   _whiteTex);
-        GUI.DrawTexture(new Rect(r.x + r.width - bLen,   r.y + r.height - bThick, bLen,   bThick), _whiteTex);
-        GUI.DrawTexture(new Rect(r.x + r.width - bThick, r.y + r.height - bLen,   bThick, bLen),   _whiteTex);
-
-        // 5. Text
+        // Text
         GUI.color = Color.white;
-        _titleStyle.normal.textColor = isCombo
-            ? new Color(1f,  0.88f, 0.22f, alpha)
-            : new Color(1f,  1f,    1f,    alpha);
-        GUI.Label(new Rect(r.x, r.y + 8f, r.width, 34f), card.cardName, _titleStyle);
+        _titleStyle.normal.textColor  = new Color(1f,    1f,    1f,    alpha);
+        _descStyle.normal.textColor   = new Color(0.72f, 0.88f, 1f,    0.82f * alpha);
+        _statusStyle.normal.textColor = Color.white;
 
-        _descStyle.normal.textColor = isCombo
-            ? new Color(1f,   0.78f, 0.35f, 0.88f * alpha)
-            : new Color(0.72f, 0.88f, 1f,   0.82f * alpha);
+        GUI.Label(new Rect(r.x, r.y + 8f, r.width, 34f), card.cardName, _titleStyle);
         GUI.Label(new Rect(r.x + 5f, r.y + 46f, r.width - 10f, 54f), card.description, _descStyle);
 
         if (isRhythm)
@@ -701,16 +710,14 @@ public class CardManager : NetworkBehaviour
             if (isShout)
             {
                 stateText = "!! SHOUT !!";
-                stateCol  = isCombo
-                    ? new Color(1f,   0.85f, 0f,   (0.78f + pulse * 0.22f) * alpha)
-                    : new Color(0.2f, 1f,    0.5f, (0.78f + pulse * 0.22f) * alpha);
+                stateCol  = new Color(0.2f, 1f, 0.5f, (0.78f + pulse * 0.22f) * alpha);
             }
             else if (approachFrac > 0.68f)
             {
-                stateText = "GET READY";
                 float ramp = (approachFrac - 0.68f) / 0.32f;
-                stateCol  = new Color(1f, Mathf.Lerp(0.65f, 0.9f, ramp), 0.1f,
-                                      Mathf.Lerp(0.5f, 0.9f, ramp) * alpha);
+                stateText  = "GET READY";
+                stateCol   = new Color(1f, Mathf.Lerp(0.65f, 0.9f, ramp), 0.1f,
+                                       Mathf.Lerp(0.5f, 0.9f, ramp) * alpha);
             }
             else
             {
@@ -719,12 +726,6 @@ public class CardManager : NetworkBehaviour
             }
             _statusStyle.normal.textColor = stateCol;
             GUI.Label(new Rect(r.x, r.y + r.height - 58f, r.width, 24f), stateText, _statusStyle);
-        }
-
-        if (isCombo)
-        {
-            _badgeStyle.normal.textColor = new Color(1f, 0.75f, 0f, alpha);
-            GUI.Label(new Rect(r.x, r.y + 4f, r.width - 5f, 20f), $"{card.comboChainLength}×", _badgeStyle);
         }
     }
 
@@ -738,17 +739,13 @@ public class CardManager : NetworkBehaviour
                 var cm = p.GetComponent<CardManager>();
                 if (cm != null && cm != this) { _oppCardsCache = cm; break; }
             }
-            // Fallback: picks up bots that aren't in GameManager.players
             if (_oppCardsCache == null)
-            {
                 foreach (var cm in FindObjectsOfType<CardManager>())
                     if (cm != this) { _oppCardsCache = cm; break; }
-            }
         }
         CardManager opp = _oppCardsCache;
         if (opp == null) return;
 
-        // Anchored below the opponent health bar (posX = Screen.width-420, posY=20, barHeight=60)
         float pip    = 18f;
         float pipGap = 7f;
         float panelW = 400f;
@@ -769,13 +766,11 @@ public class CardManager : NetworkBehaviour
             { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 11 };
 
         const int displaySlots = 4;
-
-        // Defense pips (left half)
         float defTotalW = displaySlots * pip + (displaySlots - 1) * pipGap;
         float defStartX = px + panelW * 0.25f - defTotalW * 0.5f;
         lbl.normal.textColor = new Color(0.4f, 0.78f, 1f);
         GUI.Label(new Rect(px, py + 24f, panelW * 0.5f, 16f), "DEF", lbl);
-        Color defFilled = new Color(0.28f, 0.68f, 1f,  0.9f);
+        Color defFilled = new Color(0.28f, 0.68f, 1f, 0.9f);
         Color empty     = new Color(0.15f, 0.15f, 0.15f, 0.65f);
         for (int i = 0; i < displaySlots; i++)
         {
@@ -783,7 +778,6 @@ public class CardManager : NetworkBehaviour
             GUI.DrawTexture(new Rect(defStartX + i * (pip + pipGap), py + 44f, pip, pip), _whiteTex);
         }
 
-        // Attack pips (right half)
         float atkTotalW = displaySlots * pip + (displaySlots - 1) * pipGap;
         float atkStartX = px + panelW * 0.75f - atkTotalW * 0.5f;
         lbl.normal.textColor = new Color(1f, 0.45f, 0.45f);
@@ -794,7 +788,6 @@ public class CardManager : NetworkBehaviour
             GUI.color = (i < opp.attackSlotsRemaining) ? atkFilled : empty;
             GUI.DrawTexture(new Rect(atkStartX + i * (pip + pipGap), py + 44f, pip, pip), _whiteTex);
         }
-
         GUI.color = Color.white;
     }
 
@@ -805,5 +798,13 @@ public class CardManager : NetworkBehaviour
         _descStyle   = new GUIStyle(GUI.skin.label) { alignment=TextAnchor.UpperCenter,  fontSize=12, wordWrap=true };
         _statusStyle = new GUIStyle(GUI.skin.label) { alignment=TextAnchor.MiddleCenter, fontStyle=FontStyle.Bold, fontSize=13 };
         _badgeStyle  = new GUIStyle(GUI.skin.label) { alignment=TextAnchor.UpperRight,   fontStyle=FontStyle.Bold, fontSize=14 };
+    }
+
+    private void EnsureComboStyles()
+    {
+        if (_comboMoveStyle != null) return;
+        _comboMoveStyle   = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.UpperCenter,  fontStyle = FontStyle.Bold, fontSize = 40 };
+        _comboStatusStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 15 };
+        _comboLabelStyle  = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleLeft,   fontStyle = FontStyle.Bold, fontSize = 13 };
     }
 }

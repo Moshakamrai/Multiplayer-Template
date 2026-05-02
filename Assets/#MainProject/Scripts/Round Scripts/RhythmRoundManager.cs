@@ -266,8 +266,12 @@ public class RhythmRoundManager : NetworkBehaviour
                         if (player != null)
                         {
                             BotController bot = player.GetComponent<BotController>();
-                            if (bot != null) bot.ThinkNextMove();
-                            player.GetComponent<PlayerCombat>().ExecuteRhythmWindUp();
+                            PlayerCombat pc = player.GetComponent<PlayerCombat>();
+                            if (bot != null)
+                                bot.ThinkNextMove();
+                            else if (!IsSingleMoveMode())
+                                AssignRandomComboMove(pc);
+                            pc.ExecuteRhythmWindUp();
                         }
                     }
                 }
@@ -375,6 +379,36 @@ public class RhythmRoundManager : NetworkBehaviour
         // --- NEW: GRADE TIMING BEFORE DAMAGE ---
         EvaluateAndSendFeedback(p1, m1);
         EvaluateAndSendFeedback(p2, m2);
+
+        // --- COMBO MODE: timing-clash only, no RPS ---
+        if (!IsSingleMoveMode())
+        {
+            float beatTime = GetNextBeatTime();
+            float p1Off = p1.lastVocalSpikeTime > 0f ? Mathf.Abs(beatTime - p1.lastVocalSpikeTime) : float.MaxValue;
+            float p2Off = p2.lastVocalSpikeTime > 0f ? Mathf.Abs(beatTime - p2.lastVocalSpikeTime) : float.MaxValue;
+
+            int dmgFrom1 = p1.lastVocalSpikeTime > 0f ? ComputeComboDamage(m1.attack, p1Off) : 0;
+            int dmgFrom2 = p2.lastVocalSpikeTime > 0f ? ComputeComboDamage(m2.attack, p2Off) : 0;
+
+            if (dmgFrom1 > 0)
+            {
+                if (p1.connectionToClient != null) p1.TargetPlaySuccessSound("Attack");
+                if (p2.connectionToClient != null) p2.TargetPlaySuccessSound("Hurt");
+                p2.RpcPlayCombatParticle("Hit");
+                p2.TakeDamage(dmgFrom1, (p2.transform.position - p1.transform.position).normalized);
+            }
+            if (dmgFrom2 > 0)
+            {
+                if (p2.connectionToClient != null) p2.TargetPlaySuccessSound("Attack");
+                if (p1.connectionToClient != null) p1.TargetPlaySuccessSound("Hurt");
+                p1.RpcPlayCombatParticle("Hit");
+                p1.TakeDamage(dmgFrom2, (p1.transform.position - p2.transform.position).normalized);
+            }
+
+            RpcLogCombatTrade(pc1.PlayerName, FormatMove(m1), dmgFrom1 > 0 ? 1 : (dmgFrom2 > 0 ? -1 : 0), dmgFrom2,
+                              pc2.PlayerName, FormatMove(m2), dmgFrom2 > 0 ? 1 : (dmgFrom1 > 0 ? -1 : 0), dmgFrom1);
+            return;
+        }
 
         float targetBeat = GetNextBeatTime();
 
@@ -775,6 +809,32 @@ public class RhythmRoundManager : NetworkBehaviour
             cm.attackSlotsRemaining = Mathf.Min(cm.attackSlotsTotal, cm.attackSlotsRemaining + 1);
             if (pc.connectionToClient != null) cm.TargetShowSlotBonus(pc.connectionToClient, true);
         }
+    }
+
+    [Server]
+    private void AssignRandomComboMove(PlayerCombat pc)
+    {
+        string[] pool = { "Jab", "Cross", "Hook", "UnbreakablePunch", "ParryIntent" };
+        while (pc._comboBuffer.Count < currentComboCount)
+        {
+            string move = pool[Random.Range(0, pool.Length)];
+            pc._comboBuffer.Add(new PlayerCombat.RhythmAction { attack = move, dash = Vector3.zero });
+        }
+    }
+
+    private int ComputeComboDamage(string move, float timingOffset)
+    {
+        int baseDmg = move switch
+        {
+            "Jab"              => 8,
+            "Cross"            => 12,
+            "Hook"             => 16,
+            "UnbreakablePunch" => 20,
+            "ParryIntent"      => 10,
+            _                  => 8
+        };
+        float mult = timingOffset <= 0.10f ? 1.25f : timingOffset <= 0.30f ? 1.0f : 0.5f;
+        return Mathf.Max(1, Mathf.RoundToInt(baseDmg * mult));
     }
 
     [Server]

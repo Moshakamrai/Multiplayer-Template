@@ -303,7 +303,7 @@ public class CardManager : NetworkBehaviour
         {
             // ── SINGLE MODE: original defense LEFT / attack RIGHT ───────────
             float baseY     = Screen.height - nHeight - 60f + hoverY;
-            float gap       = 40f;
+            float gap       = 120f;
             float groupW    = nWidth * 4 + nSpace * 3;
             float defStartX = Screen.width / 2f - gap / 2f - groupW;
             float atkStartX = Screen.width / 2f + gap / 2f;
@@ -638,49 +638,43 @@ public class CardManager : NetworkBehaviour
             GUI.DrawTexture(new Rect(r.x, r.y, r.width * approachFrac, 5f), _whiteTex);
         }
 
-        // Approach bar (bottom)
+        // Circular progress indicator (centered, above status text) - always bright
         if (isRhythm)
         {
-            const float barPad    = 6f;
-            const float barH      = 22f;
-            const float shoutFrac = 0.20f;
-            float barW = r.width - barPad * 2f;
-            float barX = r.x + barPad;
-            float barY = r.y + r.height - barH - 8f;
+            float circleX = r.x + r.width / 2f - 30f;
+            float circleY = r.y + 105f;
+            float circleW = 60f;
+            const float borderThick = 4f;
+            float indicatorAlpha = Mathf.Max(0.85f, alpha); // Always keep indicator bright, even on dim cards
 
-            GUI.color = new Color(0f, 0f, 0f, 0.65f * alpha);
-            GUI.DrawTexture(new Rect(barX, barY, barW, barH), _whiteTex);
+            // Outer circle background (dark)
+            GUI.color = new Color(0.15f, 0.15f, 0.15f, 0.9f * indicatorAlpha);
+            GUI.DrawTexture(new Rect(circleX, circleY, circleW, circleW), _whiteTex);
 
-            GUI.color = new Color(0f, 1f, 0.3f, 0.30f * alpha);
-            GUI.DrawTexture(new Rect(barX + barW * (1f - shoutFrac), barY, barW * shoutFrac, barH), _whiteTex);
-
-            GUI.color = new Color(0.1f, 1f, 0.5f, 0.55f * alpha);
-            GUI.DrawTexture(new Rect(barX + barW * (1f - shoutFrac) - 1f, barY, 2f, barH), _whiteTex);
-
+            // Inner circle fill (scales with approachFrac from 0 to 1)
+            float fillW = (circleW - borderThick * 2f) * approachFrac;
             Color fillCol;
             if (isShout)
-                fillCol = Color.Lerp(new Color(0.1f, 1f, 0.45f, 0.95f * alpha), Color.white, pulse * 0.40f);
+                fillCol = Color.Lerp(new Color(0.1f, 1f, 0.45f, 0.98f * indicatorAlpha), Color.white, pulse * 0.40f);
             else if (approachFrac > 0.72f)
-                fillCol = Color.Lerp(new Color(1f, 0.8f, 0f, 0.85f * alpha),
-                                     new Color(0.1f, 1f, 0.4f, 0.92f * alpha),
+                fillCol = Color.Lerp(new Color(1f, 0.8f, 0f, 0.90f * indicatorAlpha),
+                                     new Color(0.1f, 1f, 0.4f, 0.95f * indicatorAlpha),
                                      (approachFrac - 0.72f) / 0.28f);
             else
-                fillCol = new Color(0f, 0.85f, 1f, 0.75f * alpha);
+                fillCol = new Color(0f, 0.85f, 1f, 0.80f * indicatorAlpha);
 
+            // Draw fill centered (inside the border)
+            float fillX = circleX + borderThick + ((circleW - borderThick * 2f) - fillW) / 2f;
+            float fillY = circleY + borderThick + ((circleW - borderThick * 2f) - fillW) / 2f;
             GUI.color = fillCol;
-            GUI.DrawTexture(new Rect(barX, barY, barW * approachFrac, barH), _whiteTex);
+            GUI.DrawTexture(new Rect(fillX, fillY, fillW, fillW), _whiteTex);
 
-            if (approachFrac > 0.01f)
-            {
-                GUI.color = new Color(1f, 1f, 1f, 0.22f * alpha);
-                GUI.DrawTexture(new Rect(barX, barY, barW * approachFrac, barH * 0.30f), _whiteTex);
-            }
-
-            GUI.color = new Color(1f, 1f, 1f, 0.20f * alpha);
-            GUI.DrawTexture(new Rect(barX,        barY,         barW,  1.5f), _whiteTex);
-            GUI.DrawTexture(new Rect(barX,        barY + barH,  barW,  1.5f), _whiteTex);
-            GUI.DrawTexture(new Rect(barX,        barY,         1.5f,  barH), _whiteTex);
-            GUI.DrawTexture(new Rect(barX + barW, barY,         1.5f,  barH), _whiteTex);
+            // Thick circle border (bright outline - always visible)
+            GUI.color = new Color(0.2f, 0.9f, 1f, 0.98f * indicatorAlpha);
+            GUI.DrawTexture(new Rect(circleX, circleY, circleW, borderThick), _whiteTex); // top
+            GUI.DrawTexture(new Rect(circleX, circleY + circleW - borderThick, circleW, borderThick), _whiteTex); // bottom
+            GUI.DrawTexture(new Rect(circleX, circleY, borderThick, circleW), _whiteTex); // left
+            GUI.DrawTexture(new Rect(circleX + circleW - borderThick, circleY, borderThick, circleW), _whiteTex); // right
         }
 
         // Corner brackets
@@ -721,11 +715,11 @@ public class CardManager : NetworkBehaviour
             }
             else
             {
-                stateText = "WAIT";
-                stateCol  = new Color(1f, 1f, 1f, 0.18f * alpha);
+                stateText = "Command your\nattack now";
+                stateCol  = new Color(1f, 1f, 1f, 0.25f * alpha);
             }
             _statusStyle.normal.textColor = stateCol;
-            GUI.Label(new Rect(r.x, r.y + r.height - 58f, r.width, 24f), stateText, _statusStyle);
+            GUI.Label(new Rect(r.x, r.y + r.height - 30f, r.width, 24f), stateText, _statusStyle);
         }
     }
 

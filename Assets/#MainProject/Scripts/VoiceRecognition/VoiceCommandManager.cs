@@ -143,10 +143,10 @@ public class VoiceCommandManager : NetworkBehaviour
 
             if (GetSimilarity(word, "punch") > 0.75f || word == "jab") { trigger = "Jab"; recognized = true; }
             else if (GetSimilarity(word, "blast") > 0.75f || word == "last" || word == "fast" || word == "cast") { trigger = "Cross"; recognized = true; }
-            else if (GetSimilarity(word, "hook") > 0.75f) { trigger = "Hook"; recognized = true; }
+            else if (GetSimilarity(word, "hook") > 0.80f) { trigger = "Hook"; recognized = true; }
             else if (GetSimilarity(word, "block") > 0.75f || GetSimilarity(word, "guard") > 0.75f) { trigger = "Block"; recognized = true; }
             else if (GetSimilarity(word, "cage") > 0.70f || word == "page" || word == "engage") { trigger = "ParryIntent"; recognized = true; }
-            else if (word == "boom" || GetSimilarity(word, "boom") > 0.90f) { trigger = "UnbreakablePunch"; recognized = true; }
+            else if (word == "boom" || GetSimilarity(word, "boom") > 0.86f) { trigger = "UnbreakablePunch"; recognized = true; }
             else if (GetSimilarity(word, "left") > 0.75f) { trigger = "Left"; dashDir = Vector3.left; recognized = true; }
             else if (GetSimilarity(word, "right") > 0.75f) { trigger = "Right"; dashDir = Vector3.right; recognized = true; }
             // Combo card selection — "one/two/three/four"

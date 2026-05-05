@@ -75,8 +75,10 @@ public class PlayerCombat : NetworkBehaviour
 
     public override void OnStartServer()
     {
-        // Bots keep 100 HP; real players get 250 HP
+        // Bots: 250 HP; real players: 400 HP
         if (GetComponent<BotController>() == null)
+            CurrentHealth = 400;
+        else
             CurrentHealth = 250;
         MaxHealth = CurrentHealth;
     }
@@ -224,7 +226,7 @@ public class PlayerCombat : NetworkBehaviour
         {
             // Quadratic scale from threshold — loud shouting charges significantly faster
             float volScale = Mathf.Clamp01((vol - STAGGER_CHARGE_VOL_MIN) / (1f - STAGGER_CHARGE_VOL_MIN));
-            _staggerRecoveryCharge = Mathf.Min(1f, _staggerRecoveryCharge + _dynamicStaggerRate * (0.25f + 0.75f * volScale * volScale) * Time.deltaTime);
+            _staggerRecoveryCharge = Mathf.Min(1f, _staggerRecoveryCharge + _dynamicStaggerRate * (0.25f + 0.75f * volScale * volScale) * Time.deltaTime * 3f);
             if (_staggerRecoveryCharge >= 1f)
             {
                 _staggerRecoveryCharge = 0f;
@@ -702,7 +704,7 @@ public class PlayerCombat : NetworkBehaviour
             float vol = vp.CurrentRawVolume;
             float thr = (_vcm != null) ? _vcm.parryVolumeThreshold : 0.4f;
             float width = 260f; float height = 140f;
-            float pX = Screen.width - width - 20f; float pY = Screen.height - height - 20f;
+            float pX = Screen.width - width - 20f; float pY = Screen.height - 260f - height - 10f;
 
             GUI.Box(new Rect(pX, pY, width, height), "");
             GUILayout.BeginArea(new Rect(pX + 10f, pY + 10f, width - 20f, height - 20f));
@@ -718,7 +720,7 @@ public class PlayerCombat : NetworkBehaviour
         // --- 3. COMBAT QUEUE (Bottom Left) ---
         if (RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive)
         {
-            GUILayout.BeginArea(new Rect(20, Screen.height - 300, 350, 280));
+            GUILayout.BeginArea(new Rect(20, Screen.height - 270, 350, 280));
             GUIStyle headerStyle = new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold, fontSize = 20 };
             headerStyle.normal.textColor = Color.green;
 

@@ -1,0 +1,13 @@
+fileFormatVersion: 2
+guid: 9cec43f6285ad374f8f9b46c04c50202
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences:
+  - AppearTeleportationEffect: {fileID: 3238574416954557568, guid: 8ff19c8a4ef5ef5489638748290a0e83, type: 3}
+  - DisappearTeleportationEffect: {fileID: 9023450872028357838, guid: 91f800e4ce0cc2b4187778acfd412e49, type: 3}
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 

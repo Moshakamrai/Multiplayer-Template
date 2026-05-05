@@ -39,9 +39,9 @@ public class RhythmRoundManager : NetworkBehaviour
     private List<int> _clusterSizes = new List<int>();
 
     private bool _heavyHitThisBeat = false;
+    private Texture2D _whiteTex;
 
 
-    
 
     private struct CombatLogEntry
     {
@@ -394,14 +394,14 @@ public class RhythmRoundManager : NetworkBehaviour
             {
                 if (p1.connectionToClient != null) p1.TargetPlaySuccessSound("Attack");
                 if (p2.connectionToClient != null) p2.TargetPlaySuccessSound("Hurt");
-                p2.RpcPlayCombatParticle("Hit");
+                PlayHitParticle(p2.transform.position);
                 p2.TakeDamage(dmgFrom1, (p2.transform.position - p1.transform.position).normalized);
             }
             if (dmgFrom2 > 0)
             {
                 if (p2.connectionToClient != null) p2.TargetPlaySuccessSound("Attack");
                 if (p1.connectionToClient != null) p1.TargetPlaySuccessSound("Hurt");
-                p1.RpcPlayCombatParticle("Hit");
+                PlayHitParticle(p1.transform.position);
                 p1.TakeDamage(dmgFrom2, (p1.transform.position - p2.transform.position).normalized);
             }
 
@@ -488,7 +488,7 @@ public class RhythmRoundManager : NetworkBehaviour
         if (!defenderStaggered && defender.IsParryActive)
         {
             if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Parry");
-            defender.RpcPlayCombatParticle("Parry");
+            PlayHitParticle(defender.transform.position);
 
             bool isUnbreakable = (move.attack == "UnbreakablePunch");
             int baseRef = isUnbreakable ? 15 : ((move.attack == "Hook") ? 25 : 10);
@@ -508,7 +508,7 @@ public class RhythmRoundManager : NetworkBehaviour
             {
                 moveSuccessful = true;
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Dash");
-                defender.RpcPlayCombatParticle("Dodge");
+                PlayHitParticle(defender.transform.position);
             }
         }
 
@@ -526,7 +526,7 @@ public class RhythmRoundManager : NetworkBehaviour
                 {
                     blockMitigation = 1.0f;
                     if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Block");
-                    defender.RpcPlayCombatParticle("Block");
+                    PlayHitParticle(defender.transform.position);
                 }
             }
         }
@@ -580,7 +580,7 @@ public class RhythmRoundManager : NetworkBehaviour
                 if (move.attack == "UnbreakablePunch") _heavyHitThisBeat = true;
                 if (attacker.connectionToClient != null) attacker.TargetPlaySuccessSound("Attack");
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Hurt");
-                defender.RpcPlayCombatParticle("Hit");
+                PlayHitParticle(defender.transform.position);
                 Vector3 kbDir = (defender.transform.position - attacker.transform.position).normalized;
                 defender.TakeDamage(damageDealt, kbDir);
                 return 1;
@@ -812,6 +812,19 @@ public class RhythmRoundManager : NetworkBehaviour
     }
 
     [Server]
+    private void PlayHitParticle(Vector3 worldPosition)
+    {
+        RpcPlayHitParticle(worldPosition);
+    }
+
+    [ClientRpc]
+    private void RpcPlayHitParticle(Vector3 worldPosition)
+    {
+        if (ParticlePoolManager.Instance != null)
+            ParticlePoolManager.Instance.PlayParticle("Hit", worldPosition);
+    }
+
+    [Server]
     private void AssignRandomComboMove(PlayerCombat pc)
     {
         string[] pool = { "Jab", "Cross", "Hook", "UnbreakablePunch", "ParryIntent" };
@@ -899,6 +912,138 @@ public class RhythmRoundManager : NetworkBehaviour
 
     void OnRoundStateChanged(bool oldVal, bool newVal) { if (BeatAnalyzer.Instance != null && BeatAnalyzer.Instance.audioSource != null && currentType != RoundType.CustomTrack) { if (newVal) BeatAnalyzer.Instance.audioSource.Play(); else BeatAnalyzer.Instance.audioSource.Stop(); } }
 
+    private void DrawRoundSelectionCards()
+    {
+        if (_whiteTex == null) { _whiteTex = new Texture2D(1, 1); _whiteTex.SetPixel(0, 0, Color.white); _whiteTex.Apply(); }
+
+        float cardW = 220f, cardH = 160f;
+        float gap = 40f;
+        float totalW = (cardW * 2) + gap;
+        float startX = Screen.width / 2f - totalW / 2f;
+        float startY = 80f;
+
+        GUIStyle titleStyle = new GUIStyle(GUI.skin.label) { fontSize = 22, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+        GUIStyle descStyle = new GUIStyle(GUI.skin.label) { fontSize = 12, alignment = TextAnchor.MiddleCenter, wordWrap = true };
+
+        // SLOW ROUND CARD
+        DrawModeCard(startX, startY, cardW, cardH, "SLOW RHYTHM", "Single beat\nrhythm combat", Color.cyan,
+            () => StartSlowRound(), titleStyle, descStyle);
+
+        // FAST ROUND CARD
+        DrawModeCard(startX + cardW + gap, startY, cardW, cardH, "FAST COMBO", "Cluster attack\nsequences", Color.magenta,
+            () => StartFastRound(), titleStyle, descStyle);
+
+        // CUSTOM MAPS
+        var allMapNames = new HashSet<string>();
+        string registry = PlayerPrefs.GetString("CustomMapRegistry", "");
+        if (!string.IsNullOrEmpty(registry))
+            foreach (string n in registry.Split('|'))
+                if (!string.IsNullOrEmpty(n) && PlayerPrefs.HasKey("CustomMap_" + n))
+                    allMapNames.Add(n);
+        if (availableTracks != null)
+            foreach (AudioClip t in availableTracks)
+                if (t != null && PlayerPrefs.HasKey("CustomMap_" + t.name))
+                    allMapNames.Add(t.name);
+
+        if (allMapNames.Count > 0)
+        {
+            float customStartY = startY + cardH + gap + 20f;
+            int idx = 0;
+            foreach (string mapName in allMapNames)
+            {
+                float customX = startX + (idx % 2) * (cardW + gap);
+                float customY = customStartY + (idx / 2) * (cardH + gap);
+
+                AudioClip clip = null;
+                if (availableTracks != null)
+                    foreach (AudioClip t in availableTracks)
+                        if (t != null && t.name == mapName) { clip = t; break; }
+                if (clip == null && _runtimeClips.ContainsKey(mapName))
+                    clip = _runtimeClips[mapName];
+
+                bool hasPath = PlayerPrefs.HasKey("CustomMapPath_" + mapName);
+                bool loading = _isLoadingClip && _loadingClipName == mapName;
+
+                if (loading)
+                    DrawModeCard(customX, customY, cardW, cardH, "LOADING...", mapName, Color.yellow, () => { }, titleStyle, descStyle);
+                else if (clip != null || hasPath)
+                    DrawModeCard(customX, customY, cardW, cardH, mapName.ToUpper(), "Custom map", Color.green,
+                        () => LoadAndPlayMap(mapName, clip), titleStyle, descStyle);
+                idx++;
+            }
+        }
+    }
+
+    private void DrawModeCard(float x, float y, float w, float h, string title, string desc, Color color, System.Action onClick, GUIStyle titleStyle, GUIStyle descStyle)
+    {
+        Rect cardRect = new Rect(x, y, w, h);
+        const float borderThick = 6f;
+        const float cornerSize = 12f;
+        const float padding = 14f;
+
+        // Background with subtle gradient appearance
+        GUI.color = new Color(0.08f, 0.08f, 0.12f, 0.98f);
+        GUI.DrawTexture(cardRect, _whiteTex);
+
+        // Thick colored border
+        GUI.color = color;
+        GUI.DrawTexture(new Rect(x, y, w, borderThick), _whiteTex); // top
+        GUI.DrawTexture(new Rect(x, y + h - borderThick, w, borderThick), _whiteTex); // bottom
+        GUI.DrawTexture(new Rect(x, y, borderThick, h), _whiteTex); // left
+        GUI.DrawTexture(new Rect(x + w - borderThick, y, borderThick, h), _whiteTex); // right
+
+        // Corner brackets for visual flair
+        Color cornerColor = new Color(color.r, color.g, color.b, 0.7f);
+        GUI.color = cornerColor;
+        // Top-left corner
+        GUI.DrawTexture(new Rect(x + 4f, y + 4f, cornerSize, 2f), _whiteTex);
+        GUI.DrawTexture(new Rect(x + 4f, y + 4f, 2f, cornerSize), _whiteTex);
+        // Top-right corner
+        GUI.DrawTexture(new Rect(x + w - cornerSize - 4f, y + 4f, cornerSize, 2f), _whiteTex);
+        GUI.DrawTexture(new Rect(x + w - 6f, y + 4f, 2f, cornerSize), _whiteTex);
+        // Bottom-left corner
+        GUI.DrawTexture(new Rect(x + 4f, y + h - 6f, cornerSize, 2f), _whiteTex);
+        GUI.DrawTexture(new Rect(x + 4f, y + h - cornerSize - 4f, 2f, cornerSize), _whiteTex);
+        // Bottom-right corner
+        GUI.DrawTexture(new Rect(x + w - cornerSize - 4f, y + h - 6f, cornerSize, 2f), _whiteTex);
+        GUI.DrawTexture(new Rect(x + w - 6f, y + h - cornerSize - 4f, 2f, cornerSize), _whiteTex);
+
+        // Title with glow effect (duplicate offset slightly for glow) - plenty of space to avoid clipping
+        float titleY = y + padding;
+        float titleHeight = h * 0.35f;
+        GUI.color = new Color(color.r * 0.5f, color.g * 0.5f, color.b * 0.5f, 0.4f);
+        GUI.Label(new Rect(x + 2f, titleY + 1f, w - 4f, titleHeight), title, titleStyle);
+        GUI.color = color;
+        GUI.Label(new Rect(x + 1f, titleY, w - 2f, titleHeight), title, titleStyle);
+
+        // Description - give it plenty of vertical space
+        float descY = y + (h * 0.40f);
+        float descHeight = h - descY + y - padding;
+        descStyle.normal.textColor = new Color(0.85f, 0.85f, 0.9f, 0.95f);
+        GUI.Label(new Rect(x + padding, descY, w - (padding * 2f), descHeight), desc, descStyle);
+
+        // Click detection
+        if (GUI.Button(cardRect, "", GUI.skin.box)) onClick?.Invoke();
+
+        GUI.color = Color.white;
+    }
+
+    private void LoadAndPlayMap(string mapName, AudioClip clip)
+    {
+        if (BeatAnalyzer.Instance != null && BeatAnalyzer.Instance.audioSource != null)
+        {
+            if (clip != null)
+            {
+                BeatAnalyzer.Instance.audioSource.clip = clip;
+                StartCustomRound();
+            }
+            else
+            {
+                StartCoroutine(LoadClipThenStartRound(mapName, PlayerPrefs.GetString("CustomMapPath_" + mapName)));
+            }
+        }
+    }
+
    private void OnGUI()
     {
         // --- 1. SERVER CONTROLS (Top Left) ---
@@ -919,9 +1064,12 @@ public class RhythmRoundManager : NetworkBehaviour
                 GUILayout.Label("Select a track or mode\nbelow to start the fight", instrStyle, GUILayout.Height(36));
                 GUILayout.Space(4);
 
-                GUI.color = Color.cyan; if (GUILayout.Button("START SLOW ROUND", GUILayout.Height(40))) StartSlowRound();
-                GUI.color = Color.magenta; if (GUILayout.Button("START FAST ROUND", GUILayout.Height(40))) StartFastRound();
-                GUILayout.Space(10);
+                // Cards drawn in center instead
+                GUI.color = Color.white;
+                GUILayout.EndArea();
+                DrawRoundSelectionCards();
+                GUILayout.BeginArea(new Rect(10, 10, 220, 500));
+                GUILayout.Space(280);
 
                 // --- DYNAMIC CUSTOM MAP LOADER ---
                 // Collect all map names: from SmartBeatMapper registry + Inspector array

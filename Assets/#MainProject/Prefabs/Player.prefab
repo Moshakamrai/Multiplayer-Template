@@ -793,6 +793,8 @@ MonoBehaviour:
   animator: {fileID: 7078697320674753406}
   isAttacking: 0
   IsParryActive: 0
+  IsStaggered: 0
+  StaggerBeatsRemaining: 0
   weaponGloveLeft: {fileID: 4246265404567632835}
   weaponGloveRight: {fileID: 6838551958696098282}
   playerRenderer: {fileID: 3044968905943147932}
@@ -800,6 +802,7 @@ MonoBehaviour:
   _originalMaterial: {fileID: 2100000, guid: d3b488fade9d5bf48b05a6346500e4c7, type: 2}
   vp: {fileID: 3402618379187400785}
   lastVocalSpikeTime: -1
+  lastVocalSpikeVolume: 0
 --- !u!114 &8845738990167672434
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -883,13 +886,13 @@ MonoBehaviour:
     isCombo: 0
     comboChainLength: 0
     comboAttacks: []
-  - cardName: BLAST
+  - cardName: FLANK
     triggerName: Cross
     description: Straight power hit. Counters enemies trying to dodge.
     isCombo: 0
     comboChainLength: 0
     comboAttacks: []
-  - cardName: HOOK
+  - cardName: BREAK
     triggerName: Hook
     description: Heavy side-swing. High damage and grants bonus Energy.
     isCombo: 0
@@ -907,7 +910,7 @@ MonoBehaviour:
     isCombo: 0
     comboChainLength: 0
     comboAttacks: []
-  - cardName: BOOM
+  - cardName: CRUSH
     triggerName: UnbreakablePunch
     description: Unstoppable. Ignores blocks and deals massive 15-25 dmg.
     isCombo: 0
@@ -925,6 +928,10 @@ MonoBehaviour:
     isCombo: 0
     comboChainLength: 0
     comboAttacks: []
+  attackSlotsTotal: 3
+  defenseSlotTotal: 2
+  attackSlotsRemaining: 3
+  defenseSlotsRemaining: 2
 --- !u!1 &8782005603362053964
 GameObject:
   m_ObjectHideFlags: 0

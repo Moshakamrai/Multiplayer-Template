@@ -88,6 +88,9 @@ public class VoiceCommandManager : NetworkBehaviour
         string lowerSegment = segment.ToLower().Trim();
         bool isRhythm = RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive;
 
+        // Echo guard applies in ALL modes — shout tail after any executed command is silently consumed
+        if (Time.time < _echoGuardUntil) return true;
+
         if (isRhythm)
         {
             float trackTime = RhythmRoundManager.Instance.GetCurrentTrackTime();
@@ -101,11 +104,6 @@ public class VoiceCommandManager : NetworkBehaviour
 
             // Post-beat dead zone — return FALSE so the word can be retried when zone ends
             if (lastBeat > 0f && trackTime - lastBeat < deadZone) return false;
-
-            // Execution shout echo guard — activated after a move is queued and its beat fires.
-            // The shout the player makes to execute stays in Vosk's buffer 0.3-0.6s after the beat;
-            // returning true here consumes it silently so it doesn't become the next command.
-            if (Time.time < _echoGuardUntil) return true;
 
             // Pre-beat shout window — return TRUE (consume but don't queue; this beat is closing)
             if (nextBeat > 0f)
@@ -141,20 +139,17 @@ public class VoiceCommandManager : NetworkBehaviour
                 continue;
             }
 
-            if (GetSimilarity(word, "punch") > 0.75f || word == "jab") { trigger = "Jab"; recognized = true; }
-            else if (GetSimilarity(word, "blast") > 0.75f || word == "last" || word == "fast" || word == "cast") { trigger = "Cross"; recognized = true; }
-            else if (GetSimilarity(word, "hook") > 0.80f) { trigger = "Hook"; recognized = true; }
+            if (GetSimilarity(word, "punch") > 0.78f ) { trigger = "Jab"; recognized = true; }
+            else if (word == "flank" || word == "blank" || word == "frank" || GetSimilarity(word, "flank") > 0.75f) { trigger = "Cross"; recognized = true; }
+            else if (word == "break" || word == "brake" || GetSimilarity(word, "break") > 0.75f) { trigger = "Hook"; recognized = true; }
             else if (GetSimilarity(word, "block") > 0.75f || GetSimilarity(word, "guard") > 0.75f) { trigger = "Block"; recognized = true; }
             else if (GetSimilarity(word, "cage") > 0.70f || word == "page" || word == "engage") { trigger = "ParryIntent"; recognized = true; }
-            else if (word == "boom" || GetSimilarity(word, "boom") > 0.86f) { trigger = "UnbreakablePunch"; recognized = true; }
+            else if (word == "crush" || word == "crash" || word == "crushing" || word == "crashing" || GetSimilarity(word, "crush") > 0.75f) { trigger = "UnbreakablePunch"; recognized = true; }
             else if (GetSimilarity(word, "left") > 0.75f) { trigger = "Left"; dashDir = Vector3.left; recognized = true; }
             else if (GetSimilarity(word, "right") > 0.75f) { trigger = "Right"; dashDir = Vector3.right; recognized = true; }
             // Combo card selection — "one/two/three/four"
-            // Vosk mishears: "three" → "tree",  "four" → "for"
-            else if (word == "one"  || GetSimilarity(word, "one")  > 0.80f) { trigger = "Combo1"; recognized = true; }
-            else if (word == "two"  || GetSimilarity(word, "two")  > 0.80f) { trigger = "Combo2"; recognized = true; }
-            else if (word == "tree" || word == "three" || GetSimilarity(word, "three") > 0.80f) { trigger = "Combo3"; recognized = true; }
-            else if (word == "for"  || word == "four"  || GetSimilarity(word, "four")  > 0.80f) { trigger = "Combo4"; recognized = true; }
+            
+           
 
             if (recognized)
             {
@@ -188,6 +183,7 @@ public class VoiceCommandManager : NetworkBehaviour
                         }
                         CmdUseCardOnServer(trigger);
                         SetEchoGuard();
+                        VoskInstance.FlushAudioBuffer();
                         if (SoundManagerMain.Instance != null) SoundManagerMain.Instance.PlayCardAccepted();
                         LogExecution("COMBO QUEUED: " + trigger);
                         Debug.Log($"<color=#FFD700>[COMBO SUCCESS]</color> {trigger} queued: {string.Join(" → ", matchedCard.comboAttacks)}");
@@ -212,6 +208,7 @@ public class VoiceCommandManager : NetworkBehaviour
                         _myCombat.QueueRhythmMove(trigger, dashDir);
                         CmdUseCardOnServer(trigger);
                         SetEchoGuard();
+                        VoskInstance.FlushAudioBuffer();
                         if (SoundManagerMain.Instance != null) SoundManagerMain.Instance.PlayCardAccepted();
                         LogExecution("QUEUED: " + trigger);
                     }
@@ -226,6 +223,8 @@ public class VoiceCommandManager : NetworkBehaviour
                             else if (trigger == "Hook")  _myCombat.VoiceAttackHook();
                             else if (trigger == "Block") _myCombat.VoiceAttackBlock();
                             CmdUseCardOnServer(trigger);
+                            _echoGuardUntil = Time.time + EXECUTION_ECHO_GUARD;
+                            VoskInstance.FlushAudioBuffer();
                         }
                     }
                 }

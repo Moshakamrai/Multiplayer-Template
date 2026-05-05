@@ -916,14 +916,28 @@ public class RhythmRoundManager : NetworkBehaviour
     {
         if (_whiteTex == null) { _whiteTex = new Texture2D(1, 1); _whiteTex.SetPixel(0, 0, Color.white); _whiteTex.Apply(); }
 
-        float cardW = 220f, cardH = 160f;
-        float gap = 40f;
-        float totalW = (cardW * 2) + gap;
-        float startX = Screen.width / 2f - totalW / 2f;
+        float cardW = 155f, cardH = 105f;
+        float gap = 18f;
         float startY = 80f;
 
-        GUIStyle titleStyle = new GUIStyle(GUI.skin.label) { fontSize = 22, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
-        GUIStyle descStyle = new GUIStyle(GUI.skin.label) { fontSize = 12, alignment = TextAnchor.MiddleCenter, wordWrap = true };
+        GUIStyle titleStyle = new GUIStyle(GUI.skin.label) { fontSize = 16, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+        GUIStyle descStyle  = new GUIStyle(GUI.skin.label) { fontSize = 10, alignment = TextAnchor.MiddleCenter, wordWrap = true };
+
+        // Collect custom maps so we can calculate total width up front
+        var allMapNames = new List<string>();
+        string registry = PlayerPrefs.GetString("CustomMapRegistry", "");
+        if (!string.IsNullOrEmpty(registry))
+            foreach (string n in registry.Split('|'))
+                if (!string.IsNullOrEmpty(n) && PlayerPrefs.HasKey("CustomMap_" + n) && !allMapNames.Contains(n))
+                    allMapNames.Add(n);
+        if (availableTracks != null)
+            foreach (AudioClip t in availableTracks)
+                if (t != null && PlayerPrefs.HasKey("CustomMap_" + t.name) && !allMapNames.Contains(t.name))
+                    allMapNames.Add(t.name);
+
+        int totalCards = 2 + allMapNames.Count;
+        float totalW   = totalCards * cardW + (totalCards - 1) * gap;
+        float startX   = Screen.width / 2f - totalW / 2f;
 
         // SLOW ROUND CARD
         DrawModeCard(startX, startY, cardW, cardH, "SLOW RHYTHM", "Single beat\nrhythm combat", Color.cyan,
@@ -933,44 +947,27 @@ public class RhythmRoundManager : NetworkBehaviour
         DrawModeCard(startX + cardW + gap, startY, cardW, cardH, "FAST COMBO", "Cluster attack\nsequences", Color.magenta,
             () => StartFastRound(), titleStyle, descStyle);
 
-        // CUSTOM MAPS
-        var allMapNames = new HashSet<string>();
-        string registry = PlayerPrefs.GetString("CustomMapRegistry", "");
-        if (!string.IsNullOrEmpty(registry))
-            foreach (string n in registry.Split('|'))
-                if (!string.IsNullOrEmpty(n) && PlayerPrefs.HasKey("CustomMap_" + n))
-                    allMapNames.Add(n);
-        if (availableTracks != null)
-            foreach (AudioClip t in availableTracks)
-                if (t != null && PlayerPrefs.HasKey("CustomMap_" + t.name))
-                    allMapNames.Add(t.name);
-
-        if (allMapNames.Count > 0)
+        // CUSTOM MAPS — same row, continuing to the right
+        for (int idx = 0; idx < allMapNames.Count; idx++)
         {
-            float customStartY = startY + cardH + gap + 20f;
-            int idx = 0;
-            foreach (string mapName in allMapNames)
-            {
-                float customX = startX + (idx % 2) * (cardW + gap);
-                float customY = customStartY + (idx / 2) * (cardH + gap);
+            string mapName = allMapNames[idx];
+            float customX  = startX + (idx + 2) * (cardW + gap);
 
-                AudioClip clip = null;
-                if (availableTracks != null)
-                    foreach (AudioClip t in availableTracks)
-                        if (t != null && t.name == mapName) { clip = t; break; }
-                if (clip == null && _runtimeClips.ContainsKey(mapName))
-                    clip = _runtimeClips[mapName];
+            AudioClip clip = null;
+            if (availableTracks != null)
+                foreach (AudioClip t in availableTracks)
+                    if (t != null && t.name == mapName) { clip = t; break; }
+            if (clip == null && _runtimeClips.ContainsKey(mapName))
+                clip = _runtimeClips[mapName];
 
-                bool hasPath = PlayerPrefs.HasKey("CustomMapPath_" + mapName);
-                bool loading = _isLoadingClip && _loadingClipName == mapName;
+            bool hasPath = PlayerPrefs.HasKey("CustomMapPath_" + mapName);
+            bool loading = _isLoadingClip && _loadingClipName == mapName;
 
-                if (loading)
-                    DrawModeCard(customX, customY, cardW, cardH, "LOADING...", mapName, Color.yellow, () => { }, titleStyle, descStyle);
-                else if (clip != null || hasPath)
-                    DrawModeCard(customX, customY, cardW, cardH, mapName.ToUpper(), "Custom map", Color.green,
-                        () => LoadAndPlayMap(mapName, clip), titleStyle, descStyle);
-                idx++;
-            }
+            if (loading)
+                DrawModeCard(customX, startY, cardW, cardH, "LOADING...", mapName, Color.yellow, () => { }, titleStyle, descStyle);
+            else if (clip != null || hasPath)
+                DrawModeCard(customX, startY, cardW, cardH, mapName.ToUpper(), "Custom map", Color.green,
+                    () => LoadAndPlayMap(mapName, clip), titleStyle, descStyle);
         }
     }
 
@@ -1053,89 +1050,10 @@ public class RhythmRoundManager : NetworkBehaviour
             GUILayout.BeginArea(new Rect(10, 10, 220, 500));
             if (!isRoundActive)
             {
-                GUIStyle instrStyle = new GUIStyle(GUI.skin.label)
-                {
-                    fontSize = 13,
-                    fontStyle = FontStyle.Italic,
-                    wordWrap = true,
-                    alignment = TextAnchor.MiddleCenter
-                };
-                instrStyle.normal.textColor = new Color(0.8f, 0.8f, 0.8f, 1f);
-                GUILayout.Label("Select a track or mode\nbelow to start the fight", instrStyle, GUILayout.Height(36));
-                GUILayout.Space(4);
-
-                // Cards drawn in center instead
                 GUI.color = Color.white;
                 GUILayout.EndArea();
                 DrawRoundSelectionCards();
                 GUILayout.BeginArea(new Rect(10, 10, 220, 500));
-                GUILayout.Space(280);
-
-                // --- DYNAMIC CUSTOM MAP LOADER ---
-                // Collect all map names: from SmartBeatMapper registry + Inspector array
-                var allMapNames = new HashSet<string>();
-
-                string registry = PlayerPrefs.GetString("CustomMapRegistry", "");
-                if (!string.IsNullOrEmpty(registry))
-                    foreach (string n in registry.Split('|'))
-                        if (!string.IsNullOrEmpty(n) && PlayerPrefs.HasKey("CustomMap_" + n))
-                            allMapNames.Add(n);
-
-                if (availableTracks != null)
-                    foreach (AudioClip t in availableTracks)
-                        if (t != null && PlayerPrefs.HasKey("CustomMap_" + t.name))
-                            allMapNames.Add(t.name);
-
-                if (allMapNames.Count > 0)
-                {
-                    GUILayout.Label("<b>--- CUSTOM MAPS ---</b>", new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, richText = true });
-
-                    foreach (string mapName in allMapNames)
-                    {
-                        // Prefer Inspector asset, then runtime-cached clip
-                        AudioClip clip = null;
-                        if (availableTracks != null)
-                            foreach (AudioClip t in availableTracks)
-                                if (t != null && t.name == mapName) { clip = t; break; }
-                        if (clip == null && _runtimeClips.ContainsKey(mapName))
-                            clip = _runtimeClips[mapName];
-
-                        bool hasPath  = PlayerPrefs.HasKey("CustomMapPath_" + mapName);
-                        bool loading  = _isLoadingClip && _loadingClipName == mapName;
-
-                        if (loading)
-                        {
-                            GUI.color = Color.yellow;
-                            GUILayout.Box($"LOADING: {mapName}...", GUILayout.Height(45));
-                        }
-                        else if (clip != null || hasPath)
-                        {
-                            GUI.color = Color.green;
-                            if (GUILayout.Button($"PLAY: {mapName}", GUILayout.Height(45)))
-                            {
-                                if (BeatAnalyzer.Instance != null && BeatAnalyzer.Instance.audioSource != null)
-                                {
-                                    if (clip != null)
-                                    {
-                                        BeatAnalyzer.Instance.audioSource.clip = clip;
-                                        StartCustomRound();
-                                    }
-                                    else
-                                    {
-                                        StartCoroutine(LoadClipThenStartRound(mapName, PlayerPrefs.GetString("CustomMapPath_" + mapName)));
-                                    }
-                                }
-                            }
-                        }
-                        GUILayout.Space(5);
-                    }
-                }
-                else
-                {
-                    GUI.color = Color.red;
-                    GUILayout.Box("NO MAPS FOUND.\nUse SmartBeatMapper to create one.", GUILayout.Height(60));
-                }
-                GUI.color = Color.white;
             }
             else
             {

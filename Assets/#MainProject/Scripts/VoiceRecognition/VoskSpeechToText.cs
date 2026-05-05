@@ -58,6 +58,25 @@ public class VoskSpeechToText : MonoBehaviour
     // NEW: Queue for partial results
     private readonly ConcurrentQueue<string> _threadedPartialQueue = new ConcurrentQueue<string>();
 
+    // Debug-visible state (read by VoiceDebugGUI)
+    public int    PendingFrameCount => _threadedBufferQueue.Count;
+    public string LastPartial       { get; private set; } = "";
+    public float  LastPartialTime   { get; private set; }
+    public string StatusMessage     { get; private set; } = "Initializing...";
+
+    // Drain queued mic audio immediately after a command fires so the tail
+    // of the shout can't bleed through into the next input window.
+    // Also resets Vosk's internal acoustic context so normal speech before
+    // the next command doesn't pollute recognition accuracy.
+    public void FlushAudioBuffer()
+    {
+        while (_threadedBufferQueue.TryDequeue(out _)) { }
+        while (_threadedPartialQueue.TryDequeue(out _)) { }
+        if (_recognizerReady && _recognizer != null)
+            _recognizer.FinalResult(); // forces acoustic context reset
+        LastPartial = "";
+    }
+
     void Start()
     {
         if (AutoStart)
@@ -83,12 +102,14 @@ public class VoskSpeechToText : MonoBehaviour
         yield return WaitForMicrophoneInput();
         yield return Decompress();
 
-        OnStatusUpdated?.Invoke("Loading Model from: " + _decompressedModelPath);
-        
+        StatusMessage = "Loading Model from: " + _decompressedModelPath;
+        OnStatusUpdated?.Invoke(StatusMessage);
+
         Vosk.Vosk.SetLogLevel(-1); // Silence all Vosk logs — they stall the main thread
         _model = new Model(_decompressedModelPath);
 
-        OnStatusUpdated?.Invoke("Initialized");
+        StatusMessage = "Initialized";
+        OnStatusUpdated?.Invoke(StatusMessage);
         VoiceProcessor.OnFrameCaptured += VoiceProcessorOnOnFrameCaptured;
         VoiceProcessor.OnRecordingStop += VoiceProcessorOnOnRecordingStop;
 
@@ -131,7 +152,8 @@ public class VoskSpeechToText : MonoBehaviour
         // Vosk will instantly stop checking its 100,000 word dictionary.
         
         // Combat words + combo-card number words (with real Vosk mishears: "tree"=three, "for"=four)
-        _grammar = "[\"punch\", \"jab\", \"blast\", \"last\", \"fast\", \"cast\", \"hook\", \"block\", \"guard\", \"cage\", \"page\", \"engage\", \"boom\", \"room\", \"doom\", \"left\", \"right\", \"one\", \"two\", \"tree\", \"for\", \"[unk]\"]";
+        // "crush" replaced "boom"/"room"/"doom" — boom triggered too many false positives
+        _grammar = "[\"punch\", \"jab\", \"flank\", \"blank\", \"frank\", \"break\", \"brake\", \"block\", \"guard\", \"cage\", \"page\", \"engage\", \"crush\", \"crash\", \"left\", \"right\", \"one\", \"two\", \"tree\", \"for\", \"[unk]\"]";
 
         Debug.Log("<color=cyan>VOSK GRAMMAR:</color> Locked to combat + combo-number words (one/two/tree/for).");
     }
@@ -179,6 +201,8 @@ public class VoskSpeechToText : MonoBehaviour
         // Fire Partial Results (Fast)
         if (_threadedPartialQueue.TryDequeue(out string partialResult))
         {
+            LastPartial     = partialResult;
+            LastPartialTime = Time.time;
             OnPartialResult?.Invoke(partialResult);
         }
     }

@@ -54,9 +54,15 @@ public class VoskSpeechToText : MonoBehaviour
     //Thread safe queues
     private readonly ConcurrentQueue<short[]> _threadedBufferQueue = new ConcurrentQueue<short[]>();
     private readonly ConcurrentQueue<string> _threadedResultQueue = new ConcurrentQueue<string>();
-    
+
     // NEW: Queue for partial results
     private readonly ConcurrentQueue<string> _threadedPartialQueue = new ConcurrentQueue<string>();
+
+    // Debug-visible state (read from VoiceDebugGUI)
+    public int    PendingFrameCount => _threadedBufferQueue.Count;
+    public string LastPartial       { get; private set; } = "";
+    public float  LastPartialTime   { get; private set; }
+    public string StatusMessage     { get; private set; } = "Initializing...";
 
     void Start()
     {
@@ -83,12 +89,14 @@ public class VoskSpeechToText : MonoBehaviour
         yield return WaitForMicrophoneInput();
         yield return Decompress();
 
-        OnStatusUpdated?.Invoke("Loading Model from: " + _decompressedModelPath);
+        StatusMessage = "Loading Model from: " + _decompressedModelPath;
+        OnStatusUpdated?.Invoke(StatusMessage);
         
         Vosk.Vosk.SetLogLevel(-1); // Silence all Vosk logs — they stall the main thread
         _model = new Model(_decompressedModelPath);
 
-        OnStatusUpdated?.Invoke("Initialized");
+        StatusMessage = "Initialized";
+        OnStatusUpdated?.Invoke(StatusMessage);
         VoiceProcessor.OnFrameCaptured += VoiceProcessorOnOnFrameCaptured;
         VoiceProcessor.OnRecordingStop += VoiceProcessorOnOnRecordingStop;
 
@@ -179,6 +187,8 @@ public class VoskSpeechToText : MonoBehaviour
         // Fire Partial Results (Fast)
         if (_threadedPartialQueue.TryDequeue(out string partialResult))
         {
+            LastPartial = partialResult;
+            LastPartialTime = Time.time;
             OnPartialResult?.Invoke(partialResult);
         }
     }

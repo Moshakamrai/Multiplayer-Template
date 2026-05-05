@@ -10,6 +10,8 @@ public class VoiceCommandManager : NetworkBehaviour
     public Text OutputText;
     private string _previousPartialText = "";
     private string _lastProcessedWord   = "";
+    private string _deferredWord        = ""; // command blocked by dead zone — retried in Update
+    private float  _deferredExpiry      = 0f;
     private float  _echoGuardUntil      = -999f; // suppresses shout echo after beat execution
     private const float EXECUTION_ECHO_GUARD = 0.6f;
     private PlayerController _myController;
@@ -38,36 +40,54 @@ public class VoiceCommandManager : NetworkBehaviour
         }
     }
 
-    // Update HandlePartialResult in VoiceCommandManager.cs
+    void Update()
+    {
+        if (string.IsNullOrEmpty(_deferredWord)) return;
+
+        if (Time.time >= _deferredExpiry) { _deferredWord = ""; return; }
+
+        // Dead zone cleared — try to fire the command we couldn't execute earlier.
+        // ProcessWords returns false only while still in the dead zone; once it
+        // returns true the deferred slot is cleared regardless of outcome.
+        if (ProcessWords(_deferredWord)) _deferredWord = "";
+    }
+
     void HandlePartialResult(string jsonResult)
     {
         if (!Application.isFocused) return;
 
         string currentText = ParsePartialJson(jsonResult).ToLower().Trim();
         if (string.IsNullOrEmpty(currentText)) return;
-        
-        // Update the UI instantly so it feels responsive
+
         if (InputText != null) InputText.text = currentText;
 
         string[] currentWords = currentText.Split(new[] { ' ' }, System.StringSplitOptions.RemoveEmptyEntries);
         if (currentWords.Length == 0) return;
 
-        // Grab the very last word Vosk is currently guessing
         string newestWord = currentWords[currentWords.Length - 1];
 
-        // Only mark the word as processed if timing wasn't the blocker.
-        // If timing blocked it, keep retrying until the window opens.
         if (newestWord != _lastProcessedWord)
         {
+            // Claim the word immediately so friend's continuing speech can't
+            // keep changing newestWord and orphaning this command.
+            _lastProcessedWord = newestWord;
             bool consumed = ProcessWords(newestWord);
-            if (consumed) _lastProcessedWord = newestWord;
+            if (!consumed)
+            {
+                // Dead zone blocked it — store for frame-by-frame retry in Update.
+                // Only overwrite a pending deferred word if the new word is also a
+                // command (unrecognized friend-words return true, never reach here).
+                _deferredWord   = newestWord;
+                _deferredExpiry = Time.time + 2f;
+            }
         }
     }
 
-    void HandleFinalResult(string jsonResult) 
+    void HandleFinalResult(string jsonResult)
     {
         _previousPartialText = "";
-        _lastProcessedWord = ""; // Reset the tracker for the next sentence
+        _lastProcessedWord   = "";
+        _deferredWord        = ""; // sentence ended — start fresh
     }
 
     [Command]

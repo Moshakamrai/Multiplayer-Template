@@ -131,7 +131,7 @@ public class VoskSpeechToText : MonoBehaviour
             // --- FASTER POLLING FIX ---
             // We force the frameSize to 256 instead of the default 512. 
             // This makes the microphone feed Vosk twice as often!
-            VoiceProcessor.StartRecording(16000, 128);
+            VoiceProcessor.StartRecording(16000, 64);
             
             StartCoroutine(ThreadedWorkCoroutine());
         }

@@ -120,7 +120,7 @@ public class VoiceCommandManager : NetworkBehaviour
             // Long dead zone only while a combo chain is actively executing (prevents mid-chain input).
             // Single-move mode always gets the short dead zone — 1.5f would consume the entire input window.
             bool comboChainActive = !RhythmRoundManager.Instance.IsSingleMoveMode() && _myCombat._comboBuffer.Count > 0;
-            float deadZone = comboChainActive ? 1.5f : 0.35f;
+            float deadZone = comboChainActive ? 1.2f : 0.20f;
 
             // Post-beat dead zone — return FALSE so the word can be retried when zone ends
             if (lastBeat > 0f && trackTime - lastBeat < deadZone) return false;
@@ -129,7 +129,7 @@ public class VoiceCommandManager : NetworkBehaviour
             if (nextBeat > 0f)
             {
                 float timeToNext = nextBeat - trackTime;
-                if (timeToNext >= 0f && timeToNext <= 0.5f) return true;
+                if (timeToNext >= 0f && timeToNext <= 0.25f) return true;
             }
         }
 

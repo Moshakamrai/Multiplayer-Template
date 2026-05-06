@@ -104,6 +104,13 @@ public class VoiceProcessor : MonoBehaviour
         Microphone.End(CurrentDeviceName);
         Destroy(_audioClip); _audioClip = null; _didDetect = false;
         StopCoroutine(RecordData());
+        // If there's a pending device restart, fire it now since the coroutine won't exit naturally
+        if (RestartRecording != null)
+        {
+            var callback = RestartRecording;
+            RestartRecording = null;
+            callback.Invoke();
+        }
     }
 
     IEnumerator RecordData()

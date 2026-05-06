@@ -57,6 +57,7 @@ public class VoskSpeechToText : MonoBehaviour
     
     // NEW: Queue for partial results
     private readonly ConcurrentQueue<string> _threadedPartialQueue = new ConcurrentQueue<string>();
+    private string _lastEnqueuedPartial = ""; // dedupe identical partials at the source
 
     // Debug-visible state (read by VoiceDebugGUI)
     public int    PendingFrameCount => _threadedBufferQueue.Count;
@@ -75,6 +76,7 @@ public class VoskSpeechToText : MonoBehaviour
         if (_recognizerReady && _recognizer != null)
             _recognizer.FinalResult(); // forces acoustic context reset
         LastPartial = "";
+        _lastEnqueuedPartial = "";
     }
 
     void Start()
@@ -129,7 +131,7 @@ public class VoskSpeechToText : MonoBehaviour
             // --- FASTER POLLING FIX ---
             // We force the frameSize to 256 instead of the default 512. 
             // This makes the microphone feed Vosk twice as often!
-            VoiceProcessor.StartRecording(16000, 256); 
+            VoiceProcessor.StartRecording(16000, 128);
             
             StartCoroutine(ThreadedWorkCoroutine());
         }
@@ -153,7 +155,7 @@ public class VoskSpeechToText : MonoBehaviour
         
         // Combat words + combo-card number words (with real Vosk mishears: "tree"=three, "for"=four)
         // "crush" replaced "boom"/"room"/"doom" — boom triggered too many false positives
-        _grammar = "[\"punch\", \"jab\", \"flank\", \"blank\", \"frank\", \"break\", \"brake\", \"block\", \"guard\", \"cage\", \"page\", \"engage\", \"crush\", \"crash\", \"left\", \"right\", \"one\", \"two\", \"tree\", \"for\", \"[unk]\"]";
+        _grammar = "[\"punch\", \"jab\", \"flank\", \"frank\", \"hook\", \"block\", \"guard\", \"cage\", \"page\", \"engage\", \"crush\", \"crash\", \"left\", \"right\"]";
 
         Debug.Log("<color=cyan>VOSK GRAMMAR:</color> Locked to combat + combo-number words (one/two/tree/for).");
     }
@@ -192,14 +194,16 @@ public class VoskSpeechToText : MonoBehaviour
 
     void Update()
     {
-        // Fire Final Results
-        if (_threadedResultQueue.TryDequeue(out string voiceResult))
+        // Drain final results — don't let them queue up between frames
+        while (_threadedResultQueue.TryDequeue(out string voiceResult))
         {
             OnTranscriptionResult?.Invoke(voiceResult);
         }
 
-        // Fire Partial Results (Fast)
-        if (_threadedPartialQueue.TryDequeue(out string partialResult))
+        // Drain partials. Vosk emits one partial per audio frame as a word forms
+        // ("br" → "bre" → "brea" → "break") so multiple can arrive in a single
+        // Unity frame. Fire all of them — HandlePartialResult dedupes by word.
+        while (_threadedPartialQueue.TryDequeue(out string partialResult))
         {
             LastPartial     = partialResult;
             LastPartialTime = Time.time;
@@ -233,26 +237,49 @@ public class VoskSpeechToText : MonoBehaviour
             _recognizerReady = true;
         }
 
+        float lastLatticeReset = Time.time;
+        const float IDLE_RESET_INTERVAL = 2.0f;   // flush lattice every 2s of idle time
+        const float IDLE_PARTIAL_THRESHOLD = 0.5f; // no partials for 0.5s = idle
+
         while (_running)
         {
             // Drain ALL pending frames per Update instead of one.
             // Without this, a single slow frame causes audio to pile up and
             // recognition falls progressively further behind real-time.
             int processed = 0;
-            while (_threadedBufferQueue.TryDequeue(out short[] voiceResult) && processed < 12)
+            while (_threadedBufferQueue.TryDequeue(out short[] voiceResult) && processed < 32)
             {
                 processed++;
                 if (_recognizer.AcceptWaveform(voiceResult, voiceResult.Length))
                 {
                     _threadedResultQueue.Enqueue(_recognizer.Result());
+                    _lastEnqueuedPartial = "";   // recognizer state reset — clear dedupe
+                    lastLatticeReset = Time.time;
                 }
                 else
                 {
                     var partial = _recognizer.PartialResult();
-                    if (partial.Length > 14)
+                    if (partial.Length > 14 && partial != _lastEnqueuedPartial)
+                    {
                         _threadedPartialQueue.Enqueue(partial);
+                        _lastEnqueuedPartial = partial;
+                    }
                 }
             }
+
+            // Periodic idle reset: Vosk's internal lattice grows with every
+            // AcceptWaveform until Result()/FinalResult() is called. Background
+            // music can keep Vosk from ever hitting its silence threshold, so
+            // we force a reset during idle gaps. Without this, recognition
+            // gets progressively slower as the round drags on.
+            if (Time.time - lastLatticeReset > IDLE_RESET_INTERVAL &&
+                Time.time - LastPartialTime  > IDLE_PARTIAL_THRESHOLD)
+            {
+                _recognizer.FinalResult();
+                _lastEnqueuedPartial = "";
+                lastLatticeReset = Time.time;
+            }
+
             yield return null;
         }
     }

@@ -26,6 +26,10 @@ public class CardManager : NetworkBehaviour
     [SyncVar] public int attackSlotsRemaining  = 3;
     [SyncVar] public int defenseSlotsRemaining = 2;
 
+    // ── Same-card cooldown (blocks reusing the last-used card next window) ─
+    [SyncVar] public string justUsedTrigger = "";  // set when a card is consumed this window
+    [SyncVar] public string blockedTrigger  = "";  // the trigger blocked during the NEXT window
+
     private int _cfgAttack  = 3;
     private int _cfgDefense = 2;
 
@@ -102,6 +106,9 @@ public class CardManager : NetworkBehaviour
         bool isRhythm = RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive;
         if (!isRhythm) return IsAttackTrigger(trigger) || IsDefenseTrigger(trigger);
 
+        // Block the last-used card for one full input window
+        if (trigger == blockedTrigger) return false;
+
         if (trigger.StartsWith("Combo"))
         {
             CombatCard card = GetCardInHand(trigger);
@@ -146,6 +153,11 @@ public class CardManager : NetworkBehaviour
         {
             defenseSlotsRemaining = Mathf.Max(0, defenseSlotsRemaining - 1);
         }
+
+        // Record for next-window cooldown — only during active single-move rhythm rounds
+        var rmm = RhythmRoundManager.Instance;
+        if (rmm != null && rmm.isRoundActive && rmm.IsSingleMoveMode() && !trigger.StartsWith("Combo"))
+            justUsedTrigger = trigger;
     }
 
     [Server]
@@ -161,8 +173,18 @@ public class CardManager : NetworkBehaviour
     [Server]
     public void ResetSlots()
     {
+        blockedTrigger    = "";
+        justUsedTrigger   = "";
         attackSlotsRemaining  = attackSlotsTotal;
         defenseSlotsRemaining = defenseSlotTotal;
+    }
+
+    // Called every beat by RhythmRoundManager to roll the cooldown forward one window
+    [Server]
+    public void AdvanceCooldown()
+    {
+        blockedTrigger  = justUsedTrigger;
+        justUsedTrigger = "";
     }
 
     [Command]
@@ -315,18 +337,20 @@ public class CardManager : NetworkBehaviour
             {
                 int libIdx = cardLibrary.FindIndex(c => c.triggerName == defCards[i] && !c.isCombo);
                 if (libIdx < 0) continue;
-                float alpha = (defenseSlotsRemaining > 0 && !inputLocked) ? 1f : 0.30f;
+                bool isBlocked = (defCards[i] == blockedTrigger);
+                float alpha = isBlocked ? 0.18f : ((defenseSlotsRemaining > 0 && !inputLocked) ? 1f : 0.30f);
                 Rect r = new Rect(defStartX + i * (nWidth + nSpace), baseY, nWidth, nHeight);
-                DrawCard(r, cardLibrary[libIdx], isRhythm, approachFrac, isShout, pulse, alpha);
+                DrawCard(r, cardLibrary[libIdx], isRhythm, approachFrac, isShout, pulse, alpha, isBlocked);
             }
 
             for (int i = 0; i < atkCards.Length; i++)
             {
                 int libIdx = cardLibrary.FindIndex(c => c.triggerName == atkCards[i] && !c.isCombo);
                 if (libIdx < 0) continue;
-                float alpha = (attackSlotsRemaining > 0 && !inputLocked) ? 1f : 0.30f;
+                bool isBlocked = (atkCards[i] == blockedTrigger);
+                float alpha = isBlocked ? 0.18f : ((attackSlotsRemaining > 0 && !inputLocked) ? 1f : 0.30f);
                 Rect r = new Rect(atkStartX + i * (nWidth + nSpace), baseY, nWidth, nHeight);
-                DrawCard(r, cardLibrary[libIdx], isRhythm, approachFrac, isShout, pulse, alpha);
+                DrawCard(r, cardLibrary[libIdx], isRhythm, approachFrac, isShout, pulse, alpha, isBlocked);
             }
 
             float pipY = Screen.height - nHeight - 60f + hoverY - 36f;
@@ -618,7 +642,7 @@ public class CardManager : NetworkBehaviour
     }
 
     private void DrawCard(Rect r, CombatCard card, bool isRhythm,
-                          float approachFrac, bool isShout, float pulse, float alpha)
+                          float approachFrac, bool isShout, float pulse, float alpha, bool isBlocked = false)
     {
         // Background
         Color bgBase = new Color(0.04f, 0.04f, 0.09f, 0.90f * alpha);
@@ -697,7 +721,7 @@ public class CardManager : NetworkBehaviour
         GUI.Label(new Rect(r.x, r.y + 8f, r.width, 34f), card.cardName, _titleStyle);
         GUI.Label(new Rect(r.x + 5f, r.y + 46f, r.width - 10f, 54f), card.description, _descStyle);
 
-        if (isRhythm)
+        if (isRhythm && !isBlocked)
         {
             string stateText;
             Color  stateCol;
@@ -720,6 +744,28 @@ public class CardManager : NetworkBehaviour
             }
             _statusStyle.normal.textColor = stateCol;
             GUI.Label(new Rect(r.x, r.y + r.height - 30f, r.width, 24f), stateText, _statusStyle);
+        }
+
+        // Blocked overlay — drawn last so it sits on top of everything
+        if (isBlocked)
+        {
+            GUI.color = new Color(0f, 0f, 0f, 0.72f);
+            GUI.DrawTexture(r, _whiteTex);
+
+            // Diagonal cross lines
+            float cx = r.x + r.width  / 2f;
+            float cy = r.y + r.height / 2f;
+            float lineLen = Mathf.Min(r.width, r.height) * 0.38f;
+            float thick   = 3f;
+            GUI.color = new Color(0.9f, 0.15f, 0.15f, 0.85f);
+            GUI.DrawTexture(new Rect(cx - lineLen, cy - thick / 2f, lineLen * 2f, thick), _whiteTex);
+            GUI.DrawTexture(new Rect(cx - thick / 2f, cy - lineLen, thick, lineLen * 2f), _whiteTex);
+
+            GUIStyle coolStyle = new GUIStyle(GUI.skin.label)
+                { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 13 };
+            coolStyle.normal.textColor = new Color(1f, 0.25f, 0.25f, 0.95f);
+            GUI.color = Color.white;
+            GUI.Label(new Rect(r.x, r.y + r.height - 38f, r.width, 22f), "COOLDOWN", coolStyle);
         }
     }
 

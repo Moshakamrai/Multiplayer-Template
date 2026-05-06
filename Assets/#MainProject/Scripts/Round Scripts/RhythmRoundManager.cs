@@ -381,6 +381,7 @@ public class RhythmRoundManager : NetworkBehaviour
         EvaluateAndSendFeedback(p2, m2);
 
         // --- COMBO MODE: timing-clash only, no RPS ---
+        // Only the player with better timing (smaller offset from the beat) deals damage.
         if (!IsSingleMoveMode())
         {
             float beatTime = GetNextBeatTime();
@@ -390,23 +391,32 @@ public class RhythmRoundManager : NetworkBehaviour
             int dmgFrom1 = p1.lastVocalSpikeTime > 0f ? ComputeComboDamage(m1.attack, p1Off) : 0;
             int dmgFrom2 = p2.lastVocalSpikeTime > 0f ? ComputeComboDamage(m2.attack, p2Off) : 0;
 
-            if (dmgFrom1 > 0)
+            if (p1Off < p2Off && dmgFrom1 > 0)
             {
+                // p1 wins the timing clash — only p2 takes damage
                 if (p1.connectionToClient != null) p1.TargetPlaySuccessSound("Attack");
                 if (p2.connectionToClient != null) p2.TargetPlaySuccessSound("Hurt");
                 PlayHitParticle(p2.transform.position);
                 p2.TakeDamage(dmgFrom1, (p2.transform.position - p1.transform.position).normalized);
+                RpcLogCombatTrade(pc1.PlayerName, FormatMove(m1), 1, 0,
+                                  pc2.PlayerName, FormatMove(m2), -1, dmgFrom1);
             }
-            if (dmgFrom2 > 0)
+            else if (p2Off < p1Off && dmgFrom2 > 0)
             {
+                // p2 wins the timing clash — only p1 takes damage
                 if (p2.connectionToClient != null) p2.TargetPlaySuccessSound("Attack");
                 if (p1.connectionToClient != null) p1.TargetPlaySuccessSound("Hurt");
                 PlayHitParticle(p1.transform.position);
                 p1.TakeDamage(dmgFrom2, (p1.transform.position - p2.transform.position).normalized);
+                RpcLogCombatTrade(pc1.PlayerName, FormatMove(m1), -1, dmgFrom2,
+                                  pc2.PlayerName, FormatMove(m2), 1, 0);
             }
-
-            RpcLogCombatTrade(pc1.PlayerName, FormatMove(m1), dmgFrom1 > 0 ? 1 : (dmgFrom2 > 0 ? -1 : 0), dmgFrom2,
-                              pc2.PlayerName, FormatMove(m2), dmgFrom2 > 0 ? 1 : (dmgFrom1 > 0 ? -1 : 0), dmgFrom1);
+            else
+            {
+                // Tie or both missed — no damage
+                RpcLogCombatTrade(pc1.PlayerName, FormatMove(m1), 0, 0,
+                                  pc2.PlayerName, FormatMove(m2), 0, 0);
+            }
             return;
         }
 
@@ -751,12 +761,15 @@ public class RhythmRoundManager : NetworkBehaviour
                 }
                 pc.IsParryActive = false;
 
-                // 3. Stagger management
+                // 3. Stagger management + per-beat cooldown roll
                 if (isServer)
                 {
                     CardManager cm = player.GetComponent<CardManager>();
                     if (pc != null && cm != null)
                     {
+                        // Roll the same-card cooldown forward: justUsed → blocked, clear justUsed
+                        if (IsSingleMoveMode()) cm.AdvanceCooldown();
+
                         if (pc.IsStaggered)
                         {
                             // Count down dedicated stagger beat counter; clear when it expires

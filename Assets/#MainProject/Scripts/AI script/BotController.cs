@@ -34,7 +34,7 @@ public class BotController : NetworkBehaviour
                 string move = pool[Random.Range(0, pool.Length)];
                 _combat._comboBuffer.Add(new PlayerCombat.RhythmAction { attack = move, dash = Vector3.zero });
             }
-            _combat.lastVocalSpikeTime = rmm.GetNextBeatTime() - Random.Range(0.05f, 0.21f);
+            _combat.lastVocalSpikeTime = rmm.GetNextBeatTime() - Random.Range(0.3f, 0.7f);
             return;
         }
 

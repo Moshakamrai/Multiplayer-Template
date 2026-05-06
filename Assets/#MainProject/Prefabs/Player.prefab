@@ -620,6 +620,8 @@ GameObject:
   - component: {fileID: 271289335390154355}
   - component: {fileID: 1151712140726684061}
   - component: {fileID: 664431552623705391}
+  - component: {fileID: 5356967899108748255}
+  - component: {fileID: 4735511408158851343}
   m_Layer: 0
   m_Name: Player
   m_TagString: Player
@@ -892,7 +894,7 @@ MonoBehaviour:
     isCombo: 0
     comboChainLength: 0
     comboAttacks: []
-  - cardName: BREAK
+  - cardName: HOOK
     triggerName: Hook
     description: Heavy side-swing. High damage and grants bonus Energy.
     isCombo: 0
@@ -932,6 +934,48 @@ MonoBehaviour:
   defenseSlotTotal: 2
   attackSlotsRemaining: 3
   defenseSlotsRemaining: 2
+  justUsedTrigger: 
+  blockedTrigger: 
+--- !u!114 &5356967899108748255
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8718707839533561219}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ea78bcff39d5f954088e91a0104140cf, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  BloodFX:
+  - {fileID: 2656253210798625995, guid: a78e9ef18b366424b84e0c7410d2fe72, type: 3}
+  - {fileID: 5865290276592450837, guid: 42a28376f729c864a81abf66add7a418, type: 3}
+  - {fileID: 764304066602274965, guid: 4a322f29a9e1fa54f90223de8bcf3a28, type: 3}
+  - {fileID: 7935733108997359171, guid: e822d59151d3597428b0b63bf25355e7, type: 3}
+  - {fileID: 4288107571095694937, guid: c3f8938673a07704e93ac52eee18f410, type: 3}
+  - {fileID: 1165703760847671896, guid: bb596cd440832554089a7125852e836f, type: 3}
+  - {fileID: 4152240900433254336, guid: 6d3629f845b40e24fb51d381e84bbc77, type: 3}
+  - {fileID: 6463355840203370170, guid: 70ead61ff20b23b4e97b90d8e8997ecd, type: 3}
+  BloodAttach: {fileID: 3136605153214515430, guid: 45eef0a861a8a8946b4c23fb9f4f779a, type: 3}
+  DirLight: {fileID: 0}
+  HeightOffset: 1.4
+  EffectScale: 2
+--- !u!114 &4735511408158851343
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8718707839533561219}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1f7ad7edbe40f2440ab1095a5f737cc4, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  VoskInstance: {fileID: 8869197606853308541}
+  ShowDebug: 1
+  ToggleKey: 283
 --- !u!1 &8782005603362053964
 GameObject:
   m_ObjectHideFlags: 0

@@ -10,6 +10,7 @@ public class VoiceCommandManager : NetworkBehaviour
     public Text OutputText;
     private string _previousPartialText = "";
     private string _lastProcessedWord   = "";
+    private string _pendingRetryWord    = ""; // word blocked by dead zone — retried every frame
     private float  _echoGuardUntil      = -999f; // suppresses shout echo after beat execution
     private const float EXECUTION_ECHO_GUARD = 0.6f;
     private PlayerController _myController;
@@ -19,7 +20,7 @@ public class VoiceCommandManager : NetworkBehaviour
     private CardManager _myCards; // Add this reference
 
     [Header("Parry Settings")]
-    public float parryVolumeThreshold = 0.4f;
+    public float parryVolumeThreshold = 0.25f;
 
     void Start()
     {
@@ -38,7 +39,17 @@ public class VoiceCommandManager : NetworkBehaviour
         }
     }
 
-    // Update HandlePartialResult in VoiceCommandManager.cs
+    void Update()
+    {
+        if (string.IsNullOrEmpty(_pendingRetryWord)) return;
+        bool consumed = ProcessWords(_pendingRetryWord);
+        if (consumed)
+        {
+            _lastProcessedWord = _pendingRetryWord;
+            _pendingRetryWord = "";
+        }
+    }
+
     void HandlePartialResult(string jsonResult)
     {
         if (!Application.isFocused) return;
@@ -60,14 +71,23 @@ public class VoiceCommandManager : NetworkBehaviour
         if (newestWord != _lastProcessedWord)
         {
             bool consumed = ProcessWords(newestWord);
-            if (consumed) _lastProcessedWord = newestWord;
+            if (consumed)
+            {
+                _lastProcessedWord = newestWord;
+                _pendingRetryWord = "";
+            }
+            else
+            {
+                _pendingRetryWord = newestWord; // blocked by dead zone — retry every frame
+            }
         }
     }
 
-    void HandleFinalResult(string jsonResult) 
+    void HandleFinalResult(string jsonResult)
     {
         _previousPartialText = "";
-        _lastProcessedWord = ""; // Reset the tracker for the next sentence
+        _lastProcessedWord = "";
+        _pendingRetryWord = "";
     }
 
     [Command]
@@ -139,9 +159,9 @@ public class VoiceCommandManager : NetworkBehaviour
                 continue;
             }
 
-            if (GetSimilarity(word, "punch") > 0.78f ) { trigger = "Jab"; recognized = true; }
+            if (GetSimilarity(word, "punch") > 0.7f ) { trigger = "Jab"; recognized = true; }
             else if (word == "flank" || word == "blank" || word == "frank" || GetSimilarity(word, "flank") > 0.75f) { trigger = "Cross"; recognized = true; }
-            else if (word == "break" || word == "brake" || GetSimilarity(word, "break") > 0.75f) { trigger = "Hook"; recognized = true; }
+            else if (GetSimilarity(word, "hook") > 0.75f) { trigger = "Hook"; recognized = true; }
             else if (GetSimilarity(word, "block") > 0.75f || GetSimilarity(word, "guard") > 0.75f) { trigger = "Block"; recognized = true; }
             else if (GetSimilarity(word, "cage") > 0.70f || word == "page" || word == "engage") { trigger = "ParryIntent"; recognized = true; }
             else if (word == "crush" || word == "crash" || word == "crushing" || word == "crashing" || GetSimilarity(word, "crush") > 0.75f) { trigger = "UnbreakablePunch"; recognized = true; }

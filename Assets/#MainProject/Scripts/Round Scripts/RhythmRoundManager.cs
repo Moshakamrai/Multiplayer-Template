@@ -38,7 +38,8 @@ public class RhythmRoundManager : NetworkBehaviour
     private List<float> _upcomingImpacts = new List<float>();
     private List<int> _clusterSizes = new List<int>();
 
-    private bool _heavyHitThisBeat = false;
+    private bool _heavyHitThisBeat  = false;
+    private bool _tiebreakerPaused  = false;
     private Texture2D _whiteTex;
 
 
@@ -225,6 +226,7 @@ public class RhythmRoundManager : NetworkBehaviour
     private void Update()
     {
         if (!isRoundActive || _startTime == 0) return;
+        if (_tiebreakerPaused) return;
 
         // --- NEW: DEATH CHECK ---
         // The round now only ends if someone is dead
@@ -274,6 +276,23 @@ public class RhythmRoundManager : NetworkBehaviour
                             pc.ExecuteRhythmWindUp();
                         }
                     }
+
+                    // Check for same-move tie BEFORE animations fire (in wind-up, not impact)
+                    if (IsSingleMoveMode())
+                    {
+                        var playerList = new List<PlayerController>(GameManager.players);
+                        if (playerList.Count >= 2)
+                        {
+                            var m1 = playerList[0].GetComponent<PlayerCombat>().PeekNextMove();
+                            var m2 = playerList[1].GetComponent<PlayerCombat>().PeekNextMove();
+                            if (!string.IsNullOrEmpty(m1.attack) && m1.attack == m2.attack)
+                            {
+                                _tiebreakerPaused = true;
+                                TiebreakerManager.Instance?.StartTiebreaker();
+                                return; // skip impact — tiebreaker handles it
+                            }
+                        }
+                    }
                 }
 
                 // Impact Logic
@@ -305,7 +324,10 @@ public class RhythmRoundManager : NetworkBehaviour
                             customIsCombo = (currentComboCount > 1);
                     }
 
-                    RpcTriggerHitStop(_heavyHitThisBeat);
+                    // Skip hit-stop when tiebreaker just triggered — its HitStopRoutine
+                    // would reset Time.timeScale to 1.0 and cancel the slow-mo.
+                    if (!_tiebreakerPaused)
+                        RpcTriggerHitStop(_heavyHitThisBeat);
                     _heavyHitThisBeat = false;
                 }
             }
@@ -1056,6 +1078,8 @@ public class RhythmRoundManager : NetworkBehaviour
 
    private void OnGUI()
     {
+        if (TiebreakerManager.Instance != null && TiebreakerManager.Instance.IsTiebreakerActive) return;
+
         // --- 1. SERVER CONTROLS (Top Left) ---
         if (NetworkServer.active && isServer)
         {
@@ -1217,6 +1241,39 @@ public class RhythmRoundManager : NetworkBehaviour
     }
 
     public int GetNextClusterSize() => _clusterSizes.Count > 0 ? _clusterSizes[0] : 1;
+
+    // Called by TiebreakerManager when the segment ends.
+    // Consumes the tied beat, shifts the timeline so beats stay in sync with the
+    // music (which was paused during the tiebreaker), then opens a fresh input window.
+    [Server]
+    public void ResumeAfterTiebreaker(float realSecondsElapsed)
+    {
+        // Consume the beat that triggered the tiebreaker
+        if (_upcomingImpacts.Count > 0) _upcomingImpacts.RemoveAt(0);
+        if (_clusterSizes.Count  > 0)  _clusterSizes.RemoveAt(0);
+
+        // Shift _startTime forward by the real time spent in the tiebreaker so
+        // NetworkTime.time - _startTime stays aligned with the audio source position.
+        _startTime += realSecondsElapsed;
+
+        lastBeatFireTime       = 0f;
+        _isWindUpFired         = false;
+        currentChainPosition   = 0;
+        _clusterBeatsLeftToFire = _clusterSizes.Count > 0 ? _clusterSizes[0] : 1;
+
+        // Reset all player states cleanly — same as the non-damage path in ExecutePulseImpact
+        foreach (var player in GameManager.players)
+        {
+            if (player == null) continue;
+            PlayerCombat pc = player.GetComponent<PlayerCombat>();
+            pc.ConsumeNextMove();
+            pc.lastVocalSpikeTime   = -1f;
+            pc.lastVocalSpikeVolume = 0f;
+            pc.IsParryActive        = false;
+        }
+
+        _tiebreakerPaused = false;
+    }
 
     [TargetRpc]
     public void TargetPlaySuccessSound(string type)

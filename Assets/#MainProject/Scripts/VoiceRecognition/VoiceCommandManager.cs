@@ -56,6 +56,13 @@ public class VoiceCommandManager : NetworkBehaviour
 
         string currentText = ParsePartialJson(jsonResult).ToLower().Trim();
         if (string.IsNullOrEmpty(currentText)) return;
+
+        // Forward to tiebreaker word detection — skip normal command processing
+        if (TiebreakerManager.Instance != null && TiebreakerManager.Instance.IsTiebreakerActive)
+        {
+            TiebreakerManager.Instance.OnHumanVoicePartial(currentText);
+            return;
+        }
         
         // Update the UI instantly so it feels responsive
         if (InputText != null) InputText.text = currentText;
@@ -105,6 +112,7 @@ public class VoiceCommandManager : NetworkBehaviour
     bool ProcessWords(string segment)
     {
         if (_myCombat.IsHurting || _myCombat.IsDead || _myCombat.IsStaggered) return true;
+        if (TiebreakerManager.Instance != null && TiebreakerManager.Instance.IsTiebreakerActive) return true;
         string lowerSegment = segment.ToLower().Trim();
         bool isRhythm = RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive;
 

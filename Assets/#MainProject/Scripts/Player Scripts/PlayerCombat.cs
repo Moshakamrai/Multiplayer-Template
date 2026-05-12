@@ -113,6 +113,7 @@ public class PlayerCombat : NetworkBehaviour
             CheckLocalParryTiming();
             if (IsStaggered) UpdateStaggerRecovery();
             else             { _staggerRecoveryCharge = 0f; _wasStaggered = false; }
+
         }
 
         if (!isLocalPlayer || IsDead || IsHurting) return;
@@ -226,7 +227,7 @@ public class PlayerCombat : NetworkBehaviour
         {
             // Quadratic scale from threshold — loud shouting charges significantly faster
             float volScale = Mathf.Clamp01((vol - STAGGER_CHARGE_VOL_MIN) / (1f - STAGGER_CHARGE_VOL_MIN));
-            _staggerRecoveryCharge = Mathf.Min(1f, _staggerRecoveryCharge + _dynamicStaggerRate * (0.25f + 0.75f * volScale * volScale) * Time.deltaTime * 3f);
+            _staggerRecoveryCharge = Mathf.Min(1f, _staggerRecoveryCharge + _dynamicStaggerRate * (0.25f + 0.75f * volScale * volScale) * Time.deltaTime * 3f * 1.8f);
             if (_staggerRecoveryCharge >= 1f)
             {
                 _staggerRecoveryCharge = 0f;
@@ -579,6 +580,7 @@ public class PlayerCombat : NetworkBehaviour
     private void OnGUI()
     {
         if (!isLocalPlayer) return;
+        if (TiebreakerManager.Instance != null && TiebreakerManager.Instance.IsTiebreakerActive) return;
 
         // --- INITIALIZE TEXTURE ---
         if (_whiteTexture == null)
@@ -588,37 +590,61 @@ public class PlayerCombat : NetworkBehaviour
             _whiteTexture.Apply();
         }
 
-        // --- STAGGER RECOVERY PANEL (right side, above MIC monitor) ---
+        // --- STAGGER RECOVERY PANEL (enhanced visual) ---
         var _staggerRmm = RhythmRoundManager.Instance;
         if (IsStaggered && _staggerRmm != null && _staggerRmm.isRoundActive)
         {
-            float sw = 260f, sh = 150f;
-            float sx = Screen.width  - sw - 20f;   // right-aligned with MIC monitor
-            float sy = Screen.height - 140f - 20f - sh - 12f; // 12px gap above MIC monitor
+            float sw = 420f, sh = 220f;
+            float sx = Screen.width / 2 - sw / 2;   // centered
+            float sy = Screen.height / 2 - 100f;     // centered-upper area
 
-            // Dark red panel background
-            GUI.color = new Color(0.55f, 0f, 0f, 0.82f);
+            // Dark gradient background panel
+            GUI.color = new Color(0.15f, 0.05f, 0.05f, 0.95f);
             GUI.DrawTexture(new Rect(sx, sy, sw, sh), _whiteTexture);
+
+            // Bright red border glow
+            GUI.color = new Color(1f, 0.2f, 0.2f, 0.6f);
+            GUI.DrawTexture(new Rect(sx - 2f, sy - 2f, sw + 4f, 4f), _whiteTexture);
+            GUI.DrawTexture(new Rect(sx - 2f, sy + sh - 2f, sw + 4f, 4f), _whiteTexture);
+            GUI.DrawTexture(new Rect(sx - 2f, sy, 4f, sh), _whiteTexture);
+            GUI.DrawTexture(new Rect(sx + sw - 2f, sy, 4f, sh), _whiteTexture);
+
             GUI.color = Color.white;
 
+            // Title with pulsing effect
+            float titlePulse = (Mathf.Sin(Time.time * 3f) + 1f) * 0.5f;
             GUIStyle staggerTitle = new GUIStyle(GUI.skin.label)
-                { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 20 };
-            staggerTitle.normal.textColor = Color.white;
-            GUI.Label(new Rect(sx, sy + 6f, sw, 34f), "!! STAGGERED !!", staggerTitle);
+                { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 36 };
+            Color titleColor = Color.Lerp(Color.white, new Color(1f, 0.3f, 0.3f), titlePulse * 0.5f);
+            staggerTitle.normal.textColor = titleColor;
+            GUI.Label(new Rect(sx, sy + 12f, sw, 50f), "⚠ STAGGERED ⚠", staggerTitle);
 
-            // Recovery bar
-            float bx = sx + 20f, bw = sw - 40f, bh = 26f, by = sy + 50f;
-            GUI.color = new Color(0.12f, 0.12f, 0.12f, 0.95f);
-            GUI.DrawTexture(new Rect(bx, by, bw, bh), _whiteTexture);
-            GUI.color = Color.Lerp(new Color(1f, 0.25f, 0.25f), new Color(0.1f, 1f, 0.45f), _staggerRecoveryCharge);
+            // Recovery bar container (larger)
+            float bx = sx + 30f, bw = sw - 60f, bh = 50f, by = sy + 75f;
+
+            // Dark bar background
+            GUI.color = new Color(0.08f, 0.08f, 0.08f, 1f);
+            GUI.DrawTexture(new Rect(bx - 3f, by - 3f, bw + 6f, bh + 6f), _whiteTexture);
+
+            // Bar fill with gradient effect
+            GUI.color = Color.Lerp(new Color(1f, 0.1f, 0.1f), new Color(0f, 1f, 0.3f), _staggerRecoveryCharge);
             GUI.DrawTexture(new Rect(bx, by, bw * _staggerRecoveryCharge, bh), _whiteTexture);
+
+            // Bar border
+            GUI.color = Color.Lerp(new Color(1f, 0.3f, 0.3f), new Color(0.3f, 1f, 0.5f), _staggerRecoveryCharge);
+            GUI.DrawTexture(new Rect(bx, by, bw, 2f), _whiteTexture);
+            GUI.DrawTexture(new Rect(bx, by + bh - 2f, bw, 2f), _whiteTexture);
+            GUI.DrawTexture(new Rect(bx, by, 2f, bh), _whiteTexture);
+            GUI.DrawTexture(new Rect(bx + bw - 2f, by, 2f, bh), _whiteTexture);
+
+            // Bar label with percentage
             GUI.color = Color.white;
             GUIStyle barLbl = new GUIStyle(GUI.skin.label)
-                { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 13 };
+                { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 20 };
             barLbl.normal.textColor = Color.white;
-            GUI.Label(new Rect(bx, by, bw, bh), "SHOUT TO RECOVER", barLbl);
+            GUI.Label(new Rect(bx, by, bw, bh), $"SHOUT: {(_staggerRecoveryCharge * 100f):F0}%", barLbl);
 
-            // Timing escape hint
+            // Timing escape hint (larger)
             float nextBeat  = _staggerRmm.GetNextBeatTime();
             float trackTime = _staggerRmm.GetCurrentTrackTime();
             float timeToNext = nextBeat - trackTime;
@@ -626,26 +652,27 @@ public class PlayerCombat : NetworkBehaviour
             float pulse      = (Mathf.Sin(Time.time * 12f) + 1f) * 0.5f;
 
             GUIStyle hintLbl = new GUIStyle(GUI.skin.label)
-                { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 12 };
+                { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 18 };
 
             if (inWindow)
             {
-                hintLbl.normal.textColor = Color.Lerp(new Color(0.2f, 1f, 0.5f), Color.white, pulse * 0.4f);
-                GUI.Label(new Rect(sx, sy + 90f, sw, 28f), ">> SHOUT NOW — ESCAPE! <<", hintLbl);
+                hintLbl.normal.textColor = Color.Lerp(new Color(0.1f, 1f, 0.4f), Color.white, pulse);
+                GUI.Label(new Rect(sx + 20f, sy + 145f, sw - 40f, 40f), "🔊 SHOUT NOW — ESCAPE! 🔊", hintLbl);
             }
             else
             {
-                hintLbl.normal.textColor = new Color(1f, 1f, 0.35f, 0.8f);
-                GUI.Label(new Rect(sx, sy + 90f, sw, 28f),
-                    nextBeat > 0f ? $"time your shout: {timeToNext:F1}s" : "SHOUT TO RECOVER", hintLbl);
+                hintLbl.normal.textColor = new Color(1f, 1f, 0.5f, 0.9f);
+                string hint = nextBeat > 0f ? $"⏱ Shout timing in: {timeToNext:F1}s" : "🎤 KEEP SHOUTING!";
+                GUI.Label(new Rect(sx + 20f, sy + 145f, sw - 40f, 40f), hint, hintLbl);
             }
 
-            // Thin border
-            GUI.color = new Color(0.9f, 0.2f, 0.2f, 0.7f);
-            GUI.DrawTexture(new Rect(sx,         sy,           sw,   2f), _whiteTexture);
-            GUI.DrawTexture(new Rect(sx,         sy + sh - 2f, sw,   2f), _whiteTexture);
-            GUI.DrawTexture(new Rect(sx,         sy,           2f,   sh), _whiteTexture);
-            GUI.DrawTexture(new Rect(sx + sw-2f, sy,           2f,   sh), _whiteTexture);
+            // Volume indicator (new visual element)
+            float vol = vp != null ? vp.CurrentRawVolume : 0f;
+            GUIStyle volStyle = new GUIStyle(GUI.skin.label)
+                { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 14 };
+            volStyle.normal.textColor = vol >= STAGGER_CHARGE_VOL_MIN ? new Color(0f, 1f, 0.5f) : new Color(1f, 0.6f, 0.2f);
+            GUI.Label(new Rect(sx, sy + 190f, sw, 25f), $"MIC: {vol:F2} (Min: {STAGGER_CHARGE_VOL_MIN:F2})", volStyle);
+
             GUI.color = Color.white;
         }
 
@@ -698,29 +725,59 @@ public class PlayerCombat : NetworkBehaviour
             }
         }
 
-        // --- 2. VOLUME DEBUGGER (Bottom Right) ---
+        // --- 2. MIC THRESHOLD (Middle Right, Above Cards) ---
         if (vp != null)
         {
             float vol = vp.CurrentRawVolume;
             float thr = (_vcm != null) ? _vcm.parryVolumeThreshold : 0.4f;
-            float width = 260f; float height = 140f;
-            float pX = Screen.width - width - 20f; float pY = Screen.height - 260f - height - 10f;
+            float w = 240f;
+            float h = 100f;
+            float mx = Screen.width - w - 20f;
+            float my = Screen.height / 2f - 150f;
 
-            GUI.Box(new Rect(pX, pY, width, height), "");
-            GUILayout.BeginArea(new Rect(pX + 10f, pY + 10f, width - 20f, height - 20f));
-            GUI.color = vol >= thr ? Color.green : Color.yellow;
-            GUILayout.Label("<b>--- MIC MONITOR ---</b>");
-            GUILayout.HorizontalSlider(vol, 0f, 1f, GUILayout.Width(200));
-            GUILayout.Label($"VOL: {vol:F3} / THR: {thr:F3}");
-            if (vol >= thr) GUILayout.Label("<color=green>!!! SPIKE DETECTED !!!</color>");
-            GUILayout.EndArea();
+            // Background
+            GUI.color = new Color(0.08f, 0.08f, 0.08f, 0.95f);
+            GUI.DrawTexture(new Rect(mx, my, w, h), _whiteTexture);
+
+            // Border
+            GUI.color = vol >= thr ? new Color(0f, 1f, 0.5f, 0.7f) : new Color(1f, 0.6f, 0.2f, 0.7f);
+            GUI.DrawTexture(new Rect(mx, my, w, 2f), _whiteTexture);
+            GUI.DrawTexture(new Rect(mx, my + h - 2f, w, 2f), _whiteTexture);
+            GUI.DrawTexture(new Rect(mx, my, 2f, h), _whiteTexture);
+            GUI.DrawTexture(new Rect(mx + w - 2f, my, 2f, h), _whiteTexture);
+
+            // Text
+            GUI.color = Color.white;
+            GUIStyle micStyle = new GUIStyle(GUI.skin.label)
+            { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 14 };
+            GUI.Label(new Rect(mx, my + 8f, w, 25f), "MIC LEVEL", micStyle);
+
+            GUIStyle volStyle = new GUIStyle(GUI.skin.label)
+            { alignment = TextAnchor.MiddleCenter, fontSize = 12 };
+            volStyle.normal.textColor = vol >= thr ? new Color(0f, 1f, 0.5f) : new Color(1f, 0.6f, 0.2f);
+            GUI.Label(new Rect(mx, my + 35f, w, 20f), $"{vol:F2} / {thr:F2}", volStyle);
+
+            // Bar
+            float barW = w - 20f;
+            float barX = mx + 10f;
+            float barY = my + 60f;
+            GUI.color = new Color(0.15f, 0.15f, 0.15f, 1f);
+            GUI.DrawTexture(new Rect(barX, barY, barW, 8f), _whiteTexture);
+            GUI.color = vol >= thr ? new Color(0f, 1f, 0.5f) : new Color(1f, 0.6f, 0.2f);
+            GUI.DrawTexture(new Rect(barX, barY, Mathf.Min(barW, vol * barW), 8f), _whiteTexture);
+
             GUI.color = Color.white;
         }
 
-        // --- 3. COMBAT QUEUE (Bottom Left) ---
+        // --- 3. COMBAT QUEUE (Middle Right) ---
         if (RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive)
         {
-            GUILayout.BeginArea(new Rect(20, Screen.height - 270, 350, 280));
+            float w = 280f;
+            float h = 200f;
+            float qx = Screen.width - w - 20f;
+            float qy = 140f;
+
+            GUILayout.BeginArea(new Rect(qx, qy, w, h));
             GUIStyle headerStyle = new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold, fontSize = 20 };
             headerStyle.normal.textColor = Color.green;
 

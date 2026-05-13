@@ -1986,8 +1986,99 @@ PrefabInstance:
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
-    m_AddedComponents: []
+    m_AddedComponents:
+    - targetCorrespondingSourceObject: {fileID: 8076579910483855927, guid: d18cf5e0a9e9c5a4b85fe2391358695a, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 1100840017}
+    - targetCorrespondingSourceObject: {fileID: 8076579910483855927, guid: d18cf5e0a9e9c5a4b85fe2391358695a, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 1100840016}
+    - targetCorrespondingSourceObject: {fileID: 8076579910483855927, guid: d18cf5e0a9e9c5a4b85fe2391358695a, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 1100840015}
+    - targetCorrespondingSourceObject: {fileID: 8076579910483855927, guid: d18cf5e0a9e9c5a4b85fe2391358695a, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 1100840014}
   m_SourcePrefab: {fileID: 100100000, guid: d18cf5e0a9e9c5a4b85fe2391358695a, type: 3}
+--- !u!1 &1100840013 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 8076579910483855927, guid: d18cf5e0a9e9c5a4b85fe2391358695a, type: 3}
+  m_PrefabInstance: {fileID: 1100840012}
+  m_PrefabAsset: {fileID: 0}
+--- !u!114 &1100840014
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1100840013}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 35aafdce6f12a174cbeeb31030843e06, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+--- !u!114 &1100840015
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1100840013}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ae321841a50168048bd08f12fe72f9a2, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  p1Deck: 
+  p2Deck: 
+  p1TraitId: -1
+  p2TraitId: -1
+  sharedSlots: []
+  p1ClassSlots: []
+  p2ClassSlots: []
+  p1BoughtThisPhase: 0
+  p2BoughtThisPhase: 0
+--- !u!114 &1100840016
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1100840013}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: be682cb8ee1a8fa4093cb09fb735f599, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  syncDirection: 0
+  syncMode: 0
+  syncInterval: 0
+  p1Credits: 0
+  p2Credits: 0
+--- !u!114 &1100840017
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1100840013}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 75de32035efb7d64783525c0dd015957, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  syncDirection: 0
+  syncMode: 0
+  syncInterval: 0
+  p1Wins: 0
+  p2Wins: 0
+  currentRound: 0
+  trackPickerIndex: -1
+  isPreRoundShop: 1
+  isMatchActive: 0
+  isInShopPhase: 0
+  isInTrackPickPhase: 0
+  lastRoundWinnerIndex: -1
 --- !u!1 &1164917603
 GameObject:
   m_ObjectHideFlags: 0
@@ -2618,6 +2709,7 @@ MonoBehaviour:
   syncMode: 0
   syncInterval: 0
   tiebreakerPostProcess: {fileID: 1743533283}
+  mainVolume: {fileID: 0}
   slowMoEnterSfx: {fileID: 0}
   IsTiebreakerActive: 0
 --- !u!4 &1363799218

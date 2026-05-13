@@ -1,4 +1,3 @@
-using Mirror;
 using UnityEngine;
 using UnityEngine.Rendering;
 using System.Collections;
@@ -7,7 +6,7 @@ using System.Collections.Generic;
 // Inspector setup:
 //   tiebreakerPostProcess — Volume named "TiebreakerVolume" (weight=0, ColorAdjustments sat=-100)
 //   Music pitch follows Time.timeScale automatically — no separate audio clip needed.
-public class TiebreakerManager : NetworkBehaviour
+public class TiebreakerManager : MonoBehaviour
 {
     public static TiebreakerManager Instance;
 
@@ -19,7 +18,7 @@ public class TiebreakerManager : NetworkBehaviour
     public AudioClip slowMoEnterSfx; // drag a whoosh/warp clip here
     private AudioSource _sfxSource;
 
-    [SyncVar] public bool IsTiebreakerActive = false;
+    public bool IsTiebreakerActive = false;
 
     // ── Word Burst config ──────────────────────────────────────────────────────
     private static readonly string[] WORD_POOL =
@@ -137,13 +136,6 @@ public class TiebreakerManager : NetworkBehaviour
         IsTiebreakerActive = true;
 
         ApplyTiebreakerEffects();
-        if (NetworkServer.active) RpcOnTiebreakerStart();
-    }
-
-    [ClientRpc]
-    private void RpcOnTiebreakerStart()
-    {
-        if (!_effectsApplied) ApplyTiebreakerEffects();
     }
 
     private void ApplyTiebreakerEffects()
@@ -224,7 +216,7 @@ public class TiebreakerManager : NetworkBehaviour
                 break;
 
             case Phase.WordActive:
-                if (NetworkServer.active && !_botSaidWord && _phaseTimer >= _botSayAtTime)
+                if (!_botSaidWord && _phaseTimer >= _botSayAtTime)
                 {
                     _botSaidWord = true;
                     _botOffsets.Add(Mathf.Abs(_botSayAtTime - _wordPeak));
@@ -400,13 +392,6 @@ public class TiebreakerManager : NetworkBehaviour
 
         RhythmRoundManager.Instance?.ResumeAfterTiebreaker(_totalRealElapsed);
 
-        RestoreTiebreakerEffects();
-        if (NetworkServer.active) RpcOnTiebreakerEnd();
-    }
-
-    [ClientRpc]
-    private void RpcOnTiebreakerEnd()
-    {
         RestoreTiebreakerEffects();
     }
 

@@ -5,8 +5,6 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 
-public enum RoundType { SlowRhythm, FastCombo, CustomTrack }
-
 public class RhythmRoundManager : NetworkBehaviour
 {
     public static RhythmRoundManager Instance;
@@ -200,6 +198,29 @@ public class RhythmRoundManager : NetworkBehaviour
     }
 
     [Server]
+    private void NotifyMatchManagerRoundEnd()
+    {
+        MatchManager mm = MatchManager.Instance;
+        if (mm == null) return;
+
+        var playerList = new List<PlayerController>(GameManager.players);
+        int winnerIndex = -1;
+
+        for (int i = 0; i < playerList.Count; i++)
+        {
+            if (playerList[i] == null) continue;
+            PlayerCombat pc = playerList[i].GetComponent<PlayerCombat>();
+            if (pc != null && pc.CurrentHealth > 0)
+            {
+                winnerIndex = i;
+                break;
+            }
+        }
+
+        mm.OnRoundEnded(winnerIndex);
+    }
+
+    [Server]
     public void StopRound()
     {
         isRoundActive = false;
@@ -240,6 +261,7 @@ public class RhythmRoundManager : NetworkBehaviour
         if (anyoneDead)
         {
             StopRound();
+            NotifyMatchManagerRoundEnd();
             return;
         }
 

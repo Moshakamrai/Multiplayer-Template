@@ -468,6 +468,19 @@ public override void Start()
     }
 
     /// <summary>
+    /// <summary>
+    /// Called on the server when a scene finishes loading for all clients.
+    /// Kicks off the match (pre-round shop + coin toss) once the game scene is active.
+    /// </summary>
+    public override void OnServerSceneChanged(string sceneName)
+    {
+        base.OnServerSceneChanged(sceneName);
+
+        // Only start the match when we've loaded into the game scene (not back to lobby)
+        if (sceneName == level && MatchManager.Instance != null)
+            MatchManager.Instance.StartMatch();
+    }
+
     /// Check if ready to start the game.
     /// </summary>
     private void ReadyToStart()

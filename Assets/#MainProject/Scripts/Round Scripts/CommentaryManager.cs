@@ -357,6 +357,7 @@ public class CommentaryManager : MonoBehaviour
     // ─────────────────────────────────────────────────────────────────────
     void OnGUI()
     {
+        if (RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isShopPhase) return;
         if (_state == State.Idle || _alpha < 0.01f) return;
 
         if (_px == null)

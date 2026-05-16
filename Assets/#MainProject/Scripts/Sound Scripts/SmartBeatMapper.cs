@@ -188,6 +188,7 @@ public class SmartBeatMapper : MonoBehaviour
     // ─────────────────────────────────────────────────────────────────────
     private void OnGUI()
     {
+        if (RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isShopPhase) return;
         if (audioSource == null || audioSource.clip == null) return;
         if (_vizTex == null)
         {

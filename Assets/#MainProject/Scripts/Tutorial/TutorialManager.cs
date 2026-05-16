@@ -674,6 +674,7 @@ public class TutorialManager : MonoBehaviour
     // ══════════════════════════════════════════════════════════════════════
     void OnGUI()
     {
+        if (RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isShopPhase) return;
         EnsureStyles();
         switch (CurrentStage)
         {

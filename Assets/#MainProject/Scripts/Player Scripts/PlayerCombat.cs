@@ -41,7 +41,40 @@ public class PlayerCombat : NetworkBehaviour
     [Command]
     public void CmdLockInShop()
     {
+        // Pre-round shop lock-in (pick 4 cards)
         RhythmRoundManager.Instance?.LockInShop(this);
+    }
+
+    [Command]
+    public void CmdLockInPostRoundShop()
+    {
+        var inv = GetComponent<PlayerInventory>();
+        if (inv != null)
+        {
+            // Post-round TFT shop lock-in
+            ShopPhaseManager.Instance?.LockInShop(inv);
+        }
+    }
+
+    [Command]
+    public void CmdBuyCombatCard(int slotIndex)
+    {
+        var inv = GetComponent<PlayerInventory>();
+        if (inv != null) ShopPhaseManager.Instance?.TryBuyCombatCard(inv, slotIndex);
+    }
+
+    [Command]
+    public void CmdBuyVexCard(int slotIndex)
+    {
+        var inv = GetComponent<PlayerInventory>();
+        if (inv != null) ShopPhaseManager.Instance?.TryBuyVexCard(inv, slotIndex);
+    }
+
+    [Command]
+    public void CmdBuyTraitCard(int slotIndex)
+    {
+        var inv = GetComponent<PlayerInventory>();
+        if (inv != null) ShopPhaseManager.Instance?.TryBuyTraitCard(inv, slotIndex);
     }
 
     [Header("VFX Settings")]

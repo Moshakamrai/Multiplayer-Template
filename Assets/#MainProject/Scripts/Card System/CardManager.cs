@@ -223,9 +223,41 @@ public class CardManager : NetworkBehaviour
         var rmm = RhythmRoundManager.Instance;
         if (rmm != null && rmm.isRoundActive && !rmm.IsSingleMoveMode()) return false;
 
-        // Shop filter: only allow cards picked in the pre-round shop
-        if (availableCardsForRound.Count > 0 && !availableCardsForRound.Contains(trigger))
+        // Shop filter: only allow cards picked in the pre-round shop OR owned from inventory
+        var inv = GetComponent<PlayerInventory>();
+        if (inv != null && inv.equippedCombatCards.Count > 0)
+        {
+            // Map trigger names to card IDs
+            string cardId = trigger switch
+            {
+                "Jab" => "jab",
+                "Cross" => "cross",
+                "Hook" => "hook",
+                "Block" => "block",
+                "Left" => "dodge_left",
+                "Right" => "dodge_right",
+                "ParryIntent" => "reflect",
+                "UnbreakablePunch" => "boom",
+                "Grapple" => "grapple",
+                "Feint" => "feint",
+                "Clutch" => "clutch",
+                "Uppercut" => "uppercut",
+                "Sweep" => "sweep",
+                "Focus" => "focus",
+                "Taunt" => "taunt",
+                "Overclock" => "overclock",
+                "Reverse" => "reverse",
+                "Trap" => "trap",
+                "Cage" => "cage",
+                "Mirror" => "mirror",
+                _ => trigger.ToLower()
+            };
+            if (!inv.equippedCombatCards.Contains(cardId)) return false;
+        }
+        else if (availableCardsForRound.Count > 0 && !availableCardsForRound.Contains(trigger))
+        {
             return false;
+        }
 
         if (trigger.StartsWith("Combo"))
         {

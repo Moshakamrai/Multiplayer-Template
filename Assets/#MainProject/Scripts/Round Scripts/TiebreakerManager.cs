@@ -463,6 +463,7 @@ public class TiebreakerManager : NetworkBehaviour
     // ── GUI ────────────────────────────────────────────────────────────────────
     private void OnGUI()
     {
+        if (RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isShopPhase) return;
         if (!IsTiebreakerActive) return;
 
         if (_whiteTex == null)

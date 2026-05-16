@@ -101,18 +101,44 @@ public class RhythmRoundManager : NetworkBehaviour
     private bool _p1ShopLocked = false;
     private bool _p2ShopLocked = false;
 
-    private void Awake() { if (Instance == null) Instance = this; }
+    private void Awake()
+    {
+        if (Instance == null) Instance = this;
+        EnsureShopSystemsExist();
+    }
+
+    private void EnsureShopSystemsExist()
+    {
+        // Auto-spawn shop system GameObjects if not present
+        if (ShopPhaseManager.Instance == null)
+        {
+            var spmGo = new GameObject("ShopPhaseManager");
+            spmGo.AddComponent<ShopPhaseManager>();
+        }
+        if (ShopUI.Instance == null)
+        {
+            var suGo = new GameObject("ShopUI");
+            suGo.AddComponent<ShopUI>();
+        }
+        if (CardDatabase.Instance == null)
+        {
+            var cdGo = new GameObject("CardDatabase");
+            cdGo.AddComponent<CardDatabase>();
+        }
+    }
 
     public override void OnStartServer()
     {
         base.OnStartServer();
-        StartCoroutine(DelayedShopStart());
+        StartCoroutine(DelayedRoundStart());
     }
 
     [Server]
-    private IEnumerator DelayedShopStart()
+    private IEnumerator DelayedRoundStart()
     {
         yield return new WaitForSeconds(2f);
+        // Spawn bot if playing solo (only 1 human connected)
+        EnsureBotExists();
         StartShopPhase();
     }
 
@@ -136,7 +162,7 @@ public class RhythmRoundManager : NetworkBehaviour
             yield return null;
             shopTimeRemaining -= Time.deltaTime;
 
-            if (GameManager.players.Count == 1 && !_p2ShopLocked)
+            if (HasBotPlayer() && !_p2ShopLocked)
                 AutoFillBotPicks();
 
             if (AllPlayersLockedIn())
@@ -159,8 +185,19 @@ public class RhythmRoundManager : NetworkBehaviour
         var players = new List<PlayerController>(GameManager.players);
         if (players.Count == 0) return false;
         bool human1Locked = _p1ShopLocked;
-        bool human2Locked = players.Count > 1 ? _p2ShopLocked : true;
+        // If there's a bot, check bot's lock status. If solo without bot, auto-pass.
+        bool hasBot = HasBotPlayer();
+        bool human2Locked = players.Count > 1 ? (hasBot ? _p2ShopLocked : true) : true;
         return human1Locked && human2Locked;
+    }
+
+    [Server]
+    private bool HasBotPlayer()
+    {
+        foreach (var p in GameManager.players)
+            if (p != null && p.GetComponent<BotController>() != null)
+                return true;
+        return false;
     }
 
     [Server]
@@ -540,6 +577,12 @@ public class RhythmRoundManager : NetworkBehaviour
         p1TotalCredits += p1Credits;
         p2TotalCredits += p2Credits;
 
+        // Transfer earned credits to PlayerInventory for shop spending
+        var p1Inv = playerList[0].GetComponent<PlayerInventory>();
+        var p2Inv = playerList[1].GetComponent<PlayerInventory>();
+        if (p1Inv != null) p1Inv.AddCredits(p1Credits);
+        if (p2Inv != null) p2Inv.AddCredits(p2Credits);
+
         if (roundWinner == 1) p1RoundWins++;
         else if (roundWinner == 2) p2RoundWins++;
         currentRoundNumber++;
@@ -565,7 +608,8 @@ public class RhythmRoundManager : NetworkBehaviour
         }
 
         ResetPlayersForNextRound();
-        StartShopPhase();
+        // Post-round TFT shop with credits
+        ShopPhaseManager.Instance?.StartShopPhase(currentRoundNumber);
     }
 
     [Server]
@@ -582,6 +626,14 @@ public class RhythmRoundManager : NetworkBehaviour
             PlayerCombat pc = player.GetComponent<PlayerCombat>();
             if (pc != null) pc.ResetRoundStats();
 
+            // Equip up to 10 owned combat cards for next round
+            var inv = player.GetComponent<PlayerInventory>();
+            if (inv != null)
+            {
+                var equipList = new System.Collections.Generic.List<string>(inv.ownedCombatCards);
+                inv.EquipCombatCards(equipList);
+            }
+
             Vector3 spawnPos = (idx == 0) ? _spawnP1 : _spawnP2;
             player.transform.position = spawnPos;
 
@@ -596,7 +648,7 @@ public class RhythmRoundManager : NetworkBehaviour
             idx++;
         }
 
-        // Bot is reused between rounds — EnsureBotExists will respawn only if missing
+        // Bot is reused between rounds
         if (_activeBot != null)
         {
             PlayerCombat botCombat = _activeBot.GetComponent<PlayerCombat>();
@@ -1525,6 +1577,7 @@ public class RhythmRoundManager : NetworkBehaviour
             else
             {
                 if (GUILayout.Button("STOP ROUND", GUILayout.Height(40))) { StopRound(); StartCoroutine(EndRoundRoutine()); }
+                if (GUILayout.Button("SKIP TO SHOP", GUILayout.Height(40))) { StopRound(); StartCoroutine(EndRoundRoutine()); }
                 GUILayout.Label($"ACTIVE: {currentType}", GUI.skin.box);
             }
             GUILayout.EndArea();
@@ -1835,6 +1888,10 @@ public class RhythmRoundManager : NetworkBehaviour
         {
             Vector3 spawnPos = new Vector3(0, 0, 5);
             _activeBot = Instantiate(botPrefab, spawnPos, Quaternion.identity);
+
+            // Ensure bot has PlayerInventory for shop system
+            if (_activeBot.GetComponent<PlayerInventory>() == null)
+                _activeBot.AddComponent<PlayerInventory>();
 
             NetworkServer.Spawn(_activeBot);
 

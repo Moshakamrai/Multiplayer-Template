@@ -70,6 +70,12 @@ Assets/#MainProject/
    CommentaryManager.cs
    RhythmRoundManager.cs
    TiebreakerManager.cs
+  Shop System/
+   CardData.cs
+   CardDatabase.cs
+   PlayerInventory.cs
+   ShopPhaseManager.cs
+   ShopUI.cs
   Sound Scripts/
    BeatAnalysisEngine.cs
    BeatAnalyzer.cs

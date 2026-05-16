@@ -97,6 +97,7 @@ public class RhythmTestManager : MonoBehaviour
     // ─────────────────────────────────────────────────────────────────────
     void OnGUI()
     {
+        if (RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isShopPhase) return;
         if (_px == null) { _px = new Texture2D(1,1); _px.SetPixel(0,0,Color.white); _px.Apply(); }
 
         // Background

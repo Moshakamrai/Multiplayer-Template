@@ -166,6 +166,7 @@ public class BeatVisualizer : MonoBehaviour
     // ─────────────────────────────────────────────────────────────────────
     void OnGUI()
     {
+        if (RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isShopPhase) return;
         if (_px == null)
         {
             _px = new Texture2D(1, 1);

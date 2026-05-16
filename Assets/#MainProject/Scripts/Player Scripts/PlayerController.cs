@@ -62,6 +62,10 @@ public class PlayerController : NetworkBehaviour
         playerCollider = GetComponent<CapsuleCollider>();
         _characterController.enabled = isLocalPlayer || isServer;
 
+        // Ensure PlayerInventory exists (for shop system)
+        if (GetComponent<PlayerInventory>() == null)
+            gameObject.AddComponent<PlayerInventory>();
+
         if (isLocalPlayer)
         {
             GameManager.localPlayer = this;

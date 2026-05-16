@@ -86,6 +86,7 @@ public class VoiceDebugGUI : MonoBehaviour
 
     void OnGUI()
     {
+        return; // DEBUG UI COMPLETELY DISABLED
         if (!ShowDebug) return;
 
         // Recalculate height based on device count

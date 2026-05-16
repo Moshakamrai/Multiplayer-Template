@@ -13,17 +13,7 @@ public class VoskResultText : MonoBehaviour
 
     private void OnTranscriptionResult(string obj)
     {
-        Debug.Log(obj);
-        var result = new RecognitionResult(obj);
-        for (int i = 0; i < result.Phrases.Length; i++)
-        {
-            if (i > 0)
-            {
-                ResultText.text += ", ";
-            }
-
-            ResultText.text += result.Phrases[i].Text;
-        }
-    	ResultText.text += "\n";
+        // DEBUG UI DISABLED — recognition still works, just no text output
+        // Debug.Log(obj);
     }
 }

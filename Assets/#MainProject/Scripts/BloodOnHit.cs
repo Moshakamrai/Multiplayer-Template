@@ -2,7 +2,7 @@ using UnityEngine;
 
 // Add this component to the player prefab.
 // Assign BloodFX prefabs (Blood1–Blood15) and BloodAttach (AttachedBloodDecal) in the Inspector.
-// No Mirror involvement — reads CurrentHealth SyncVar which Mirror already syncs to all clients.
+// No Mirror involvement — reads CurrentPercentage SyncVar which Mirror already syncs to all clients.
 public class BloodOnHit : MonoBehaviour
 {
     [Header("Blood FX Prefabs")]
@@ -15,21 +15,21 @@ public class BloodOnHit : MonoBehaviour
     public float EffectScale = 2.0f;
 
     PlayerCombat _combat;
-    int _lastHealth;
+    float _lastPercentage;
     int _effectIdx;
 
     void Start()
     {
         _combat = GetComponent<PlayerCombat>();
-        _lastHealth = _combat.CurrentHealth;
+        _lastPercentage = _combat.CurrentPercentage;
     }
 
     void Update()
     {
-        int current = _combat.CurrentHealth;
-        if (current < _lastHealth && _lastHealth > 0)
+        float current = _combat.CurrentPercentage;
+        if (current > _lastPercentage && _lastPercentage >= 0f)
             SpawnBlood();
-        _lastHealth = current;
+        _lastPercentage = current;
     }
 
     void SpawnBlood()
@@ -47,6 +47,14 @@ public class BloodOnHit : MonoBehaviour
         {
             settings.DecalLiveTimeInfinite = false;
             if (DirLight != null) settings.LightIntensityMultiplier = DirLight.intensity;
+        }
+
+        // Slow down blood particles during hurt slow-mo
+        var particles = burst.GetComponentsInChildren<ParticleSystem>();
+        foreach (var ps in particles)
+        {
+            var main = ps.main;
+            main.simulationSpeed = Time.timeScale;
         }
 
         Destroy(burst, 20f);

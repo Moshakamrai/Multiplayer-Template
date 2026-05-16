@@ -117,61 +117,7 @@ public class VoiceDebugger : MonoBehaviour
     // ── GUI ───────────────────────────────────────────────────────────────
     private void OnGUI()
     {
-        if (_bg == null)
-        {
-            _bg = new Texture2D(1, 1);
-            _bg.SetPixel(0, 0, Color.black);
-            _bg.Apply();
-        }
-
-        float panelW = Mathf.Min(560f, Screen.width - 40f);
-
-        // Dark panel
-        GUI.color = new Color(0f, 0f, 0f, 0.88f);
-        GUI.DrawTexture(new Rect(20, 20, panelW, Screen.height - 40f), _bg);
-        GUI.color = Color.white;
-
-        GUILayout.BeginArea(new Rect(32, 32, panelW - 24, Screen.height - 64));
-
-        // Title
-        GUIStyle title = Style(20, FontStyle.Bold, new Color(0.2f, 0.9f, 1f));
-        GUILayout.Label("VOICE DEBUGGER  (Open Vocabulary)", title);
-
-        // Status
-        GUILayout.Label(_statusMsg, Style(11, FontStyle.Italic, Color.yellow));
-        GUILayout.Space(6);
-
-        // Mic bar
-        if (_vp != null)
-        {
-            float vol = _vp.CurrentRawVolume;
-            Color volCol = vol > 0.15f ? Color.green : vol > 0.05f ? Color.yellow : Color.gray;
-            GUILayout.Label($"MIC  {vol:F3}  {(vol > 0.15f ? "  ← SPIKE" : "")}", Style(13, FontStyle.Normal, volCol));
-        }
-
-        GUILayout.Space(8);
-
-        // Live partial
-        GUIStyle partStyle = Style(17, FontStyle.Italic, new Color(1f, 0.85f, 0.2f));
-        GUILayout.Label("Hearing:  " + _currentPartial, partStyle);
-
-        GUILayout.Space(10);
-        GUILayout.Label("── Finalized results  (>>> = WatchWord hit) ──",
-            Style(11, FontStyle.Normal, new Color(0.5f, 0.5f, 0.55f)));
-        GUILayout.Space(4);
-
-        // History
-        foreach (string entry in _history)
-        {
-            bool isWatch = entry.StartsWith(">>>");
-            GUILayout.Label(entry, Style(14, FontStyle.Normal, isWatch ? Color.yellow : new Color(0.5f, 1f, 0.5f)));
-        }
-
-        GUILayout.Space(12);
-        GUILayout.Label("WatchWords: " + string.Join(", ", WatchWords),
-            Style(10, FontStyle.Normal, new Color(0.45f, 0.45f, 0.5f)));
-
-        GUILayout.EndArea();
+        return; // DEBUG UI COMPLETELY DISABLED
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────

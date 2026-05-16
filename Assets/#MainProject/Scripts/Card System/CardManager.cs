@@ -1,5 +1,6 @@
 using UnityEngine;
 using System.Collections.Generic;
+using System.Linq;
 using Mirror;
 
 [System.Serializable]
@@ -79,6 +80,22 @@ public class CardManager : NetworkBehaviour
     private GUIStyle _comboLabelStyle;
 
     public bool IsComboHandActive => false;
+
+    // ── Round-available cards (synced from PlayerCombat SyncVar) ───────────
+    public List<string> availableCardsForRound = new List<string>();
+    private string _lastCardsString = "";
+
+    private void UpdateAvailableCardsFromCombat()
+    {
+        if (_myPCombat == null) _myPCombat = GetComponent<PlayerCombat>();
+        if (_myPCombat == null) return;
+        if (_myPCombat.availableCardsString == _lastCardsString) return;
+        _lastCardsString = _myPCombat.availableCardsString;
+        if (string.IsNullOrEmpty(_lastCardsString))
+            availableCardsForRound.Clear();
+        else
+            availableCardsForRound = new List<string>(_lastCardsString.Split('|'));
+    }
 
     // ── Card definitions ───────────────────────────────────────────────────
     private static CombatCard[] BuildNormalCardDefs() => new[]
@@ -206,6 +223,10 @@ public class CardManager : NetworkBehaviour
         var rmm = RhythmRoundManager.Instance;
         if (rmm != null && rmm.isRoundActive && !rmm.IsSingleMoveMode()) return false;
 
+        // Shop filter: only allow cards picked in the pre-round shop
+        if (availableCardsForRound.Count > 0 && !availableCardsForRound.Contains(trigger))
+            return false;
+
         if (trigger.StartsWith("Combo"))
         {
             foreach (int index in currentHandIndices)
@@ -257,12 +278,22 @@ public class CardManager : NetworkBehaviour
 
     private float GetCardScreenX(string trigger)
     {
-        var defCards = new[] { "Block", "ParryIntent", "Left", "Right" };
-        var atkCards = new[] { "Jab", "Cross", "Hook", "UnbreakablePunch" };
+        var allDefCards = new[] { "Block", "ParryIntent", "Left", "Right" };
+        var allAtkCards = new[] { "Jab", "Cross", "Hook", "UnbreakablePunch" };
+
+        var defCards = (availableCardsForRound.Count > 0)
+            ? allDefCards.Where(c => availableCardsForRound.Contains(c)).ToArray()
+            : allDefCards;
+        var atkCards = (availableCardsForRound.Count > 0)
+            ? allAtkCards.Where(c => availableCardsForRound.Contains(c)).ToArray()
+            : allAtkCards;
+
         float gap       = 40f;
-        float groupW    = nWidth * 4 + nSpace * 3;
-        float defStartX = Screen.width / 2f - gap / 2f - groupW;
-        float atkStartX = Screen.width / 2f + gap / 2f;
+        float defGroupW = nWidth * defCards.Length + nSpace * Mathf.Max(0, defCards.Length - 1);
+        float atkGroupW = nWidth * atkCards.Length + nSpace * Mathf.Max(0, atkCards.Length - 1);
+        float totalW    = defGroupW + gap + atkGroupW;
+        float defStartX = Screen.width / 2f - totalW / 2f;
+        float atkStartX = defStartX + defGroupW + gap;
 
         for (int i = 0; i < atkCards.Length; i++)
             if (atkCards[i] == trigger) return atkStartX + i * (nWidth + nSpace);
@@ -277,9 +308,12 @@ public class CardManager : NetworkBehaviour
     {
         if (!isLocalPlayer) return;
         if (cardLibrary == null || cardLibrary.Count == 0) return;
+        if (RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isShopPhase) return;
 
         if (_whiteTex == null) { _whiteTex = new Texture2D(1, 1); _whiteTex.SetPixel(0, 0, Color.white); _whiteTex.Apply(); }
         EnsureStyles();
+
+        UpdateAvailableCardsFromCombat();
 
         if (_myPCombat == null) _myPCombat = GetComponent<PlayerCombat>();
 
@@ -326,12 +360,22 @@ public class CardManager : NetworkBehaviour
             // ── SINGLE MODE: original defense LEFT / attack RIGHT ───────────
             float baseY     = Screen.height - nHeight - 60f + hoverY;
             float gap       = 120f;
-            float groupW    = nWidth * 4 + nSpace * 3;
-            float defStartX = Screen.width / 2f - gap / 2f - groupW;
-            float atkStartX = Screen.width / 2f + gap / 2f;
 
-            var defCards = new[] { "Block", "ParryIntent", "Left", "Right" };
-            var atkCards = new[] { "Jab", "Cross", "Hook", "UnbreakablePunch" };
+            var allDefCards = new[] { "Block", "ParryIntent", "Left", "Right" };
+            var allAtkCards = new[] { "Jab", "Cross", "Hook", "UnbreakablePunch" };
+
+            var defCards = (availableCardsForRound.Count > 0)
+                ? System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Where(allDefCards, c => availableCardsForRound.Contains(c)))
+                : allDefCards;
+            var atkCards = (availableCardsForRound.Count > 0)
+                ? System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Where(allAtkCards, c => availableCardsForRound.Contains(c)))
+                : allAtkCards;
+
+            float defGroupW = nWidth * defCards.Length + nSpace * Mathf.Max(0, defCards.Length - 1);
+            float atkGroupW = nWidth * atkCards.Length + nSpace * Mathf.Max(0, atkCards.Length - 1);
+            float totalW    = defGroupW + gap + atkGroupW;
+            float defStartX = Screen.width / 2f - totalW / 2f;
+            float atkStartX = defStartX + defGroupW + gap;
 
             for (int i = 0; i < defCards.Length; i++)
             {

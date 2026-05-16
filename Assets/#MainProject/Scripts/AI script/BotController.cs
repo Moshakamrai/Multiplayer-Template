@@ -24,14 +24,17 @@ public class BotController : NetworkBehaviour
     {
         if (_combat.IsHurting || _combat.IsDead) return;
 
-        // COMBO MODE: fill buffer with random moves + set semi-pro timing spike
+        var avail = _myCards != null && _myCards.availableCardsForRound.Count > 0
+            ? _myCards.availableCardsForRound
+            : new List<string> { "Jab", "Cross", "Hook", "Block", "Left", "Right", "UnbreakablePunch", "ParryIntent" };
+
+        // COMBO MODE: fill buffer with random moves from available pool
         var rmm = RhythmRoundManager.Instance;
         if (rmm != null && !rmm.IsSingleMoveMode())
         {
-            string[] pool = { "Jab", "Cross", "Hook", "UnbreakablePunch", "ParryIntent" };
             while (_combat._comboBuffer.Count < rmm.currentComboCount)
             {
-                string move = pool[Random.Range(0, pool.Length)];
+                string move = avail[Random.Range(0, avail.Count)];
                 _combat._comboBuffer.Add(new PlayerCombat.RhythmAction { attack = move, dash = Vector3.zero });
             }
             _combat.lastVocalSpikeTime = rmm.GetNextBeatTime() - Random.Range(0.3f, 0.7f);
@@ -46,26 +49,56 @@ public class BotController : NetworkBehaviour
             UpdatePlayerHistory(oppMove.attack);
         }
 
-        // 2. CHOOSE COUNTER OR RANDOM
+        // 2. CHOOSE COUNTER OR RANDOM (filtered by available cards)
         string attack = "";
         Vector3 dash = Vector3.zero;
+
+        bool hasJab = avail.Contains("Jab");
+        bool hasCross = avail.Contains("Cross");
+        bool hasHook = avail.Contains("Hook");
+        bool hasBlock = avail.Contains("Block");
+        bool hasLeft = avail.Contains("Left");
+        bool hasRight = avail.Contains("Right");
+        bool hasBoom = avail.Contains("UnbreakablePunch");
+        bool hasCage = avail.Contains("ParryIntent");
+        bool canDash = hasLeft || hasRight;
 
         string mostSpammed = GetMostSpammedMove();
         float adaptiveChance = Random.value;
 
         if (adaptiveChance < 0.6f && !string.IsNullOrEmpty(mostSpammed))
         {
-            if (mostSpammed == "Jab") { dash = Random.value > 0.5f ? Vector3.left : Vector3.right; }
-            else if (mostSpammed == "Cross") { attack = "Block"; }
-            else if (mostSpammed == "Hook") { attack = "Jab"; }
-            else if (mostSpammed == "UnbreakablePunch") { dash = Vector3.left; }
+            if (mostSpammed == "Jab" && canDash)
+            { dash = hasLeft && hasRight ? (Random.value > 0.5f ? Vector3.left : Vector3.right) : (hasLeft ? Vector3.left : Vector3.right); }
+            else if (mostSpammed == "Cross" && hasBlock) { attack = "Block"; }
+            else if (mostSpammed == "Hook" && hasJab) { attack = "Jab"; }
+            else if (mostSpammed == "UnbreakablePunch" && hasLeft) { dash = Vector3.left; }
         }
-        else
+
+        // If counter didn't fire or was invalid, pick randomly from available pool
+        if (string.IsNullOrEmpty(attack) && dash == Vector3.zero)
         {
+            var attackPool = new List<string>();
+            if (hasJab) attackPool.Add("Jab");
+            if (hasCross) attackPool.Add("Cross");
+            if (hasHook) attackPool.Add("Hook");
+            if (hasBlock) attackPool.Add("Block");
+            if (hasBoom) attackPool.Add("UnbreakablePunch");
+            if (hasCage) attackPool.Add("ParryIntent");
+
             float decision = Random.value;
-            if (decision < 0.7f) attack = Random.value < 0.5f ? "Jab" : (Random.value < 0.8f ? "Cross" : "Hook");
-            else if (decision < 0.9f) dash = (Random.value > 0.5f) ? Vector3.left : Vector3.right;
-            else attack = "Block";
+            if (decision < 0.7f && attackPool.Count > 0)
+            {
+                attack = attackPool[Random.Range(0, attackPool.Count)];
+            }
+            else if (decision < 0.9f && canDash)
+            {
+                dash = hasLeft && hasRight ? (Random.value > 0.5f ? Vector3.left : Vector3.right) : (hasLeft ? Vector3.left : Vector3.right);
+            }
+            else if (attackPool.Count > 0)
+            {
+                attack = attackPool[Random.Range(0, attackPool.Count)];
+            }
         }
 
         // 3. SLOT CHECK — respect same slot rules as the player
@@ -73,13 +106,26 @@ public class BotController : NetworkBehaviour
 
         if (_myCards != null && !_myCards.HasSlot(trigger))
         {
-            // Primary move blocked — try the opposite pool
-            if (CardManager.IsAttackTrigger(trigger) && _myCards.defenseSlotsRemaining > 0)
-            { attack = "Block"; dash = Vector3.zero; trigger = "Block"; }
-            else if (!CardManager.IsAttackTrigger(trigger) && _myCards.attackSlotsRemaining > 0)
-            { attack = "Jab"; dash = Vector3.zero; trigger = "Jab"; }
+            var availAttacks = avail.FindAll(c => CardManager.IsAttackTrigger(c));
+            var availDefs = avail.FindAll(c => CardManager.IsDefenseTrigger(c));
+
+            if (CardManager.IsAttackTrigger(trigger) && availDefs.Count > 0)
+            {
+                string defPick = availDefs[Random.Range(0, availDefs.Count)];
+                if (defPick == "Left") { dash = Vector3.left; attack = ""; }
+                else if (defPick == "Right") { dash = Vector3.right; attack = ""; }
+                else { attack = defPick; dash = Vector3.zero; }
+            }
+            else if (!CardManager.IsAttackTrigger(trigger) && availAttacks.Count > 0)
+            {
+                attack = availAttacks[Random.Range(0, availAttacks.Count)];
+                dash = Vector3.zero;
+            }
             else return; // Both pools exhausted — skip this beat
         }
+
+        // Recompute trigger after fallback
+        trigger = dash != Vector3.zero ? (dash == Vector3.left ? "Left" : "Right") : attack;
 
         // 4. SEMI-PRO TIMING
         float targetBeat = RhythmRoundManager.Instance.GetNextBeatTime();

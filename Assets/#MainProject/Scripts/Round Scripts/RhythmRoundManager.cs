@@ -4,6 +4,7 @@ using UnityEngine.Networking;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using UnityEngine.SceneManagement;
 
 public enum RoundType { SlowRhythm, FastCombo, CustomTrack }
 
@@ -67,7 +68,223 @@ public class RhythmRoundManager : NetworkBehaviour
     private bool _isLoadingClip = false;
     private string _loadingClipName = "";
 
+    [Header("Match State")]
+    [SyncVar] public int p1RoundWins = 0;
+    [SyncVar] public int p2RoundWins = 0;
+    [SyncVar] public int currentRoundNumber = 1;
+    [SyncVar] public int matchWinner = 0; // 0=ongoing, 1=p1, 2=p2, 3=draw
+    [SyncVar] public bool isMatchOver = false;
+
+    [Header("Economy")]
+    [SyncVar] public int p1TotalCredits = 0;
+    [SyncVar] public int p2TotalCredits = 0;
+
+    // Server-only round & streak tracking
+    private int _p1WinStreak = 0;
+    private int _p1LossStreak = 0;
+    private int _p2WinStreak = 0;
+    private int _p2LossStreak = 0;
+    private int _p1RoundDamageDealt = 0;
+    private int _p2RoundDamageDealt = 0;
+    private bool _isEndingRound = false;
+
+    private readonly Vector3 _spawnP1 = new Vector3(0f, 0f, -2.5f);
+    private readonly Vector3 _spawnP2 = new Vector3(0f, 0f, 2.5f);
+
+    [Header("Shop Phase")]
+    [SyncVar] public bool isShopPhase = false;
+    [SyncVar] public float shopTimeRemaining = 72f;
+
+    private readonly string[] _shopCardPool = { "Jab", "Cross", "Hook", "Block", "Left", "Right" };
+    private List<string> _p1ShopSelection = new List<string>();
+    private List<string> _p2ShopSelection = new List<string>();
+    private bool _p1ShopLocked = false;
+    private bool _p2ShopLocked = false;
+
     private void Awake() { if (Instance == null) Instance = this; }
+
+    public override void OnStartServer()
+    {
+        base.OnStartServer();
+        StartCoroutine(DelayedShopStart());
+    }
+
+    [Server]
+    private IEnumerator DelayedShopStart()
+    {
+        yield return new WaitForSeconds(2f);
+        StartShopPhase();
+    }
+
+    [Server]
+    public void StartShopPhase()
+    {
+        isShopPhase = true;
+        shopTimeRemaining = 72f;
+        _p1ShopSelection.Clear();
+        _p2ShopSelection.Clear();
+        _p1ShopLocked = false;
+        _p2ShopLocked = false;
+        StartCoroutine(ShopTimerRoutine());
+    }
+
+    [Server]
+    private IEnumerator ShopTimerRoutine()
+    {
+        while (shopTimeRemaining > 0f && isShopPhase)
+        {
+            yield return null;
+            shopTimeRemaining -= Time.deltaTime;
+
+            if (GameManager.players.Count == 1 && !_p2ShopLocked)
+                AutoFillBotPicks();
+
+            if (AllPlayersLockedIn())
+            {
+                FinalizeShopAndStartRound();
+                yield break;
+            }
+        }
+
+        if (isShopPhase)
+        {
+            AutoFillRemainingPicks();
+            FinalizeShopAndStartRound();
+        }
+    }
+
+    [Server]
+    private bool AllPlayersLockedIn()
+    {
+        var players = new List<PlayerController>(GameManager.players);
+        if (players.Count == 0) return false;
+        bool human1Locked = _p1ShopLocked;
+        bool human2Locked = players.Count > 1 ? _p2ShopLocked : true;
+        return human1Locked && human2Locked;
+    }
+
+    [Server]
+    private void AutoFillBotPicks()
+    {
+        var remaining = new List<string>(_shopCardPool);
+        foreach (var c in _p2ShopSelection) remaining.Remove(c);
+        while (_p2ShopSelection.Count < 3 && remaining.Count > 0)
+        {
+            string pick = remaining[Random.Range(0, remaining.Count)];
+            _p2ShopSelection.Add(pick);
+            if (pick == "Left" && !_p2ShopSelection.Contains("Right")) _p2ShopSelection.Add("Right");
+            if (pick == "Right" && !_p2ShopSelection.Contains("Left")) _p2ShopSelection.Add("Left");
+            remaining.Remove(pick);
+        }
+        _p2ShopLocked = true;
+    }
+
+    [Server]
+    private void AutoFillRemainingPicks()
+    {
+        var players = new List<PlayerController>(GameManager.players);
+        for (int i = 0; i < players.Count; i++)
+        {
+            var selection = (i == 0) ? _p1ShopSelection : _p2ShopSelection;
+            var remaining = new List<string>(_shopCardPool);
+            foreach (var c in selection) remaining.Remove(c);
+            while (selection.Count < 4 && remaining.Count > 0)
+            {
+                string pick = remaining[Random.Range(0, remaining.Count)];
+                selection.Add(pick);
+                if (pick == "Left" && !selection.Contains("Right")) selection.Add("Right");
+                if (pick == "Right" && !selection.Contains("Left")) selection.Add("Left");
+                remaining.Remove(pick);
+            }
+        }
+        _p1ShopLocked = true;
+        _p2ShopLocked = true;
+    }
+
+    [Server]
+    public void ToggleShopCard(PlayerCombat pc, string cardName)
+    {
+        if (!isShopPhase) return;
+        if (System.Array.IndexOf(_shopCardPool, cardName) < 0) return;
+
+        int playerIdx = GetPlayerIndex(pc);
+        if (playerIdx < 0) return;
+
+        var selection = (playerIdx == 0) ? _p1ShopSelection : _p2ShopSelection;
+        bool locked = (playerIdx == 0) ? _p1ShopLocked : _p2ShopLocked;
+        if (locked) return;
+
+        if (selection.Contains(cardName))
+        {
+            selection.Remove(cardName);
+            if (cardName == "Left") selection.Remove("Right");
+            if (cardName == "Right") selection.Remove("Left");
+        }
+        else
+        {
+            int pickCount = selection.Count;
+            if (selection.Contains("Left") && selection.Contains("Right")) pickCount--;
+            if (pickCount >= 4) return;
+
+            selection.Add(cardName);
+            if (cardName == "Left" && !selection.Contains("Right")) selection.Add("Right");
+            if (cardName == "Right" && !selection.Contains("Left")) selection.Add("Left");
+        }
+    }
+
+    [Server]
+    public void LockInShop(PlayerCombat pc)
+    {
+        if (!isShopPhase) return;
+        int playerIdx = GetPlayerIndex(pc);
+        if (playerIdx < 0) return;
+
+        var selection = (playerIdx == 0) ? _p1ShopSelection : _p2ShopSelection;
+        bool locked = (playerIdx == 0) ? _p1ShopLocked : _p2ShopLocked;
+        if (locked) return;
+
+        var remaining = new List<string>(_shopCardPool);
+        foreach (var c in selection) remaining.Remove(c);
+        while (selection.Count < 4 && remaining.Count > 0)
+        {
+            string pick = remaining[Random.Range(0, remaining.Count)];
+            selection.Add(pick);
+            if (pick == "Left" && !selection.Contains("Right")) selection.Add("Right");
+            if (pick == "Right" && !selection.Contains("Left")) selection.Add("Left");
+            remaining.Remove(pick);
+        }
+
+        if (playerIdx == 0) _p1ShopLocked = true;
+        else _p2ShopLocked = true;
+    }
+
+    [Server]
+    private int GetPlayerIndex(PlayerCombat pc)
+    {
+        var players = new List<PlayerController>(GameManager.players);
+        for (int i = 0; i < players.Count; i++)
+            if (players[i] != null && players[i].GetComponent<PlayerCombat>() == pc) return i;
+        return -1;
+    }
+
+    [Server]
+    private void FinalizeShopAndStartRound()
+    {
+        isShopPhase = false;
+
+        // Sync selected cards to all clients via PlayerCombat SyncVar
+        var players = new List<PlayerController>(GameManager.players);
+        for (int i = 0; i < players.Count; i++)
+        {
+            if (players[i] == null) continue;
+            var pc = players[i].GetComponent<PlayerCombat>();
+            var selection = (i == 0) ? _p1ShopSelection : _p2ShopSelection;
+            if (pc != null)
+                pc.availableCardsString = string.Join("|", selection);
+        }
+
+        StartSlowRound();
+    }
 
     public bool IsSingleMoveMode()
     {
@@ -177,6 +394,17 @@ public class RhythmRoundManager : NetworkBehaviour
     {
         EnsureBotExists();
 
+        // Set bot cards so all clients can see them, and server bot AI can read them
+        if (_activeBot != null)
+        {
+            var botPc = _activeBot.GetComponent<PlayerCombat>();
+            if (botPc != null)
+                botPc.availableCardsString = string.Join("|", _p2ShopSelection);
+            var botCm = _activeBot.GetComponent<CardManager>();
+            if (botCm != null)
+                botCm.availableCardsForRound = new List<string>(_p2ShopSelection);
+        }
+
         foreach (var player in GameManager.players)
         {
             if (player != null)
@@ -209,6 +437,7 @@ public class RhythmRoundManager : NetworkBehaviour
         currentChainPosition = 0;
         lastBeatFireTime = 0f;
         _clusterBeatsLeftToFire = 0;
+        _isEndingRound = false;
 
         // Clear player hands so the GUI hides
         foreach (var player in GameManager.players)
@@ -221,6 +450,190 @@ public class RhythmRoundManager : NetworkBehaviour
         }
     }
 
+    [Server]
+    private IEnumerator EndRoundRoutine()
+    {
+        _isEndingRound = true;
+        yield return new WaitForSeconds(1.5f);
+
+        var playerList = new List<PlayerController>(GameManager.players);
+        if (playerList.Count < 2)
+        {
+            _isEndingRound = false;
+            yield break;
+        }
+
+        PlayerCombat p1 = playerList[0].GetComponent<PlayerCombat>();
+        PlayerCombat p2 = playerList[1].GetComponent<PlayerCombat>();
+
+        int roundWinner = 0; // 0=draw, 1=p1, 2=p2
+        string winReason = "";
+
+        if (p1.CurrentPercentage < p2.CurrentPercentage)
+        {
+            roundWinner = 1;
+            winReason = "Lower %";
+        }
+        else if (p2.CurrentPercentage < p1.CurrentPercentage)
+        {
+            roundWinner = 2;
+            winReason = "Lower %";
+        }
+        else
+        {
+            if (_p1RoundDamageDealt > _p2RoundDamageDealt)
+            {
+                roundWinner = 1;
+                winReason = "More Damage";
+            }
+            else if (_p2RoundDamageDealt > _p1RoundDamageDealt)
+            {
+                roundWinner = 2;
+                winReason = "More Damage";
+            }
+            else
+            {
+                roundWinner = 0;
+                winReason = "Draw";
+            }
+        }
+
+        int p1Credits = 0;
+        int p2Credits = 0;
+
+        // Base credits
+        if (roundWinner == 1) { p1Credits += 2; p2Credits += 1; }
+        else if (roundWinner == 2) { p1Credits += 1; p2Credits += 2; }
+        else { p1Credits += 2; p2Credits += 2; }
+
+        // Consecutive win/loss bonuses
+        if (roundWinner == 1)
+        {
+            _p1WinStreak++; _p1LossStreak = 0;
+            _p2LossStreak++; _p2WinStreak = 0;
+            if (_p1WinStreak >= 2) p1Credits += 1; // +3 total
+            if (_p2LossStreak >= 2) p2Credits += 1; // +2 total
+        }
+        else if (roundWinner == 2)
+        {
+            _p2WinStreak++; _p2LossStreak = 0;
+            _p1LossStreak++; _p1WinStreak = 0;
+            if (_p2WinStreak >= 2) p2Credits += 1;
+            if (_p1LossStreak >= 2) p1Credits += 1;
+        }
+        else
+        {
+            _p1WinStreak = 0; _p1LossStreak = 0;
+            _p2WinStreak = 0; _p2LossStreak = 0;
+        }
+
+        // Most Excellent bonus
+        if (p1.roundExcellentCount > p2.roundExcellentCount) p1Credits += 1;
+        else if (p2.roundExcellentCount > p1.roundExcellentCount) p2Credits += 1;
+        else { p1Credits += 1; p2Credits += 1; }
+
+        // Perfect Counter bonus
+        if (p1.roundCounterCount > p2.roundCounterCount) p1Credits += 1;
+        else if (p2.roundCounterCount > p1.roundCounterCount) p2Credits += 1;
+        else { p1Credits += 1; p2Credits += 1; }
+
+        p1TotalCredits += p1Credits;
+        p2TotalCredits += p2Credits;
+
+        if (roundWinner == 1) p1RoundWins++;
+        else if (roundWinner == 2) p2RoundWins++;
+        currentRoundNumber++;
+
+        RpcShowRoundResult(roundWinner, winReason, p1Credits, p2Credits,
+                           p1.CurrentPercentage, p2.CurrentPercentage,
+                           p1.roundExcellentCount, p2.roundExcellentCount,
+                           p1.roundCounterCount, p2.roundCounterCount);
+
+        yield return new WaitForSeconds(3f);
+
+        if (p1RoundWins >= 5 || p2RoundWins >= 5 || currentRoundNumber > 9)
+        {
+            if (p1RoundWins > p2RoundWins) matchWinner = 1;
+            else if (p2RoundWins > p1RoundWins) matchWinner = 2;
+            else matchWinner = 3;
+            isMatchOver = true;
+
+            RpcShowMatchResult(matchWinner, p1RoundWins, p2RoundWins, p1TotalCredits, p2TotalCredits);
+            yield return new WaitForSeconds(5f);
+            NetworkManager.singleton.ServerChangeScene(SceneManager.GetActiveScene().name);
+            yield break;
+        }
+
+        ResetPlayersForNextRound();
+        StartShopPhase();
+    }
+
+    [Server]
+    private void ResetPlayersForNextRound()
+    {
+        _p1RoundDamageDealt = 0;
+        _p2RoundDamageDealt = 0;
+
+        int idx = 0;
+        foreach (var player in GameManager.players)
+        {
+            if (player == null) continue;
+
+            PlayerCombat pc = player.GetComponent<PlayerCombat>();
+            if (pc != null) pc.ResetRoundStats();
+
+            Vector3 spawnPos = (idx == 0) ? _spawnP1 : _spawnP2;
+            player.transform.position = spawnPos;
+
+            PlayerController opponent = player.GetComponent<PlayerController>().GetOpponent();
+            if (opponent != null)
+            {
+                Vector3 lookDir = opponent.transform.position - spawnPos;
+                lookDir.y = 0;
+                if (lookDir != Vector3.zero)
+                    player.transform.rotation = Quaternion.LookRotation(lookDir);
+            }
+            idx++;
+        }
+
+        // Bot is reused between rounds — EnsureBotExists will respawn only if missing
+        if (_activeBot != null)
+        {
+            PlayerCombat botCombat = _activeBot.GetComponent<PlayerCombat>();
+            if (botCombat != null) botCombat.ResetRoundStats();
+            _activeBot.transform.position = _spawnP2;
+
+            PlayerController botController = _activeBot.GetComponent<PlayerController>();
+            PlayerController human = null;
+            foreach (var p in GameManager.players)
+                if (p != null && p.GetComponent<BotController>() == null) { human = p; break; }
+            if (human != null && botController != null)
+            {
+                Vector3 lookDir = human.transform.position - _spawnP2;
+                lookDir.y = 0;
+                if (lookDir != Vector3.zero)
+                    _activeBot.transform.rotation = Quaternion.LookRotation(lookDir);
+            }
+        }
+    }
+
+    [ClientRpc]
+    private void RpcShowRoundResult(int winner, string reason, int p1Credits, int p2Credits,
+                                     float p1Pct, float p2Pct,
+                                     int p1Exc, int p2Exc,
+                                     int p1Ctr, int p2Ctr)
+    {
+        // Round result overlay drawn in OnGUI via _lastRoundResult fields
+        // This is a lightweight RPC; actual display is handled in OnGUI
+        Debug.Log($"<color=yellow>[ROUND END]</color> Winner: {winner} | Reason: {reason} | P1: +{p1Credits} credits | P2: +{p2Credits} credits");
+    }
+
+    [ClientRpc]
+    private void RpcShowMatchResult(int winner, int p1Wins, int p2Wins, int p1Credits, int p2Credits)
+    {
+        Debug.Log($"<color=green>[MATCH END]</color> Winner: {winner} | Score {p1Wins}-{p2Wins} | P1 Credits: {p1Credits} | P2 Credits: {p2Credits}");
+    }
+
     [ClientRpc] private void RpcClearLogs() { combatLogs.Clear(); }
 
     private void Update()
@@ -228,30 +641,32 @@ public class RhythmRoundManager : NetworkBehaviour
         if (!isRoundActive || _startTime == 0) return;
         if (_tiebreakerPaused) return;
 
-        // --- NEW: DEATH CHECK ---
-        // The round now only ends if someone is dead
-        bool anyoneDead = false;
-        foreach (var p in GameManager.players)
-        {
-            if (p != null && p.GetComponent<PlayerCombat>().CurrentHealth <= 0)
-                anyoneDead = true;
-        }
-
-        if (anyoneDead)
-        {
-            StopRound();
-            return;
-        }
-
         if (isServer)
         {
-            float currentTime = GetCurrentTrackTime();
+            // --- ROUND END CHECKS ---
+            bool shouldEndRound = false;
 
-            // --- NEW: MUSIC LOOPING LOGIC ---
-            // If we run out of impacts but the round is still active, refill the list
-            if (_upcomingImpacts.Count == 0)
+            if (_upcomingImpacts.Count == 0) shouldEndRound = true;
+
+            if (!shouldEndRound)
+            {
+                foreach (var p in GameManager.players)
+                {
+                    // Percentage limit removed — round only ends when music finishes
+                }
+            }
+
+            if (shouldEndRound && !_isEndingRound)
             {
                 StopRound();
+                StartCoroutine(EndRoundRoutine());
+                return;
+            }
+
+            float currentTime = GetCurrentTrackTime();
+
+            if (_upcomingImpacts.Count == 0)
+            {
                 return;
             }
 
@@ -476,6 +891,10 @@ public class RhythmRoundManager : NetworkBehaviour
 
         p2DamageTaken += dmgToP2;
         p1DamageTaken += dmgToP1;
+
+        // Track damage dealt for round economy
+        if (dmgToP2 > 0) _p1RoundDamageDealt += dmgToP2;
+        if (dmgToP1 > 0) _p2RoundDamageDealt += dmgToP1;
 
         int p1State = (p1Result == 1 || p1Result == -1) ? 1 : (p1DamageTaken > 0 ? -1 : 0);
         int p2State = (p2Result == 1 || p2Result == -1) ? 1 : (p2DamageTaken > 0 ? -1 : 0);
@@ -831,7 +1250,8 @@ public class RhythmRoundManager : NetworkBehaviour
     [Server]
     private void GrantCounterBonus(CardManager cm, PlayerCombat pc, bool usedAttack)
     {
-        if (cm == null) return;
+        if (cm == null || pc == null) return;
+        pc.roundCounterCount++;
         if (usedAttack) // attacked successfully → gain DEF slot
         {
             if (cm.defenseSlotsRemaining >= cm.defenseSlotTotal) return;
@@ -909,6 +1329,7 @@ public class RhythmRoundManager : NetworkBehaviour
             }
             float chainOffset = Mathf.Abs(targetBeat - pc.lastVocalSpikeTime);
             string chainRating = (chainOffset <= 0.1f) ? "EXCELLENT" : "GOOD";
+            if (chainRating == "EXCELLENT") pc.roundExcellentCount++;
             Debug.Log($"<color=cyan>[TIMING EVAL]</color> {pc.name} | CHAIN Beat: {targetBeat:F3}s | Spike: {pc.lastVocalSpikeTime:F3}s | Offset: {chainOffset:F3}s => <color=yellow>{chainRating}</color>");
             pc.TargetShowTimingFeedback(chainRating);
             return;
@@ -931,6 +1352,8 @@ public class RhythmRoundManager : NetworkBehaviour
         string rating = "BAD";
         if (offset <= 0.1f) rating = "EXCELLENT";
         else if (offset <= window) rating = "GOOD";
+
+        if (rating == "EXCELLENT") pc.roundExcellentCount++;
 
         Debug.Log($"<color=cyan>[TIMING EVAL]</color> {pc.name} | Beat: {targetBeat:F3}s | Voice Spike: {pc.lastVocalSpikeTime:F3}s | Offset: {offset:F3}s | Window: {window}s => <color=yellow>{rating}</color>");
         pc.TargetShowTimingFeedback(rating);
@@ -1080,6 +1503,13 @@ public class RhythmRoundManager : NetworkBehaviour
     {
         if (TiebreakerManager.Instance != null && TiebreakerManager.Instance.IsTiebreakerActive) return;
 
+        // --- SHOP PHASE OVERLAY ---
+        if (isShopPhase)
+        {
+            DrawShop();
+            return;
+        }
+
         // --- 1. SERVER CONTROLS (Top Left) ---
         if (NetworkServer.active && isServer)
         {
@@ -1094,22 +1524,30 @@ public class RhythmRoundManager : NetworkBehaviour
             }
             else
             {
-                if (GUILayout.Button("STOP ROUND", GUILayout.Height(40))) StopRound();
+                if (GUILayout.Button("STOP ROUND", GUILayout.Height(40))) { StopRound(); StartCoroutine(EndRoundRoutine()); }
                 GUILayout.Label($"ACTIVE: {currentType}", GUI.skin.box);
             }
             GUILayout.EndArea();
         }
 
-        // --- 2. PLAYER HP (Center Left) ---
-        GUILayout.BeginArea(new Rect(10, Screen.height / 2 - 100, 250, 200));
+        // --- 2. MATCH STATUS (Top Left under server controls) ---
+        GUILayout.BeginArea(new Rect(10, 130, 260, 280));
+        GUIStyle matchStyle = new GUIStyle(GUI.skin.box) { fontSize = 16, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleLeft };
+        matchStyle.normal.textColor = Color.cyan;
+        GUILayout.Label($"ROUND {currentRoundNumber} / 9", matchStyle, GUILayout.Height(30));
+        matchStyle.normal.textColor = Color.yellow;
+        GUILayout.Label($"SCORE: {p1RoundWins} - {p2RoundWins}", matchStyle, GUILayout.Height(30));
+        matchStyle.normal.textColor = Color.green;
+        GUILayout.Label($"P1 Credits: {p1TotalCredits}", matchStyle, GUILayout.Height(28));
+        GUILayout.Label($"P2 Credits: {p2TotalCredits}", matchStyle, GUILayout.Height(28));
+
         foreach (var p in GameManager.players)
         {
             if (p != null)
             {
                 PlayerCombat pc = p.GetComponent<PlayerCombat>();
-                GUIStyle healthStyle = new GUIStyle(GUI.skin.box) { fontSize = 18, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleLeft };
-                healthStyle.normal.textColor = pc.CurrentHealth <= pc.MaxHealth * 0.3f ? Color.red : Color.green;
-                GUILayout.Label($"{p.PlayerName} Health: {pc.CurrentHealth}", healthStyle, GUILayout.Height(40));
+                matchStyle.normal.textColor = pc.CurrentPercentage >= 75f ? Color.red : new Color(0f, 1f, 0.5f);
+                GUILayout.Label($"{p.PlayerName}: {pc.CurrentPercentage:F0}%", matchStyle, GUILayout.Height(30));
             }
         }
         GUILayout.EndArea();
@@ -1186,6 +1624,23 @@ public class RhythmRoundManager : NetworkBehaviour
             GUILayout.EndArea();
             GUI.color = Color.white;
         }
+        // --- MATCH OVER OVERLAY ---
+        if (isMatchOver)
+        {
+            if (_whiteTex == null) { _whiteTex = new Texture2D(1, 1); _whiteTex.SetPixel(0, 0, Color.white); _whiteTex.Apply(); }
+            GUIStyle overlayStyle = new GUIStyle(GUI.skin.label) { fontSize = 42, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+            overlayStyle.normal.textColor = Color.magenta;
+            string matchResult = matchWinner == 1 ? "PLAYER 1 WINS MATCH!" : matchWinner == 2 ? "PLAYER 2 WINS MATCH!" : "MATCH DRAW!";
+            GUI.color = new Color(0f, 0f, 0f, 0.75f);
+            GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), _whiteTex);
+            GUI.color = Color.white;
+            GUI.Label(new Rect(Screen.width / 2 - 300, Screen.height / 2 - 120, 600, 80), matchResult, overlayStyle);
+            overlayStyle.fontSize = 24;
+            overlayStyle.normal.textColor = Color.cyan;
+            GUI.Label(new Rect(Screen.width / 2 - 300, Screen.height / 2 - 20, 600, 40), $"Final Score: {p1RoundWins} - {p2RoundWins}", overlayStyle);
+            GUI.Label(new Rect(Screen.width / 2 - 300, Screen.height / 2 + 30, 600, 40), $"P1 Credits: {p1TotalCredits}  |  P2 Credits: {p2TotalCredits}", overlayStyle);
+        }
+
         DrawBackButton();
     }
 
@@ -1201,7 +1656,7 @@ public class RhythmRoundManager : NetworkBehaviour
         hintStyle.normal.textColor = new Color(0.75f, 0.75f, 0.75f, 1f);
         GUI.Label(new Rect(20f, Screen.height - 80f, 260f, 22f), "Hold [Tab] to free cursor", hintStyle);
 
-        if (isRoundActive) return;
+        if (isRoundActive || isShopPhase) return;
 
         if (GUI.Button(new Rect(20f, Screen.height - 55f, 160f, 40f), "← BACK TO MENU"))
         {
@@ -1210,6 +1665,165 @@ public class RhythmRoundManager : NetworkBehaviour
             else
                 NetworkManager.singleton.StopClient();
         }
+    }
+
+    // ── SHOP UI ────────────────────────────────────────────────────────────
+
+    private void DrawShop()
+    {
+        if (_whiteTex == null) { _whiteTex = new Texture2D(1, 1); _whiteTex.SetPixel(0, 0, Color.white); _whiteTex.Apply(); }
+
+        // Dark overlay
+        GUI.color = new Color(0.04f, 0.04f, 0.08f, 0.96f);
+        GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), _whiteTex);
+        GUI.color = Color.white;
+
+        // Title
+        GUIStyle titleStyle = new GUIStyle(GUI.skin.label) { fontSize = 36, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+        titleStyle.normal.textColor = new Color(1f, 0f, 0.5f);
+        GUI.Label(new Rect(Screen.width / 2 - 350, 30, 700, 55), "PRE-ROUND SHOP", titleStyle);
+
+        // Timer
+        GUIStyle timerStyle = new GUIStyle(GUI.skin.label) { fontSize = 26, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+        timerStyle.normal.textColor = shopTimeRemaining <= 10f ? Color.red : Color.cyan;
+        GUI.Label(new Rect(Screen.width / 2 - 200, 90, 400, 45), $"TIME REMAINING: {Mathf.Max(0f, shopTimeRemaining):F1}s", timerStyle);
+
+        // Instructions
+        GUIStyle instrStyle = new GUIStyle(GUI.skin.label) { fontSize = 16, alignment = TextAnchor.MiddleCenter };
+        instrStyle.normal.textColor = new Color(0.8f, 0.8f, 0.85f);
+        GUI.Label(new Rect(Screen.width / 2 - 350, 135, 700, 28), "Pick 4 cards. Left + Right Dodge count as 1 pick.", instrStyle);
+
+        // Cards grid
+        var localPc = GameManager.localPlayer?.GetComponent<PlayerCombat>();
+        bool isLocked = localPc != null && localPc.localShopLocked;
+
+        float cardW = 220f, cardH = 280f;
+        float gapX = 24f, gapY = 24f;
+        int cols = 3, rows = 2;
+        float totalW = cols * cardW + (cols - 1) * gapX;
+        float totalH = rows * cardH + (rows - 1) * gapY;
+        float startX = Screen.width / 2f - totalW / 2f;
+        float startY = Screen.height / 2f - totalH / 2f + 10f;
+
+        string[] shopCards = { "Jab", "Cross", "Hook", "Block", "Left", "Right" };
+        string[] displayNames = { "PUNCH", "FLANK", "HOOK", "BLOCK", "LEFT", "RIGHT" };
+        Color[] cardColors = {
+            new Color(1f, 0.3f, 0.3f), new Color(1f, 0.3f, 0.3f), new Color(1f, 0.3f, 0.3f),
+            new Color(0.25f, 0.7f, 1f), new Color(0.25f, 0.7f, 1f), new Color(0.25f, 0.7f, 1f)
+        };
+
+        for (int i = 0; i < shopCards.Length; i++)
+        {
+            int col = i % cols;
+            int row = i / cols;
+            float x = startX + col * (cardW + gapX);
+            float y = startY + row * (cardH + gapY);
+            bool isSelected = localPc != null && localPc.localShopSelection.Contains(shopCards[i]);
+            bool isBundlePair = (shopCards[i] == "Left" && localPc != null && localPc.localShopSelection.Contains("Right")) ||
+                                (shopCards[i] == "Right" && localPc != null && localPc.localShopSelection.Contains("Left"));
+            DrawShopCard(new Rect(x, y, cardW, cardH), displayNames[i], shopCards[i], cardColors[i], isSelected, isBundlePair, isLocked);
+        }
+
+        // Pick count
+        int pickCount = localPc != null ? GetPickCount(localPc.localShopSelection) : 0;
+        GUIStyle countStyle = new GUIStyle(GUI.skin.label) { fontSize = 22, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+        countStyle.normal.textColor = pickCount >= 4 ? new Color(0.2f, 1f, 0.4f) : new Color(1f, 0.85f, 0.2f);
+        GUI.Label(new Rect(Screen.width / 2 - 250, startY + totalH + 24, 500, 40), $"PICKS USED: {pickCount} / 4", countStyle);
+
+        // Lock In button
+        if (!isLocked)
+        {
+            GUIStyle btnStyle = new GUIStyle(GUI.skin.button) { fontSize = 24, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+            GUI.color = pickCount >= 4 ? new Color(0.15f, 0.9f, 0.35f) : new Color(0.35f, 0.35f, 0.4f);
+            if (GUI.Button(new Rect(Screen.width / 2 - 140, startY + totalH + 75, 280, 55), "LOCK IN", btnStyle) && pickCount >= 4)
+            {
+                localPc.CmdLockInShop();
+                localPc.localShopLocked = true;
+            }
+            GUI.color = Color.white;
+        }
+        else
+        {
+            GUIStyle lockedStyle = new GUIStyle(GUI.skin.label) { fontSize = 24, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+            lockedStyle.normal.textColor = new Color(0.2f, 1f, 0.4f);
+            GUI.Label(new Rect(Screen.width / 2 - 250, startY + totalH + 75, 500, 55), "LOCKED IN — WAITING...", lockedStyle);
+        }
+    }
+
+    private void DrawShopCard(Rect r, string displayName, string cardName, Color baseColor, bool isSelected, bool isBundlePair, bool isLocked)
+    {
+        // Background
+        Color bg = isSelected ? Color.Lerp(baseColor, Color.white, 0.25f) : new Color(0.06f, 0.06f, 0.1f, 0.92f);
+        bg.a = isSelected ? 0.95f : 0.88f;
+        GUI.color = bg;
+        GUI.DrawTexture(r, _whiteTex);
+
+        // Border
+        Color borderCol = isSelected ? baseColor : new Color(0.3f, 0.3f, 0.4f, 0.7f);
+        if (isBundlePair) borderCol = new Color(0.85f, 0.35f, 1f, 0.95f);
+        GUI.color = borderCol;
+        float bt = 4f;
+        GUI.DrawTexture(new Rect(r.x, r.y, r.width, bt), _whiteTex);
+        GUI.DrawTexture(new Rect(r.x, r.y + r.height - bt, r.width, bt), _whiteTex);
+        GUI.DrawTexture(new Rect(r.x, r.y, bt, r.height), _whiteTex);
+        GUI.DrawTexture(new Rect(r.x + r.width - bt, r.y, bt, r.height), _whiteTex);
+
+        // Card name
+        GUI.color = Color.white;
+        GUIStyle nameStyle = new GUIStyle(GUI.skin.label) { fontSize = 26, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+        GUI.Label(new Rect(r.x, r.y + 30, r.width, 45), displayName, nameStyle);
+
+        // Selection indicator
+        if (isSelected)
+        {
+            GUIStyle selStyle = new GUIStyle(GUI.skin.label) { fontSize = 16, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+            selStyle.normal.textColor = new Color(0.2f, 1f, 0.5f);
+            GUI.Label(new Rect(r.x, r.y + r.height - 60, r.width, 30), "SELECTED", selStyle);
+        }
+
+        // Bundle indicator
+        if (isBundlePair)
+        {
+            GUIStyle bundleStyle = new GUIStyle(GUI.skin.label) { fontSize = 14, fontStyle = FontStyle.Italic, alignment = TextAnchor.MiddleCenter };
+            bundleStyle.normal.textColor = new Color(0.85f, 0.45f, 1f);
+            GUI.Label(new Rect(r.x, r.y + r.height - 85, r.width, 25), "DODGE BUNDLE", bundleStyle);
+        }
+
+        // Click handling
+        if (!isLocked && GUI.Button(r, "", GUI.skin.box))
+        {
+            var localPc = GameManager.localPlayer?.GetComponent<PlayerCombat>();
+            if (localPc != null)
+            {
+                localPc.CmdToggleShopCard(cardName);
+                // Local prediction
+                if (localPc.localShopSelection.Contains(cardName))
+                {
+                    localPc.localShopSelection.Remove(cardName);
+                    if (cardName == "Left") localPc.localShopSelection.Remove("Right");
+                    if (cardName == "Right") localPc.localShopSelection.Remove("Left");
+                }
+                else
+                {
+                    int picks = GetPickCount(localPc.localShopSelection);
+                    if (picks < 4)
+                    {
+                        localPc.localShopSelection.Add(cardName);
+                        if (cardName == "Left" && !localPc.localShopSelection.Contains("Right")) localPc.localShopSelection.Add("Right");
+                        if (cardName == "Right" && !localPc.localShopSelection.Contains("Left")) localPc.localShopSelection.Add("Left");
+                    }
+                }
+            }
+        }
+
+        GUI.color = Color.white;
+    }
+
+    private int GetPickCount(List<string> selection)
+    {
+        int count = selection.Count;
+        if (selection.Contains("Left") && selection.Contains("Right")) count--;
+        return count;
     }
 
     private Color GetStateColor(int state) { if (state == 1) return Color.green; if (state == -1) return Color.red; return Color.white; }

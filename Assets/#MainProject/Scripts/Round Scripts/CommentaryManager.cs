@@ -251,8 +251,8 @@ public class CommentaryManager : MonoBehaviour
             var pc = player.GetComponent<PlayerCombat>();
             if (pc == null || pc.IsDead) continue;
 
-            float frac = (float)pc.CurrentHealth / pc.MaxHealth;
-            if (frac < 0.25f && !_lowHealthFired)
+            float pct = pc.CurrentPercentage;
+            if (pct >= 75f && !_lowHealthFired)
             {
                 _lowHealthFired = true;
                 Trigger(CommentaryEvent.LowHealth);

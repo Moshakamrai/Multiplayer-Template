@@ -7,11 +7,11 @@ using UnityEngine.SceneManagement;
 
 public class PlayerCombat : NetworkBehaviour
 {
-    [SyncVar] public int CurrentHealth = 100;
-    [SyncVar] public int MaxHealth = 100;
-    [SyncVar] public int CurrentShield = 25;
-    public int MaxShield = 25;
-    public Text ShieldText;
+    [SyncVar] public float CurrentPercentage = 0f;
+    [SyncVar] public int roundDamageDealt = 0;
+    [SyncVar] public int roundExcellentCount = 0;
+    [SyncVar] public int roundCounterCount = 0;
+    [SyncVar] public string availableCardsString = "";
     public Animator animator;
     public bool isAttacking = false;
     public bool IsDead { get; private set; }
@@ -27,6 +27,22 @@ public class PlayerCombat : NetworkBehaviour
 
     public struct RhythmAction { public string attack; public Vector3 dash; }
     public List<RhythmAction> _comboBuffer = new List<RhythmAction>();
+
+    // ── Shop Phase (local client state) ────────────────────────────────────
+    public List<string> localShopSelection = new List<string>();
+    public bool localShopLocked = false;
+
+    [Command]
+    public void CmdToggleShopCard(string cardName)
+    {
+        RhythmRoundManager.Instance?.ToggleShopCard(this, cardName);
+    }
+
+    [Command]
+    public void CmdLockInShop()
+    {
+        RhythmRoundManager.Instance?.LockInShop(this);
+    }
 
     [Header("VFX Settings")]
     public Renderer playerRenderer;
@@ -75,17 +91,35 @@ public class PlayerCombat : NetworkBehaviour
 
     public override void OnStartServer()
     {
-        // Bots: 250 HP; real players: 400 HP
-        if (GetComponent<BotController>() == null)
-            CurrentHealth = 400;
-        else
-            CurrentHealth = 250;
-        MaxHealth = CurrentHealth;
+        CurrentPercentage = 0f;
+        ResetRoundStats();
+    }
+
+    [Server]
+    public void ResetRoundStats()
+    {
+        CurrentPercentage = 0f;
+        roundDamageDealt = 0;
+        roundExcellentCount = 0;
+        roundCounterCount = 0;
+        IsDead = false;
+        IsStaggered = false;
+        StaggerBeatsRemaining = 0;
+        IsParryActive = false;
+        lastVocalSpikeTime = -1f;
+        lastVocalSpikeVolume = 0f;
+        _pendingAttackTrigger = "";
+        _pendingDashDirection = Vector3.zero;
+        _attackQueue.Clear();
+        _comboBuffer.Clear();
+        _pressureLevel = 0f;
+        _staggerRecoveryCharge = 0f;
+        _staggerTimingEscaped = false;
+        _spikeLockedThisBeat = false;
     }
 
     private void Start()
     {
-        if (isLocalPlayer && ShieldText == null) ShieldText = GameObject.Find("ShieldText")?.GetComponent<Text>();
         _vcm = GetComponent<VoiceCommandManager>();
         _cardManager = GetComponent<CardManager>();
     }
@@ -97,7 +131,7 @@ public class PlayerCombat : NetworkBehaviour
 
     private void Update()
     {
-        if (isLocalPlayer && ShieldText != null) ShieldText.text = CurrentShield.ToString();
+        // Percentage system — no health bar UI updates needed here
 
         // --- Fade the timing text ---
         if (isLocalPlayer && _timingFade > 0)
@@ -168,7 +202,9 @@ public class PlayerCombat : NetworkBehaviour
         float timeUntilImpact = nextBeat - currentTime;
 
         // Under-pressure players get a tighter shout window (max 40% reduction at full pressure)
-        float effectiveWindow = SHOUT_WINDOW * (1f - _pressureLevel * 0.4f);
+        // Plus additional reduction based on damage percentage (every 50% = -4% window, max -20%)
+        float percentageReduction = GetShoutWindowReduction(CurrentPercentage);
+        float effectiveWindow = SHOUT_WINDOW * (1f - _pressureLevel * 0.4f - percentageReduction);
         bool inShoutWindow = timeUntilImpact > 0f && timeUntilImpact <= effectiveWindow;
         if (!inShoutWindow) return;
 
@@ -244,7 +280,8 @@ public class PlayerCombat : NetworkBehaviour
         if (!_staggerTimingEscaped && nextBeat > 0f && _vcm != null)
         {
             float timeToNext = nextBeat - trackTime;
-            if (timeToNext >= 0f && timeToNext <= SHOUT_WINDOW && vol >= _vcm.parryVolumeThreshold)
+            float escapeWindow = SHOUT_WINDOW * (1f - GetShoutWindowReduction(CurrentPercentage));
+            if (timeToNext >= 0f && timeToNext <= escapeWindow && vol >= _vcm.parryVolumeThreshold)
             {
                 _staggerTimingEscaped = true;
                 CmdEscapeStaggerTiming();
@@ -518,15 +555,10 @@ public class PlayerCombat : NetworkBehaviour
     [Server]
     public void TakeDamage(int damage, Vector3 knockbackDir = default)
     {
-        if (IsDead) return;
         StartCoroutine(FlashEffectRoutine());
-        CurrentHealth -= damage;
-        if (CurrentHealth <= 0) StartCoroutine(DelayedKnockout(0f));
-        else
-        {
-            RpcTriggerHurt("Hurt " + Random.Range(1, 5), 0f, damage);
-            if (knockbackDir != default) RpcNudgeBack(knockbackDir);
-        }
+        CurrentPercentage += damage;
+        RpcTriggerHurt("Hurt " + Random.Range(1, 5), 0f, damage);
+        if (knockbackDir != default) RpcNudgeBack(knockbackDir);
     }
 
     [ClientRpc]
@@ -547,6 +579,16 @@ public class PlayerCombat : NetworkBehaviour
         float shakeMag = damage > 15 ? 0.65f : damage > 8 ? 0.38f : 0.18f;
         CameraShake.Instance?.Shake(shakeDur, shakeMag);
 
+        // ── SINGLE MODE ONLY: hurt slow-mo effect ──
+        var rmm = RhythmRoundManager.Instance;
+        bool isSingleMode = rmm != null && rmm.IsSingleMoveMode();
+        if (isSingleMode && animator != null)
+        {
+            animator.speed = 0.15f;
+            Time.timeScale = 0.25f;
+            StartCoroutine(RestoreAnimatorSpeed(0.9f));
+        }
+
         if (isLocalPlayer)
         {
             _pressureLevel = Mathf.Min(1f, _pressureLevel + PRESSURE_GAIN);
@@ -558,6 +600,13 @@ public class PlayerCombat : NetworkBehaviour
             GetComponent<PlayerController>().InterruptMovement();
             StartCoroutine(HurtStunTimer());
         }
+    }
+
+    private IEnumerator RestoreAnimatorSpeed(float delay)
+    {
+        yield return new WaitForSecondsRealtime(delay);
+        Time.timeScale = 1.0f;
+        if (animator != null) animator.speed = 1f;
     }
 
     public bool HasOpenSlot(bool isMovement)
@@ -572,8 +621,8 @@ public class PlayerCombat : NetworkBehaviour
 
     private IEnumerator HurtStunTimer() { IsHurting = true; yield return new WaitForSeconds(0.2f); IsHurting = false; }
     private IEnumerator FlashEffectRoutine() { if (playerRenderer == null || flashMaterial == null) yield break; playerRenderer.material = flashMaterial; yield return new WaitForSeconds(0.1f); playerRenderer.material = _originalMaterial; }
-    [ClientRpc] void RpcKnockout() { IsDead = true; if (animator != null) animator.SetTrigger("Knock out"); CommentaryManager.Instance?.Trigger(CommentaryEvent.Knockout, forceInterrupt: true); CameraShake.Instance?.Shake(0.45f, 0.9f); if (isServer) StartCoroutine(ServerRestartMatchRoutine()); }
-    [Server] private IEnumerator ServerRestartMatchRoutine() { yield return new WaitForSeconds(4f); NetworkManager.singleton.ServerChangeScene(SceneManager.GetActiveScene().name); }
+    [ClientRpc] void RpcKnockout() { IsDead = true; if (animator != null) animator.SetTrigger("Knock out"); CommentaryManager.Instance?.Trigger(CommentaryEvent.Knockout, forceInterrupt: true); CameraShake.Instance?.Shake(0.45f, 0.9f); }
+    [Server] public IEnumerator ServerRestartMatchRoutine() { yield return new WaitForSeconds(4f); NetworkManager.singleton.ServerChangeScene(SceneManager.GetActiveScene().name); }
 
     private Texture2D _whiteTexture;
 
@@ -581,6 +630,7 @@ public class PlayerCombat : NetworkBehaviour
     {
         if (!isLocalPlayer) return;
         if (TiebreakerManager.Instance != null && TiebreakerManager.Instance.IsTiebreakerActive) return;
+        if (RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isShopPhase) return;
 
         // --- INITIALIZE TEXTURE ---
         if (_whiteTexture == null)
@@ -648,7 +698,8 @@ public class PlayerCombat : NetworkBehaviour
             float nextBeat  = _staggerRmm.GetNextBeatTime();
             float trackTime = _staggerRmm.GetCurrentTrackTime();
             float timeToNext = nextBeat - trackTime;
-            bool  inWindow   = nextBeat > 0f && timeToNext >= 0f && timeToNext <= SHOUT_WINDOW;
+            float staggerWindow = SHOUT_WINDOW * (1f - GetShoutWindowReduction(CurrentPercentage));
+            bool  inWindow   = nextBeat > 0f && timeToNext >= 0f && timeToNext <= staggerWindow;
             float pulse      = (Mathf.Sin(Time.time * 12f) + 1f) * 0.5f;
 
             GUIStyle hintLbl = new GUIStyle(GUI.skin.label)
@@ -708,9 +759,10 @@ public class PlayerCombat : NetworkBehaviour
                 GUI.color = new Color(0.1f, 0.1f, 0.1f, 1f);
                 GUI.DrawTexture(new Rect(posX, posY, barWidth, barHeight), _whiteTexture);
 
-                float healthPercent = oppCombat.MaxHealth > 0 ? (float)oppCombat.CurrentHealth / oppCombat.MaxHealth : 0f;
-                GUI.color = Color.red;
-                GUI.DrawTexture(new Rect(posX + 5, posY + 5, (barWidth - 10) * healthPercent, barHeight - 10), _whiteTexture);
+                float pctPercent = Mathf.Clamp01(oppCombat.CurrentPercentage / 100f);
+                Color barColor = GetPercentageColor(oppCombat.CurrentPercentage);
+                GUI.color = barColor;
+                GUI.DrawTexture(new Rect(posX + 5, posY + 5, (barWidth - 10) * pctPercent, barHeight - 10), _whiteTexture);
 
                 GUI.color = Color.white;
                 GUIStyle nameStyle = new GUIStyle(GUI.skin.label)
@@ -721,7 +773,55 @@ public class PlayerCombat : NetworkBehaviour
                 };
 
                 string oppName = string.IsNullOrEmpty(opponent.PlayerName) ? "BOT UNIT" : opponent.PlayerName;
-                GUI.Label(new Rect(posX, posY, barWidth, barHeight), $"{oppName}: {oppCombat.CurrentHealth} HP", nameStyle);
+                GUI.Label(new Rect(posX, posY, barWidth, barHeight), $"{oppName}: {oppCombat.CurrentPercentage:F0}%", nameStyle);
+
+                // --- OPPONENT CARDS PANEL (Left Middle) ---
+                if (!string.IsNullOrEmpty(oppCombat.availableCardsString))
+                {
+                    var oppCards = new List<string>(oppCombat.availableCardsString.Split('|'));
+                    float panelW = 220f;
+                    float panelH = 36f + oppCards.Count * 34f;
+                    float panelX = 20f;
+                    float panelY = Screen.height / 2f - panelH / 2f;
+
+                    GUI.color = new Color(0.06f, 0.06f, 0.1f, 0.92f);
+                    GUI.DrawTexture(new Rect(panelX, panelY, panelW, panelH), _whiteTexture);
+
+                    GUI.color = new Color(1f, 0f, 0.5f, 0.85f);
+                    GUI.DrawTexture(new Rect(panelX, panelY, panelW, 3f), _whiteTexture);
+                    GUI.DrawTexture(new Rect(panelX, panelY + panelH - 3f, panelW, 3f), _whiteTexture);
+                    GUI.DrawTexture(new Rect(panelX, panelY, 3f, panelH), _whiteTexture);
+                    GUI.DrawTexture(new Rect(panelX + panelW - 3f, panelY, 3f, panelH), _whiteTexture);
+
+                    GUIStyle hdrStyle = new GUIStyle(GUI.skin.label)
+                    { fontSize = 14, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+                    hdrStyle.normal.textColor = new Color(1f, 0.3f, 0.6f);
+                    GUI.color = Color.white;
+                    GUI.Label(new Rect(panelX, panelY + 6f, panelW, 26f), $"{oppName}'s CARDS", hdrStyle);
+
+                    GUIStyle cardStyle = new GUIStyle(GUI.skin.label)
+                    { fontSize = 13, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleLeft };
+                    for (int i = 0; i < oppCards.Count; i++)
+                    {
+                        string card = oppCards[i];
+                        string display = card switch
+                        {
+                            "Jab" => "  PUNCH",
+                            "Cross" => "  FLANK",
+                            "Hook" => "  HOOK",
+                            "Block" => "  BLOCK",
+                            "Left" => "  DODGE LEFT",
+                            "Right" => "  DODGE RIGHT",
+                            "UnbreakablePunch" => "  BOOM",
+                            "ParryIntent" => "  CAGE",
+                            _ => $"  {card.ToUpper()}"
+                        };
+                        bool isAtk = CardManager.IsAttackTrigger(card);
+                        cardStyle.normal.textColor = isAtk ? new Color(1f, 0.4f, 0.4f) : new Color(0.4f, 0.75f, 1f);
+                        GUI.Label(new Rect(panelX + 8f, panelY + 34f + i * 30f, panelW - 16f, 28f), display, cardStyle);
+                    }
+                    GUI.color = Color.white;
+                }
             }
         }
 
@@ -855,6 +955,20 @@ public class PlayerCombat : NetworkBehaviour
         if (dir == Vector3.forward) return "Forward"; if (dir == Vector3.back) return "Back";
         if (dir == Vector3.left || dir == new Vector3(-1, 0, 0)) return "Left";
         if (dir == Vector3.right || dir == new Vector3(1, 0, 0)) return "Right"; return dir.ToString();
+    }
+
+    public static Color GetPercentageColor(float percentage)
+    {
+        if (percentage >= 150f) return new Color(1f, 0f, 1f);     // magenta
+        if (percentage >= 100f) return new Color(1f, 0.1f, 0.1f); // red
+        if (percentage >= 50f)  return new Color(1f, 0.6f, 0f);   // orange
+        return new Color(0f, 1f, 0.5f);                           // green
+    }
+
+    public static float GetShoutWindowReduction(float percentage)
+    {
+        int thresholds = Mathf.FloorToInt(percentage / 50f);
+        return Mathf.Min(thresholds * 0.04f, 0.20f); // max 20% reduction
     }
 
     [TargetRpc]

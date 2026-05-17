@@ -39,8 +39,24 @@ public class VoiceCommandManager : NetworkBehaviour
         }
     }
 
+    private string _lastEquippedCards = "";
+
     void Update()
     {
+        // ── DYNAMIC GRAMMAR: rebuild Vosk grammar when equipped cards change ──
+        if (VoskInstance != null && _myCards != null)
+        {
+            string current = _myCards.availableCardsString;
+            if (current != _lastEquippedCards)
+            {
+                _lastEquippedCards = current;
+                var triggers = string.IsNullOrEmpty(current)
+                    ? new List<string>()
+                    : new List<string>(current.Split('|'));
+                VoskInstance.RebuildGrammar(triggers);
+            }
+        }
+
         if (string.IsNullOrEmpty(_pendingRetryWord)) return;
         bool consumed = ProcessWords(_pendingRetryWord);
         if (consumed)
@@ -175,6 +191,20 @@ public class VoiceCommandManager : NetworkBehaviour
             else if (word == "crush" || word == "crash" || word == "crushing" || word == "crashing" || GetSimilarity(word, "crush") > 0.75f) { trigger = "UnbreakablePunch"; recognized = true; }
             else if (GetSimilarity(word, "left") > 0.75f) { trigger = "Left"; dashDir = Vector3.left; recognized = true; }
             else if (GetSimilarity(word, "right") > 0.75f) { trigger = "Right"; dashDir = Vector3.right; recognized = true; }
+            // ── NEW CARDS (Basic) ──
+            else if (GetSimilarity(word, "grapple") > 0.75f || word == "grab" || word == "wrap") { trigger = "Grapple"; recognized = true; }
+            else if (GetSimilarity(word, "feint") > 0.70f || word == "faint" || word == "paint") { trigger = "Feint"; recognized = true; }
+            else if (GetSimilarity(word, "clutch") > 0.75f || word == "catch" || word == "crunch") { trigger = "Clutch"; recognized = true; }
+            // ── NEW CARDS (Advanced) ──
+            else if (GetSimilarity(word, "uppercut") > 0.75f || word == "upper" || word == "cutter") { trigger = "Uppercut"; recognized = true; }
+            else if (GetSimilarity(word, "sweep") > 0.75f || word == "swipe" || word == "sweet") { trigger = "Sweep"; recognized = true; }
+            else if (GetSimilarity(word, "focus") > 0.75f || word == "charge" || word == "power") { trigger = "Focus"; recognized = true; }
+            else if (GetSimilarity(word, "taunt") > 0.75f || word == "taught" || word == "tall") { trigger = "Taunt"; recognized = true; }
+            // ── NEW CARDS (Legendary) ──
+            else if (GetSimilarity(word, "overclock") > 0.70f || word == "over" || word == "clock" || word == "overload") { trigger = "Overclock"; recognized = true; }
+            else if (GetSimilarity(word, "reverse") > 0.75f || word == "revert" || word == "reflect") { trigger = "Reverse"; recognized = true; }
+            else if (GetSimilarity(word, "trap") > 0.75f || word == "trip" || word == "track") { trigger = "Trap"; recognized = true; }
+            else if (GetSimilarity(word, "mirror") > 0.75f || word == "mere" || word == "near") { trigger = "Mirror"; recognized = true; }
             // Combo card selection — "one/two/three/four"
             
            
@@ -245,11 +275,13 @@ public class VoiceCommandManager : NetworkBehaviour
                         if (isMovement) _myController.CmdRhythmDash(dashDir);
                         else
                         {
+                            // Fallback non-rhythm animation triggers
                             if (trigger == "ParryIntent") _myCombat.animator.Play("Parry", 0, 0f);
                             else if (trigger == "Jab")   _myCombat.VoiceAttackJab();
                             else if (trigger == "Cross") _myCombat.VoiceAttackCross();
                             else if (trigger == "Hook")  _myCombat.VoiceAttackHook();
                             else if (trigger == "Block") _myCombat.VoiceAttackBlock();
+                            else if (_myCombat.animator != null) _myCombat.animator.Play(trigger, 0, 0f);
                             CmdUseCardOnServer(trigger);
                             _echoGuardUntil = Time.time + EXECUTION_ECHO_GUARD;
                             VoskInstance.FlushAudioBuffer();

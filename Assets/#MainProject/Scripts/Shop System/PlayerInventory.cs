@@ -35,6 +35,7 @@ public class PlayerInventory : MonoBehaviour
         if (!ownedCombatCards.Contains(cardId))
             ownedCombatCards.Add(cardId);
         credits -= cost;
+        Debug.Log($"<color=cyan>INVENTORY:</color> Bought {cardId}. Now owning: {string.Join(",", ownedCombatCards)}");
         return true;
     }
 

@@ -57,6 +57,20 @@ public class PlayerCombat : NetworkBehaviour
     }
 
     [Command]
+    public void CmdSelectRound(int roundTypeValue)
+    {
+        var type = (RoundType)roundTypeValue;
+        RhythmRoundManager.Instance?.SelectRoundType(type, "");
+    }
+
+    [Command]
+    public void CmdSelectCustomRound(int roundTypeValue, string customMapName)
+    {
+        var type = (RoundType)roundTypeValue;
+        RhythmRoundManager.Instance?.SelectRoundType(type, customMapName);
+    }
+
+    [Command]
     public void CmdBuyCombatCard(int slotIndex)
     {
         var inv = GetComponent<PlayerInventory>();
@@ -435,7 +449,20 @@ public class PlayerCombat : NetworkBehaviour
     {
         isAttacking = true;
         if (isLocalPlayer && animator != null) animator.Play(trigger, 0, 0f);
-        int damageToSet = (trigger == "Hook") ? 25 : (trigger == "Cross") ? 15 : (trigger == "Jab") ? 10 : 0;
+        int damageToSet = trigger switch
+        {
+            "Jab"              => 10,
+            "Cross"            => 15,
+            "Hook"             => 25,
+            "UnbreakablePunch" => 30,
+            "Grapple"          => 18,
+            "Feint"            => 5,
+            "Uppercut"         => 20,
+            "Sweep"            => 16,
+            "Overclock"        => 35,
+            "Reverse"          => 0,
+            _                  => 0
+        };
         CmdTriggerAttack(trigger, damageToSet);
         yield return new WaitForSeconds(0.1f);
     }
@@ -553,15 +580,11 @@ public class PlayerCombat : NetworkBehaviour
             // Map the internal logical triggers to the actual Animator state names
             string animToPlay = attack;
 
-            if (attack == "ParryIntent")
-            {
-                animToPlay = "Parry";
-            }
-            else if (attack == "UnbreakablePunch")
-            {
-                // Mapping the "Boom" command logic to your "UpperCut" animation
-                animToPlay = "Uppercut";
-            }
+            if (attack == "ParryIntent")        animToPlay = "Parry";
+            else if (attack == "UnbreakablePunch") animToPlay = "Uppercut";
+            // New cards: most use their trigger name directly as animator state
+            // If your animator doesn't have these states yet, they'll gracefully fall through
+            // Animator states needed: Grapple, Feint, Clutch, Uppercut, Sweep, Focus, Taunt, Overclock, Reverse, Trap, Cage, Mirror
 
             if (animator != null)
             {
@@ -606,6 +629,14 @@ public class PlayerCombat : NetworkBehaviour
     private IEnumerator DelayedHurtRoutine(string trigger, float delay, int damage)
     {
         yield return new WaitForSeconds(delay);
+
+        // Reset stagger recovery bar when hit — prevents stale UI from lingering
+        if (isLocalPlayer)
+        {
+            _staggerRecoveryCharge = 0f;
+            _staggerTimingEscaped = false;
+        }
+
         if (animator) animator.SetTrigger(trigger);
 
         float shakeDur = damage > 15 ? 0.35f : damage > 8 ? 0.20f : 0.10f;
@@ -675,7 +706,9 @@ public class PlayerCombat : NetworkBehaviour
 
         // --- STAGGER RECOVERY PANEL (enhanced visual) ---
         var _staggerRmm = RhythmRoundManager.Instance;
-        if (IsStaggered && _staggerRmm != null && _staggerRmm.isRoundActive)
+        // Hide panel if charge was reset by a hit (even if still staggered)
+        bool showStaggerPanel = IsStaggered && _staggerRmm != null && _staggerRmm.isRoundActive && _staggerRecoveryCharge > 0.001f;
+        if (showStaggerPanel)
         {
             float sw = 420f, sh = 220f;
             float sx = Screen.width / 2 - sw / 2;   // centered
@@ -847,6 +880,18 @@ public class PlayerCombat : NetworkBehaviour
                             "Right" => "  DODGE RIGHT",
                             "UnbreakablePunch" => "  BOOM",
                             "ParryIntent" => "  CAGE",
+                            "Grapple" => "  GRAPPLE",
+                            "Feint" => "  FEINT",
+                            "Clutch" => "  CLUTCH",
+                            "Uppercut" => "  UPPERCUT",
+                            "Sweep" => "  SWEEP",
+                            "Focus" => "  FOCUS",
+                            "Taunt" => "  TAUNT",
+                            "Overclock" => "  OVERCLOCK",
+                            "Reverse" => "  REVERSE",
+                            "Trap" => "  TRAP",
+                            "Cage" => "  CAGE",
+                            "Mirror" => "  MIRROR",
                             _ => $"  {card.ToUpper()}"
                         };
                         bool isAtk = CardManager.IsAttackTrigger(card);
@@ -918,8 +963,17 @@ public class PlayerCombat : NetworkBehaviour
             {
                 GUILayout.Label("LOCKED ACTION:", headerStyle);
                 string atk = string.IsNullOrEmpty(_pendingAttackTrigger) ? "None" : _pendingAttackTrigger;
-                if (atk == "ParryIntent") GUI.color = Color.cyan;
-                GUILayout.Label($"Attack: {atk}", new GUIStyle(GUI.skin.label) { fontSize = 18 });
+                string atkDisplay = atk switch
+                {
+                    "ParryIntent" => "CAGE",
+                    "UnbreakablePunch" => "BOOM",
+                    "Jab" => "PUNCH",
+                    "Cross" => "FLANK",
+                    _ => atk
+                };
+                if (atk == "ParryIntent" || atk == "Mirror" || atk == "Trap" || atk == "Cage" || atk == "Reverse" || atk == "Clutch")
+                    GUI.color = Color.cyan;
+                GUILayout.Label($"Attack: {atkDisplay}", new GUIStyle(GUI.skin.label) { fontSize = 18 });
                 GUI.color = Color.white;
             }
             GUILayout.EndArea();
@@ -945,8 +999,14 @@ public class PlayerCombat : NetworkBehaviour
                     var move = _comboBuffer[i];
                     string moveName = string.IsNullOrEmpty(move.attack) ? "DASH" : move.attack;
 
-                    if (moveName == "ParryIntent") moveName = "CAGE";
-                    if (moveName == "UnbreakablePunch") moveName = "BOOM";
+                    moveName = moveName switch
+                    {
+                        "ParryIntent" => "CAGE",
+                        "UnbreakablePunch" => "BOOM",
+                        "Jab" => "PUNCH",
+                        "Cross" => "FLANK",
+                        _ => moveName
+                    };
 
                     GUI.color = Color.cyan;
                     GUILayout.Box($"{i + 1}. {moveName.ToUpper()}", GUILayout.Height(40));

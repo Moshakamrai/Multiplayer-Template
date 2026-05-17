@@ -12,6 +12,7 @@ public class ShopUI : MonoBehaviour
     private GUIStyle _costStyle;
     private GUIStyle _timerStyle;
     private GUIStyle _sectionStyle;
+    private GUIStyle _ownedStyle;
 
     private void Awake() { if (Instance == null) Instance = this; }
 
@@ -26,92 +27,124 @@ public class ShopUI : MonoBehaviour
         var localInv = GameManager.localPlayer?.GetComponent<PlayerInventory>();
 
         // Dark overlay
-        GUI.color = new Color(0.03f, 0.03f, 0.06f, 0.97f);
+        GUI.color = new Color(0.02f, 0.02f, 0.04f, 0.98f);
         GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), _whiteTex);
         GUI.color = Color.white;
 
-        // Title
-        GUI.Label(new Rect(Screen.width / 2 - 300, 15, 600, 45), "ROUND SHOP", _titleStyle);
+        float margin = 15f;
+        float topH = 100f;
+        float panelW = (Screen.width - margin * 4f) / 3f;
+        float panelX1 = margin;
+        float panelX2 = margin * 2f + panelW;
+        float panelX3 = margin * 3f + panelW * 2f;
+        float contentY = topH + 10f;
+        float contentH = Screen.height - contentY - 80f;
 
-        // Timer
+        // ── HEADER ──
+        GUI.Label(new Rect(0, 10, Screen.width, 40), "POST-ROUND SHOP", _titleStyle);
+
+        // Timer + Credits bar
+        float barY = 55f;
         _timerStyle.normal.textColor = spm.shopTimeRemaining <= 15f ? Color.red : Color.cyan;
-        GUI.Label(new Rect(Screen.width / 2 - 150, 60, 300, 35), $"TIME: {Mathf.Max(0f, spm.shopTimeRemaining):F0}s", _timerStyle);
+        GUI.Label(new Rect(panelX1, barY, panelW, 30), $"TIME: {Mathf.Max(0f, spm.shopTimeRemaining):F0}s", _timerStyle);
 
-        // Credits
         string creditsStr = localInv != null ? $"CREDITS: {localInv.credits}" : "CREDITS: --";
-        GUIStyle creditStyle = new GUIStyle(_timerStyle) { fontSize = 20, normal = { textColor = Color.yellow } };
-        GUI.Label(new Rect(Screen.width / 2 - 150, 95, 300, 30), creditsStr, creditStyle);
+        GUIStyle creditStyle = new GUIStyle(_timerStyle) { normal = { textColor = Color.yellow } };
+        GUI.Label(new Rect(panelX2, barY, panelW, 30), creditsStr, creditStyle);
 
-        // ── COMBAT CARDS (6 slots) ──
-        DrawSectionHeader(20, 140, 280, "COMBAT CARDS", new Color(1f, 0.35f, 0.1f));
-        DrawCombatCards(20, 175, localInv);
+        string roundStr = $"ROUND {spm.currentShopRound} SHOP";
+        GUI.Label(new Rect(panelX3, barY, panelW, 30), roundStr, _timerStyle);
 
-        // ── VEX CARDS (3 slots) ──
-        float vexX = Screen.width / 2f - 140f;
-        DrawSectionHeader(vexX, 140, 280, "VEX CARDS", new Color(0.85f, 0.35f, 1f));
-        DrawVexCards(vexX, 175, localInv);
+        // ── THREE PANELS ──
+        DrawPanelBackground(panelX1, contentY, panelW, contentH, new Color(0.06f, 0.04f, 0.02f, 0.95f));
+        DrawPanelBackground(panelX2, contentY, panelW, contentH, new Color(0.06f, 0.02f, 0.06f, 0.95f));
+        DrawPanelBackground(panelX3, contentY, panelW, contentH, new Color(0.02f, 0.06f, 0.03f, 0.95f));
 
-        // ── TRAIT CARDS (3 slots) ──
-        float traitX = Screen.width - 300f;
-        DrawSectionHeader(traitX, 140, 280, "TRAIT CARDS", new Color(0.2f, 0.85f, 0.35f));
-        DrawTraitCards(traitX, 175, localInv);
+        DrawSectionHeader(panelX1, contentY, panelW, "COMBAT CARDS", new Color(1f, 0.5f, 0.15f));
+        DrawCombatCards(panelX1, contentY + 35f, panelW, contentH - 35f, localInv);
+
+        DrawSectionHeader(panelX2, contentY, panelW, "VEX CARDS", new Color(0.9f, 0.3f, 1f));
+        DrawVexCards(panelX2, contentY + 35f, panelW, contentH - 35f, localInv);
+
+        DrawSectionHeader(panelX3, contentY, panelW, "TRAIT CARDS", new Color(0.25f, 0.9f, 0.4f));
+        DrawTraitCards(panelX3, contentY + 35f, panelW, contentH - 35f, localInv);
 
         // Lock In button
         DrawLockInButton();
     }
 
-    private void DrawCombatCards(float startX, float startY, PlayerInventory inv)
+    private void DrawPanelBackground(float x, float y, float w, float h, Color col)
+    {
+        GUI.color = col;
+        GUI.DrawTexture(new Rect(x, y, w, h), _whiteTex);
+        GUI.color = Color.white;
+    }
+
+    private void DrawCombatCards(float startX, float startY, float panelW, float panelH, PlayerInventory inv)
     {
         var slots = ShopPhaseManager.Instance.CombatShopSlots;
-        float cardW = 260f;
-        float cardH = 110f;
-        float gapY = 8f;
+        float pad = 10f;
+        float cardW = panelW - pad * 2f;
+        float cardH = (panelH - pad * 2f - 5f * 5f) / 6f; // 6 cards with 5px gaps
+        float x = startX + pad;
 
         for (int i = 0; i < 6; i++)
         {
-            float y = startY + i * (cardH + gapY);
+            float y = startY + pad + i * (cardH + 5f);
             bool hasCard = i < slots.Count && slots[i] != null;
 
             // Background
-            GUI.color = new Color(0.06f, 0.06f, 0.1f, 0.92f);
-            GUI.DrawTexture(new Rect(startX, y, cardW, cardH), _whiteTex);
+            GUI.color = new Color(0.08f, 0.08f, 0.12f, 0.95f);
+            GUI.DrawTexture(new Rect(x, y, cardW, cardH), _whiteTex);
 
             if (hasCard)
             {
                 var card = slots[i];
                 bool owned = inv != null && inv.ownedCombatCards.Contains(card.cardId);
                 bool canAfford = inv != null && inv.credits >= card.cost;
+                bool inventoryFull = inv != null && inv.ownedCombatCards.Count >= 10;
 
-                // Border color by rarity
+                // Border by rarity
                 Color borderCol = card.rarity switch
                 {
-                    CardRarity.Basic => new Color(0.6f, 0.6f, 0.6f),
-                    CardRarity.Advanced => new Color(0.2f, 0.6f, 1f),
-                    CardRarity.Legendary => new Color(1f, 0.8f, 0.1f),
+                    CardRarity.Basic => new Color(0.5f, 0.5f, 0.5f),
+                    CardRarity.Advanced => new Color(0.2f, 0.5f, 1f),
+                    CardRarity.Legendary => new Color(1f, 0.75f, 0.1f),
                     _ => Color.gray
                 };
-                if (owned) borderCol = new Color(0.2f, 1f, 0.4f);
+                if (owned) borderCol = new Color(0.15f, 0.9f, 0.3f);
 
                 GUI.color = borderCol;
-                GUI.DrawTexture(new Rect(startX, y, cardW, 3f), _whiteTex);
-                GUI.DrawTexture(new Rect(startX, y + cardH - 3f, cardW, 3f), _whiteTex);
+                GUI.DrawTexture(new Rect(x, y, cardW, 4f), _whiteTex);
+                GUI.DrawTexture(new Rect(x, y + cardH - 4f, cardW, 4f), _whiteTex);
 
+                // Name
                 GUI.color = Color.white;
-                GUI.Label(new Rect(startX + 8f, y + 6f, cardW - 16f, 24f), card.displayName.ToUpper(), _cardNameStyle);
+                GUI.Label(new Rect(x + 10f, y + 6f, cardW - 20f, 22f), card.displayName.ToUpper(), _cardNameStyle);
 
-                _descStyle.normal.textColor = new Color(0.75f, 0.75f, 0.8f);
-                GUI.Label(new Rect(startX + 8f, y + 30f, cardW - 16f, 50f), card.description, _descStyle);
+                // Description
+                _descStyle.normal.textColor = new Color(0.8f, 0.8f, 0.85f);
+                GUI.Label(new Rect(x + 10f, y + 28f, cardW - 20f, cardH - 55f), card.description, _descStyle);
 
-                string costText = owned ? "OWNED" : $"{card.cost} CR";
-                _costStyle.normal.textColor = owned ? new Color(0.2f, 1f, 0.4f) : (canAfford ? Color.yellow : Color.red);
-                GUI.Label(new Rect(startX + 8f, y + cardH - 26f, 80f, 22f), costText, _costStyle);
+                // Bottom row: cost + buy button
+                string costText;
+                if (owned) costText = "OWNED";
+                else if (inventoryFull) costText = "FULL";
+                else costText = $"{card.cost} CR";
 
-                // Buy button
-                if (!owned && canAfford)
+                GUIStyle costSt = owned ? _ownedStyle : _costStyle;
+                if (owned) costSt.normal.textColor = new Color(0.15f, 0.9f, 0.3f);
+                else if (inventoryFull) costSt.normal.textColor = Color.red;
+                else costSt.normal.textColor = canAfford ? Color.yellow : Color.red;
+                GUI.Label(new Rect(x + 10f, y + cardH - 26f, 80f, 22f), costText, costSt);
+
+                if (!owned && canAfford && !inventoryFull)
                 {
-                    Rect btnRect = new Rect(startX + cardW - 70f, y + cardH - 30f, 60f, 24f);
-                    GUI.color = new Color(0.15f, 0.7f, 0.25f);
-                    if (GUI.Button(btnRect, "BUY", new GUIStyle(GUI.skin.button) { fontSize = 12, fontStyle = FontStyle.Bold }))
+                    float btnW = 55f;
+                    float btnH = 26f;
+                    Rect btnRect = new Rect(x + cardW - btnW - 8f, y + cardH - btnH - 6f, btnW, btnH);
+                    GUI.color = new Color(0.12f, 0.65f, 0.22f);
+                    if (GUI.Button(btnRect, "BUY", new GUIStyle(GUI.skin.button) { fontSize = 13, fontStyle = FontStyle.Bold }))
                     {
                         var localPc = GameManager.localPlayer?.GetComponent<PlayerCombat>();
                         if (localPc != null) localPc.CmdBuyCombatCard(i);
@@ -121,52 +154,55 @@ public class ShopUI : MonoBehaviour
             }
             else
             {
-                GUI.color = new Color(0.3f, 0.3f, 0.3f, 0.5f);
-                GUI.Label(new Rect(startX, y + cardH / 2 - 10f, cardW, 20f), "SOLD OUT", _cardNameStyle);
+                GUI.color = new Color(0.3f, 0.3f, 0.3f, 0.4f);
+                GUI.Label(new Rect(x, y + cardH / 2 - 12f, cardW, 24f), "SOLD OUT", _cardNameStyle);
                 GUI.color = Color.white;
             }
         }
     }
 
-    private void DrawVexCards(float startX, float startY, PlayerInventory inv)
+    private void DrawVexCards(float startX, float startY, float panelW, float panelH, PlayerInventory inv)
     {
         var slots = ShopPhaseManager.Instance.VexShopSlots;
-        float cardW = 260f;
-        float cardH = 130f;
-        float gapY = 8f;
+        float pad = 10f;
+        float cardW = panelW - pad * 2f;
+        float cardH = (panelH - pad * 2f - 2f * 5f) / 3f;
+        float x = startX + pad;
 
         for (int i = 0; i < 3; i++)
         {
-            float y = startY + i * (cardH + gapY);
+            float y = startY + pad + i * (cardH + 5f);
             bool hasCard = i < slots.Count && slots[i] != null;
 
-            GUI.color = new Color(0.08f, 0.04f, 0.12f, 0.92f);
-            GUI.DrawTexture(new Rect(startX, y, cardW, cardH), _whiteTex);
+            GUI.color = new Color(0.08f, 0.04f, 0.12f, 0.95f);
+            GUI.DrawTexture(new Rect(x, y, cardW, cardH), _whiteTex);
 
             if (hasCard)
             {
                 var card = slots[i];
                 bool canAfford = inv != null && inv.credits >= card.cost;
 
-                GUI.color = new Color(0.85f, 0.35f, 1f);
-                GUI.DrawTexture(new Rect(startX, y, cardW, 3f), _whiteTex);
-                GUI.DrawTexture(new Rect(startX, y + cardH - 3f, cardW, 3f), _whiteTex);
+                GUI.color = new Color(0.85f, 0.3f, 1f);
+                GUI.DrawTexture(new Rect(x, y, cardW, 4f), _whiteTex);
+                GUI.DrawTexture(new Rect(x, y + cardH - 4f, cardW, 4f), _whiteTex);
 
                 GUI.color = Color.white;
-                GUI.Label(new Rect(startX + 8f, y + 6f, cardW - 16f, 24f), card.displayName.ToUpper(), _cardNameStyle);
+                GUI.Label(new Rect(x + 10f, y + 6f, cardW - 20f, 22f), card.displayName.ToUpper(), _cardNameStyle);
 
-                _descStyle.normal.textColor = new Color(0.8f, 0.7f, 0.9f);
-                GUI.Label(new Rect(startX + 8f, y + 30f, cardW - 16f, 40f), card.effect, _descStyle);
-                GUI.Label(new Rect(startX + 8f, y + 72f, cardW - 16f, 30f), card.description, _descStyle);
+                _descStyle.normal.textColor = new Color(0.85f, 0.75f, 0.95f);
+                GUI.Label(new Rect(x + 10f, y + 28f, cardW - 20f, 30f), card.effect, _descStyle);
+                GUI.Label(new Rect(x + 10f, y + 58f, cardW - 20f, cardH - 90f), card.description, _descStyle);
 
                 _costStyle.normal.textColor = canAfford ? Color.yellow : Color.red;
-                GUI.Label(new Rect(startX + 8f, y + cardH - 26f, 80f, 22f), $"{card.cost} CR", _costStyle);
+                GUI.Label(new Rect(x + 10f, y + cardH - 26f, 80f, 22f), $"{card.cost} CR", _costStyle);
 
                 if (canAfford)
                 {
-                    Rect btnRect = new Rect(startX + cardW - 70f, y + cardH - 30f, 60f, 24f);
-                    GUI.color = new Color(0.7f, 0.2f, 0.9f);
-                    if (GUI.Button(btnRect, "BUY", new GUIStyle(GUI.skin.button) { fontSize = 12, fontStyle = FontStyle.Bold }))
+                    float btnW = 55f;
+                    float btnH = 26f;
+                    Rect btnRect = new Rect(x + cardW - btnW - 8f, y + cardH - btnH - 6f, btnW, btnH);
+                    GUI.color = new Color(0.7f, 0.15f, 0.9f);
+                    if (GUI.Button(btnRect, "BUY", new GUIStyle(GUI.skin.button) { fontSize = 13, fontStyle = FontStyle.Bold }))
                     {
                         var localPc = GameManager.localPlayer?.GetComponent<PlayerCombat>();
                         if (localPc != null) localPc.CmdBuyVexCard(i);
@@ -176,27 +212,28 @@ public class ShopUI : MonoBehaviour
             }
             else
             {
-                GUI.color = new Color(0.3f, 0.3f, 0.3f, 0.5f);
-                GUI.Label(new Rect(startX, y + cardH / 2 - 10f, cardW, 20f), "SOLD OUT", _cardNameStyle);
+                GUI.color = new Color(0.3f, 0.3f, 0.3f, 0.4f);
+                GUI.Label(new Rect(x, y + cardH / 2 - 12f, cardW, 24f), "SOLD OUT", _cardNameStyle);
                 GUI.color = Color.white;
             }
         }
     }
 
-    private void DrawTraitCards(float startX, float startY, PlayerInventory inv)
+    private void DrawTraitCards(float startX, float startY, float panelW, float panelH, PlayerInventory inv)
     {
         var slots = ShopPhaseManager.Instance.TraitShopSlots;
-        float cardW = 260f;
-        float cardH = 130f;
-        float gapY = 8f;
+        float pad = 10f;
+        float cardW = panelW - pad * 2f;
+        float cardH = (panelH - pad * 2f - 2f * 5f) / 3f;
+        float x = startX + pad;
 
         for (int i = 0; i < 3; i++)
         {
-            float y = startY + i * (cardH + gapY);
+            float y = startY + pad + i * (cardH + 5f);
             bool hasCard = i < slots.Count && slots[i] != null;
 
-            GUI.color = new Color(0.04f, 0.08f, 0.05f, 0.92f);
-            GUI.DrawTexture(new Rect(startX, y, cardW, cardH), _whiteTex);
+            GUI.color = new Color(0.04f, 0.08f, 0.05f, 0.95f);
+            GUI.DrawTexture(new Rect(x, y, cardW, cardH), _whiteTex);
 
             if (hasCard)
             {
@@ -204,26 +241,29 @@ public class ShopUI : MonoBehaviour
                 bool equipped = inv != null && inv.equippedTraitId == trait.traitId;
                 bool canAfford = inv != null && inv.credits >= trait.cost;
 
-                GUI.color = equipped ? new Color(0.2f, 1f, 0.4f) : new Color(0.2f, 0.85f, 0.35f);
-                GUI.DrawTexture(new Rect(startX, y, cardW, 3f), _whiteTex);
-                GUI.DrawTexture(new Rect(startX, y + cardH - 3f, cardW, 3f), _whiteTex);
+                GUI.color = equipped ? new Color(0.15f, 0.9f, 0.3f) : new Color(0.2f, 0.85f, 0.35f);
+                GUI.DrawTexture(new Rect(x, y, cardW, 4f), _whiteTex);
+                GUI.DrawTexture(new Rect(x, y + cardH - 4f, cardW, 4f), _whiteTex);
 
                 GUI.color = Color.white;
-                GUI.Label(new Rect(startX + 8f, y + 6f, cardW - 16f, 24f), trait.displayName.ToUpper(), _cardNameStyle);
+                GUI.Label(new Rect(x + 10f, y + 6f, cardW - 20f, 22f), trait.displayName.ToUpper(), _cardNameStyle);
 
-                _descStyle.normal.textColor = new Color(0.7f, 0.85f, 0.75f);
-                GUI.Label(new Rect(startX + 8f, y + 30f, cardW - 16f, 40f), trait.effect, _descStyle);
-                GUI.Label(new Rect(startX + 8f, y + 72f, cardW - 16f, 30f), trait.description, _descStyle);
+                _descStyle.normal.textColor = new Color(0.75f, 0.9f, 0.8f);
+                GUI.Label(new Rect(x + 10f, y + 28f, cardW - 20f, 30f), trait.effect, _descStyle);
+                GUI.Label(new Rect(x + 10f, y + 58f, cardW - 20f, cardH - 90f), trait.description, _descStyle);
 
                 string costText = equipped ? "EQUIPPED" : $"{trait.cost} CR";
-                _costStyle.normal.textColor = equipped ? new Color(0.2f, 1f, 0.4f) : (canAfford ? Color.yellow : Color.red);
-                GUI.Label(new Rect(startX + 8f, y + cardH - 26f, 100f, 22f), costText, _costStyle);
+                GUIStyle costSt = equipped ? _ownedStyle : _costStyle;
+                costSt.normal.textColor = equipped ? new Color(0.15f, 0.9f, 0.3f) : (canAfford ? Color.yellow : Color.red);
+                GUI.Label(new Rect(x + 10f, y + cardH - 26f, 100f, 22f), costText, costSt);
 
                 if (!equipped && canAfford)
                 {
-                    Rect btnRect = new Rect(startX + cardW - 70f, y + cardH - 30f, 60f, 24f);
-                    GUI.color = new Color(0.15f, 0.7f, 0.3f);
-                    if (GUI.Button(btnRect, "BUY", new GUIStyle(GUI.skin.button) { fontSize = 12, fontStyle = FontStyle.Bold }))
+                    float btnW = 55f;
+                    float btnH = 26f;
+                    Rect btnRect = new Rect(x + cardW - btnW - 8f, y + cardH - btnH - 6f, btnW, btnH);
+                    GUI.color = new Color(0.12f, 0.65f, 0.25f);
+                    if (GUI.Button(btnRect, "BUY", new GUIStyle(GUI.skin.button) { fontSize = 13, fontStyle = FontStyle.Bold }))
                     {
                         var localPc = GameManager.localPlayer?.GetComponent<PlayerCombat>();
                         if (localPc != null) localPc.CmdBuyTraitCard(i);
@@ -233,8 +273,8 @@ public class ShopUI : MonoBehaviour
             }
             else
             {
-                GUI.color = new Color(0.3f, 0.3f, 0.3f, 0.5f);
-                GUI.Label(new Rect(startX, y + cardH / 2 - 10f, cardW, 20f), "SOLD OUT", _cardNameStyle);
+                GUI.color = new Color(0.3f, 0.3f, 0.3f, 0.4f);
+                GUI.Label(new Rect(x, y + cardH / 2 - 12f, cardW, 24f), "SOLD OUT", _cardNameStyle);
                 GUI.color = Color.white;
             }
         }
@@ -243,21 +283,21 @@ public class ShopUI : MonoBehaviour
     private void DrawSectionHeader(float x, float y, float w, string text, Color accent)
     {
         GUI.color = accent;
-        GUI.DrawTexture(new Rect(x, y, w, 28f), _whiteTex);
+        GUI.DrawTexture(new Rect(x, y, w, 32f), _whiteTex);
         GUI.color = Color.white;
         _sectionStyle.normal.textColor = Color.white;
-        GUI.Label(new Rect(x, y, w, 28f), text, _sectionStyle);
+        GUI.Label(new Rect(x, y, w, 32f), text, _sectionStyle);
     }
 
     private void DrawLockInButton()
     {
-        float btnW = 200f;
-        float btnH = 45f;
+        float btnW = 220f;
+        float btnH = 50f;
         float btnX = Screen.width / 2f - btnW / 2f;
-        float btnY = Screen.height - 70f;
+        float btnY = Screen.height - 65f;
 
-        GUI.color = new Color(0.15f, 0.8f, 0.3f);
-        if (GUI.Button(new Rect(btnX, btnY, btnW, btnH), "LOCK IN & FIGHT", new GUIStyle(GUI.skin.button) { fontSize = 18, fontStyle = FontStyle.Bold }))
+        GUI.color = new Color(0.12f, 0.85f, 0.3f);
+        if (GUI.Button(new Rect(btnX, btnY, btnW, btnH), "LOCK IN & FIGHT", new GUIStyle(GUI.skin.button) { fontSize = 20, fontStyle = FontStyle.Bold }))
         {
             var localPc = GameManager.localPlayer?.GetComponent<PlayerCombat>();
             if (localPc != null) localPc.CmdLockInPostRoundShop();
@@ -281,7 +321,7 @@ public class ShopUI : MonoBehaviour
 
         _titleStyle = new GUIStyle(GUI.skin.label)
         {
-            fontSize = 32,
+            fontSize = 36,
             fontStyle = FontStyle.Bold,
             alignment = TextAnchor.MiddleCenter
         };
@@ -289,35 +329,42 @@ public class ShopUI : MonoBehaviour
 
         _cardNameStyle = new GUIStyle(GUI.skin.label)
         {
-            fontSize = 14,
+            fontSize = 16,
             fontStyle = FontStyle.Bold,
-            alignment = TextAnchor.MiddleLeft
+            alignment = TextAnchor.MiddleCenter
         };
 
         _descStyle = new GUIStyle(GUI.skin.label)
         {
-            fontSize = 10,
+            fontSize = 12,
             alignment = TextAnchor.MiddleLeft,
             wordWrap = true
         };
 
         _costStyle = new GUIStyle(GUI.skin.label)
         {
-            fontSize = 12,
+            fontSize = 14,
+            fontStyle = FontStyle.Bold,
+            alignment = TextAnchor.MiddleLeft
+        };
+
+        _ownedStyle = new GUIStyle(GUI.skin.label)
+        {
+            fontSize = 14,
             fontStyle = FontStyle.Bold,
             alignment = TextAnchor.MiddleLeft
         };
 
         _timerStyle = new GUIStyle(GUI.skin.label)
         {
-            fontSize = 22,
+            fontSize = 20,
             fontStyle = FontStyle.Bold,
             alignment = TextAnchor.MiddleCenter
         };
 
         _sectionStyle = new GUIStyle(GUI.skin.label)
         {
-            fontSize = 14,
+            fontSize = 16,
             fontStyle = FontStyle.Bold,
             alignment = TextAnchor.MiddleCenter
         };

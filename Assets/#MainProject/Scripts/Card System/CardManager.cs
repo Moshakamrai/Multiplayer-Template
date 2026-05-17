@@ -36,9 +36,9 @@ public class CardManager : NetworkBehaviour
 
     // ── Classification ─────────────────────────────────────────────────────
     private static readonly HashSet<string> _atkSet = new HashSet<string>
-        { "Jab", "Cross", "Hook", "UnbreakablePunch" };
+        { "Jab", "Cross", "Hook", "UnbreakablePunch", "Grapple", "Feint", "Uppercut", "Sweep", "Overclock", "Reverse" };
     private static readonly HashSet<string> _defSet = new HashSet<string>
-        { "Block", "ParryIntent", "Left", "Right" };
+        { "Block", "ParryIntent", "Left", "Right", "Clutch", "Focus", "Taunt", "Trap", "Cage", "Mirror" };
 
     public static bool IsAttackTrigger(string t)  => _atkSet.Contains(t);
     public static bool IsDefenseTrigger(string t) => _defSet.Contains(t);
@@ -98,22 +98,45 @@ public class CardManager : NetworkBehaviour
     }
 
     // ── Card definitions ───────────────────────────────────────────────────
+    // ALL possible cards that can appear in the shop and be played
     private static CombatCard[] BuildNormalCardDefs() => new[]
     {
-        new CombatCard { cardName="Block", triggerName="Block",            description="Standard defense. Wider timing window to negate damage." },
-        new CombatCard { cardName="Cage",  triggerName="ParryIntent",      description="Elite Parry. Reflects 120% damage back to the attacker." },
-        new CombatCard { cardName="Left",  triggerName="Left",             description="Quick dodge to the left. Evades Jabs and Hooks." },
-        new CombatCard { cardName="Right", triggerName="Right",            description="Quick dodge to the right. Evades Jabs and Hooks." },
+        // Basic (8 cards)
         new CombatCard { cardName="Punch", triggerName="Jab",              description="Quick lead strike. Reliable base damage." },
         new CombatCard { cardName="Blast", triggerName="Cross",            description="Straight power hit. Counters enemies trying to dodge." },
         new CombatCard { cardName="Hook",  triggerName="Hook",             description="Heavy side-swing. High damage and grants bonus Energy." },
+        new CombatCard { cardName="Block", triggerName="Block",            description="Standard defense. Wider timing window to negate damage." },
+        new CombatCard { cardName="Left",  triggerName="Left",             description="Quick dodge to the left. Evades Jabs and Hooks." },
+        new CombatCard { cardName="Right", triggerName="Right",            description="Quick dodge to the right. Evades Jabs and Hooks." },
+        new CombatCard { cardName="Parry",  triggerName="ParryIntent",      description="Elite Parry. Reflects 120% damage back to the attacker." },
         new CombatCard { cardName="Boom",  triggerName="UnbreakablePunch", description="Unstoppable. Ignores blocks and deals massive dmg." },
+        new CombatCard { cardName="Grapple", triggerName="Grapple",         description="Command grab. Bypasses blocks and dodges." },
+        new CombatCard { cardName="Feint",  triggerName="Feint",           description="Cancels opponent defense. Mind game tool." },
+        new CombatCard { cardName="Clutch", triggerName="Clutch",          description="HIGH RISK. Nullify heavy attack on perfect timing." },
+        // Advanced (4 cards)
+        new CombatCard { cardName="Uppercut", triggerName="Uppercut",       description="Anti-dodge attack. Punishes evasive play." },
+        new CombatCard { cardName="Sweep",    triggerName="Sweep",          description="Low attack. Catches defensive players." },
+        new CombatCard { cardName="Focus",    triggerName="Focus",          description="Charge up. Next attack deals +50% damage." },
+        new CombatCard { cardName="Taunt",    triggerName="Taunt",          description="Force opponent to use only Attack Cards next turn." },
+        // Legendary (5 cards)
+        new CombatCard { cardName="Overclock", triggerName="Overclock",     description="High damage rush. Deals +35% but +10% self-damage." },
+        new CombatCard { cardName="Reverse",   triggerName="Reverse",       description="Negates all damage and returns it to opponent." },
+        new CombatCard { cardName="Trap",      triggerName="Trap",          description="Set trap. Opponent takes damage on move or block." },
+        new CombatCard { cardName="Cage",      triggerName="Cage",          description="Trap opponent. Playing a card next turn damages them." },
+        new CombatCard { cardName="Mirror",    triggerName="Mirror",        description="Returns next attack damage +15% bonus." },
     };
 
     private void Awake()
     {
-        if (!cardLibrary.Exists(c => !c.isCombo))
-            foreach (var nc in BuildNormalCardDefs()) cardLibrary.Add(nc);
+        // Merge any missing cards from the full definition set
+        var existingTriggers = new HashSet<string>();
+        foreach (var c in cardLibrary)
+            if (!string.IsNullOrEmpty(c.triggerName))
+                existingTriggers.Add(c.triggerName);
+
+        foreach (var nc in BuildNormalCardDefs())
+            if (!existingTriggers.Contains(nc.triggerName))
+                cardLibrary.Add(nc);
     }
 
     // ── Slot API ───────────────────────────────────────────────────────────
@@ -310,8 +333,8 @@ public class CardManager : NetworkBehaviour
 
     private float GetCardScreenX(string trigger)
     {
-        var allDefCards = new[] { "Block", "ParryIntent", "Left", "Right" };
-        var allAtkCards = new[] { "Jab", "Cross", "Hook", "UnbreakablePunch" };
+        var allDefCards = new[] { "Block", "ParryIntent", "Left", "Right", "Clutch", "Focus", "Taunt", "Trap", "Cage", "Mirror" };
+        var allAtkCards = new[] { "Jab", "Cross", "Hook", "UnbreakablePunch", "Grapple", "Feint", "Uppercut", "Sweep", "Overclock", "Reverse" };
 
         var defCards = (availableCardsForRound.Count > 0)
             ? allDefCards.Where(c => availableCardsForRound.Contains(c)).ToArray()
@@ -393,8 +416,8 @@ public class CardManager : NetworkBehaviour
             float baseY     = Screen.height - nHeight - 60f + hoverY;
             float gap       = 120f;
 
-            var allDefCards = new[] { "Block", "ParryIntent", "Left", "Right" };
-            var allAtkCards = new[] { "Jab", "Cross", "Hook", "UnbreakablePunch" };
+            var allDefCards = new[] { "Block", "ParryIntent", "Left", "Right", "Clutch", "Focus", "Taunt", "Trap", "Cage", "Mirror" };
+            var allAtkCards = new[] { "Jab", "Cross", "Hook", "UnbreakablePunch", "Grapple", "Feint", "Uppercut", "Sweep", "Overclock", "Reverse" };
 
             var defCards = (availableCardsForRound.Count > 0)
                 ? System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Where(allDefCards, c => availableCardsForRound.Contains(c)))
@@ -633,10 +656,22 @@ public class CardManager : NetworkBehaviour
     private static string ComboDisplayName(string trigger) => trigger switch
     {
         "Jab"               => "PUNCH",
-        "Cross"             => "BLAST",
+        "Cross"             => "FLANK",
         "Hook"              => "HOOK",
         "UnbreakablePunch"  => "BOOM",
         "ParryIntent"       => "CAGE",
+        "Grapple"           => "GRAPPLE",
+        "Feint"             => "FEINT",
+        "Clutch"            => "CLUTCH",
+        "Uppercut"          => "UPPERCUT",
+        "Sweep"             => "SWEEP",
+        "Focus"             => "FOCUS",
+        "Taunt"             => "TAUNT",
+        "Overclock"         => "OVERCLOCK",
+        "Reverse"           => "REVERSE",
+        "Trap"              => "TRAP",
+        "Cage"              => "CAGE",
+        "Mirror"            => "MIRROR",
         _                   => string.IsNullOrEmpty(trigger) ? "..." : trigger.ToUpper()
     };
 

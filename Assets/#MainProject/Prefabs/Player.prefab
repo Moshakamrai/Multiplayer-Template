@@ -787,11 +787,11 @@ MonoBehaviour:
   syncDirection: 0
   syncMode: 0
   syncInterval: 0
-  CurrentHealth: 100
-  MaxHealth: 100
-  CurrentShield: 25
-  MaxShield: 25
-  ShieldText: {fileID: 1856066874330144664}
+  CurrentPercentage: 0
+  roundDamageDealt: 0
+  roundExcellentCount: 0
+  roundCounterCount: 0
+  availableCardsString: 
   animator: {fileID: 7078697320674753406}
   isAttacking: 0
   IsParryActive: 0
@@ -799,6 +799,8 @@ MonoBehaviour:
   StaggerBeatsRemaining: 0
   weaponGloveLeft: {fileID: 4246265404567632835}
   weaponGloveRight: {fileID: 6838551958696098282}
+  localShopSelection: []
+  localShopLocked: 0
   playerRenderer: {fileID: 3044968905943147932}
   flashMaterial: {fileID: 2100000, guid: 53ba7b32d17e498438356150ba39ed0f, type: 2}
   _originalMaterial: {fileID: 2100000, guid: d3b488fade9d5bf48b05a6346500e4c7, type: 2}
@@ -906,7 +908,7 @@ MonoBehaviour:
     isCombo: 0
     comboChainLength: 0
     comboAttacks: []
-  - cardName: CAGE
+  - cardName: PARRY
     triggerName: ParryIntent
     description: Elite Parry. Reflects 120% damage back at the attacker.
     isCombo: 0
@@ -930,12 +932,27 @@ MonoBehaviour:
     isCombo: 0
     comboChainLength: 0
     comboAttacks: []
+  - cardName: GRAPPLE
+    triggerName: Grapple
+    description: Command grab. Beats Block and Dodge. Loses to Jab, Cross, Uppercut.
+      Bypasses defenses.
+    isCombo: 0
+    comboChainLength: 0
+    comboAttacks: []
+  - cardName: FEINT
+    triggerName: Feint
+    description: Cancels opponent defense. Beats Block and Parry. Loses to all attacks.
+      Mind game tool.
+    isCombo: 0
+    comboChainLength: 0
+    comboAttacks: []
   attackSlotsTotal: 3
   defenseSlotTotal: 2
   attackSlotsRemaining: 3
   defenseSlotsRemaining: 2
   justUsedTrigger: 
   blockedTrigger: 
+  availableCardsForRound: []
 --- !u!114 &5356967899108748255
 MonoBehaviour:
   m_ObjectHideFlags: 0

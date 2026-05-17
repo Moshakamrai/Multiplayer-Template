@@ -24,6 +24,7 @@ public class BotController : NetworkBehaviour
     {
         if (_combat.IsHurting || _combat.IsDead) return;
 
+        // Use equipped cards from PlayerInventory, fallback to defaults
         var avail = _myCards != null && _myCards.availableCardsForRound.Count > 0
             ? _myCards.availableCardsForRound
             : new List<string> { "Jab", "Cross", "Hook", "Block", "Left", "Right", "UnbreakablePunch", "ParryIntent" };
@@ -49,51 +50,88 @@ public class BotController : NetworkBehaviour
             UpdatePlayerHistory(oppMove.attack);
         }
 
-        // 2. CHOOSE COUNTER OR RANDOM (filtered by available cards)
+        // 2. BUILD AVAILABILITY FLAGS FOR ALL 20 CARDS
+        var hasCard = new System.Collections.Generic.Dictionary<string, bool>();
+        foreach (var c in new[] { "Jab","Cross","Hook","Block","Left","Right",
+                                   "UnbreakablePunch","ParryIntent",
+                                   "Grapple","Feint","Clutch",
+                                   "Uppercut","Sweep","Focus","Taunt",
+                                   "Overclock","Reverse","Trap","Cage","Mirror" })
+            hasCard[c] = avail.Contains(c);
+
+        bool canDash = hasCard["Left"] || hasCard["Right"];
+
+        // 3. ADAPTIVE COUNTER LOGIC
         string attack = "";
         Vector3 dash = Vector3.zero;
-
-        bool hasJab = avail.Contains("Jab");
-        bool hasCross = avail.Contains("Cross");
-        bool hasHook = avail.Contains("Hook");
-        bool hasBlock = avail.Contains("Block");
-        bool hasLeft = avail.Contains("Left");
-        bool hasRight = avail.Contains("Right");
-        bool hasBoom = avail.Contains("UnbreakablePunch");
-        bool hasCage = avail.Contains("ParryIntent");
-        bool canDash = hasLeft || hasRight;
 
         string mostSpammed = GetMostSpammedMove();
         float adaptiveChance = Random.value;
 
         if (adaptiveChance < 0.6f && !string.IsNullOrEmpty(mostSpammed))
         {
-            if (mostSpammed == "Jab" && canDash)
-            { dash = hasLeft && hasRight ? (Random.value > 0.5f ? Vector3.left : Vector3.right) : (hasLeft ? Vector3.left : Vector3.right); }
-            else if (mostSpammed == "Cross" && hasBlock) { attack = "Block"; }
-            else if (mostSpammed == "Hook" && hasJab) { attack = "Jab"; }
-            else if (mostSpammed == "UnbreakablePunch" && hasLeft) { dash = Vector3.left; }
+            switch (mostSpammed)
+            {
+                case "Jab":
+                    if (canDash) dash = PickDash(hasCard["Left"], hasCard["Right"]);
+                    else if (hasCard["Grapple"]) attack = "Grapple";
+                    break;
+                case "Cross":
+                    if (hasCard["Block"]) attack = "Block";
+                    else if (hasCard["Clutch"]) attack = "Clutch";
+                    break;
+                case "Hook":
+                    if (hasCard["Jab"]) attack = "Jab";
+                    else if (hasCard["Uppercut"]) attack = "Uppercut";
+                    break;
+                case "UnbreakablePunch":
+                    if (hasCard["Left"]) dash = Vector3.left;
+                    else if (hasCard["Clutch"]) attack = "Clutch";
+                    break;
+                case "Grapple":
+                    if (hasCard["Jab"]) attack = "Jab";
+                    else if (hasCard["Cross"]) attack = "Cross";
+                    break;
+                case "Uppercut":
+                    if (hasCard["Block"]) attack = "Block";
+                    else if (hasCard["Cross"]) attack = "Cross";
+                    break;
+                case "Sweep":
+                    if (canDash) dash = PickDash(hasCard["Left"], hasCard["Right"]);
+                    break;
+                case "Overclock":
+                    if (hasCard["Mirror"]) attack = "Mirror";
+                    else if (hasCard["Reverse"]) attack = "Reverse";
+                    break;
+            }
         }
 
-        // If counter didn't fire or was invalid, pick randomly from available pool
+        // 4. RANDOM PICK FROM AVAILABLE POOL
         if (string.IsNullOrEmpty(attack) && dash == Vector3.zero)
         {
             var attackPool = new List<string>();
-            if (hasJab) attackPool.Add("Jab");
-            if (hasCross) attackPool.Add("Cross");
-            if (hasHook) attackPool.Add("Hook");
-            if (hasBlock) attackPool.Add("Block");
-            if (hasBoom) attackPool.Add("UnbreakablePunch");
-            if (hasCage) attackPool.Add("ParryIntent");
+            var defPool = new List<string>();
+            foreach (var c in avail)
+            {
+                if (CardManager.IsAttackTrigger(c)) attackPool.Add(c);
+                else if (CardManager.IsDefenseTrigger(c)) defPool.Add(c);
+            }
 
             float decision = Random.value;
-            if (decision < 0.7f && attackPool.Count > 0)
+            if (decision < 0.55f && attackPool.Count > 0)
             {
                 attack = attackPool[Random.Range(0, attackPool.Count)];
             }
-            else if (decision < 0.9f && canDash)
+            else if (decision < 0.80f && defPool.Count > 0)
             {
-                dash = hasLeft && hasRight ? (Random.value > 0.5f ? Vector3.left : Vector3.right) : (hasLeft ? Vector3.left : Vector3.right);
+                string defPick = defPool[Random.Range(0, defPool.Count)];
+                if (defPick == "Left") { dash = Vector3.left; attack = ""; }
+                else if (defPick == "Right") { dash = Vector3.right; attack = ""; }
+                else { attack = defPick; dash = Vector3.zero; }
+            }
+            else if (canDash)
+            {
+                dash = PickDash(hasCard["Left"], hasCard["Right"]);
             }
             else if (attackPool.Count > 0)
             {
@@ -101,7 +139,7 @@ public class BotController : NetworkBehaviour
             }
         }
 
-        // 3. SLOT CHECK — respect same slot rules as the player
+        // 5. SLOT CHECK
         string trigger = dash != Vector3.zero ? (dash == Vector3.left ? "Left" : "Right") : attack;
 
         if (_myCards != null && !_myCards.HasSlot(trigger))
@@ -121,18 +159,25 @@ public class BotController : NetworkBehaviour
                 attack = availAttacks[Random.Range(0, availAttacks.Count)];
                 dash = Vector3.zero;
             }
-            else return; // Both pools exhausted — skip this beat
+            else return;
         }
 
-        // Recompute trigger after fallback
         trigger = dash != Vector3.zero ? (dash == Vector3.left ? "Left" : "Right") : attack;
 
-        // 4. SEMI-PRO TIMING
+        // 6. SEMI-PRO TIMING
         float targetBeat = RhythmRoundManager.Instance.GetNextBeatTime();
         _combat.lastVocalSpikeTime = targetBeat - Random.Range(0.05f, 0.21f);
 
         _combat.QueueRhythmMove(attack, dash);
         if (_myCards != null) _myCards.ConsumeSlot(trigger);
+    }
+
+    private Vector3 PickDash(bool hasLeft, bool hasRight)
+    {
+        if (hasLeft && hasRight) return Random.value > 0.5f ? Vector3.left : Vector3.right;
+        if (hasLeft) return Vector3.left;
+        if (hasRight) return Vector3.right;
+        return Vector3.zero;
     }
 
     private void UpdatePlayerHistory(string move)

@@ -19,14 +19,35 @@ public class VoiceDebugGUI : MonoBehaviour
     {
         if (string.IsNullOrEmpty(word)) return "";
         word = word.ToLower().Trim();
-        if (Similarity(word, "punch") > 0.70f) return "→ JAB";
-        if (word == "flank" || word == "frank" || Similarity(word, "flank") > 0.75f) return "→ CROSS";
+
+        // ── BASIC CARDS (8 + 3) ──
+        if (Similarity(word, "punch") > 0.70f || word == "jab") return "→ JAB";
+        if (word == "flank" || word == "frank" || word == "blank" || Similarity(word, "flank") > 0.75f) return "→ CROSS";
         if (Similarity(word, "hook")  > 0.75f) return "→ HOOK";
         if (Similarity(word, "block") > 0.75f || Similarity(word, "guard") > 0.75f) return "→ BLOCK";
-        if (Similarity(word, "cage")  > 0.70f || word == "page" || word == "engage") return "→ PARRY";
-        if (word == "crush" || word == "crash" || Similarity(word, "crush") > 0.75f) return "→ UNBREAKABLE";
-        if (Similarity(word, "left")  > 0.75f) return "→ DASH LEFT";
-        if (Similarity(word, "right") > 0.75f) return "→ DASH RIGHT";
+        if (Similarity(word, "left")  > 0.75f) return "→ DODGE LEFT";
+        if (Similarity(word, "right") > 0.75f) return "→ DODGE RIGHT";
+        if (Similarity(word, "cage")  > 0.70f || word == "page" || word == "engage") return "→ PARRY / CAGE";
+        if (word == "crush" || word == "crash" || word == "crushing" || word == "crashing" || Similarity(word, "crush") > 0.75f) return "→ BOOM";
+        if (Similarity(word, "grapple") > 0.75f || word == "grab" || word == "wrap") return "→ GRAPPLE";
+        if (Similarity(word, "feint") > 0.70f || word == "faint" || word == "paint") return "→ FEINT";
+        if (Similarity(word, "clutch") > 0.75f || word == "catch" || word == "crunch") return "→ CLUTCH";
+
+        // ── ADVANCED CARDS (4) ──
+        if (Similarity(word, "uppercut") > 0.75f || word == "upper" || word == "cutter") return "→ UPPERCUT";
+        if (Similarity(word, "sweep") > 0.75f || word == "swipe" || word == "sweet") return "→ SWEEP";
+        if (Similarity(word, "focus") > 0.75f || word == "charge" || word == "power") return "→ FOCUS";
+        if (Similarity(word, "taunt") > 0.75f || word == "taught" || word == "tall") return "→ TAUNT";
+
+        // ── LEGENDARY CARDS (5) ──
+        if (Similarity(word, "overclock") > 0.70f || word == "over" || word == "clock" || word == "overload") return "→ OVERCLOCK";
+        if (Similarity(word, "reverse") > 0.75f || word == "revert" || word == "reflect") return "→ REVERSE";
+        if (Similarity(word, "trap") > 0.75f || word == "trip" || word == "track") return "→ TRAP";
+        if (Similarity(word, "mirror") > 0.75f || word == "mere" || word == "near") return "→ MIRROR";
+
+        // ── UTILITY ──
+        if (word == "cancel" || word == "clear" || Similarity(word, "cancel") > 0.72f) return "→ CANCEL";
+
         return "";
     }
 
@@ -86,7 +107,6 @@ public class VoiceDebugGUI : MonoBehaviour
 
     void OnGUI()
     {
-        return; // DEBUG UI COMPLETELY DISABLED
         if (!ShowDebug) return;
 
         // Recalculate height based on device count

@@ -59,35 +59,63 @@ public class ShopPhaseManager : MonoBehaviour
 
         CardDatabase.GetRarityChances(roundNumber, out float basicChance, out float advancedChance, out float legendaryChance);
 
-        // Generate 6 combat card slots
-        for (int i = 0; i < 6; i++)
+        // Collect all owned card IDs across players so we don't show duplicates
+        var ownedCardIds = new HashSet<string>();
+        foreach (var p in GameManager.players)
         {
+            var inv = p?.GetComponent<PlayerInventory>();
+            if (inv != null)
+                foreach (var id in inv.ownedCombatCards)
+                    ownedCardIds.Add(id);
+        }
+
+        // Generate 6 combat card slots (no duplicates, no owned cards)
+        var usedIds = new HashSet<string>();
+        int attempts = 0;
+        while (_combatShopSlots.Count < 6 && attempts < 50)
+        {
+            attempts++;
             float roll = Random.value;
             CombatCardData[] pool;
             if (roll < basicChance) pool = CardDatabase.BasicCards;
             else if (roll < basicChance + advancedChance) pool = CardDatabase.AdvancedCards;
             else pool = CardDatabase.LegendaryCards;
 
-            if (pool.Length > 0)
-                _combatShopSlots.Add(pool[Random.Range(0, pool.Length)]);
+            if (pool.Length == 0) continue;
+            var card = pool[Random.Range(0, pool.Length)];
+
+            // Skip if already owned or already in shop
+            if (ownedCardIds.Contains(card.cardId)) continue;
+            if (usedIds.Contains(card.cardId)) continue;
+
+            usedIds.Add(card.cardId);
+            _combatShopSlots.Add(card);
         }
 
-        // Generate 3 Vex cards (random, regardless of round)
+        // Generate 3 Vex cards (no duplicates)
         var vexPool = new List<VexCardData>(CardDatabase.VexCards);
-        for (int i = 0; i < 3 && vexPool.Count > 0; i++)
+        var usedVexIds = new HashSet<string>();
+        while (_vexShopSlots.Count < 3 && vexPool.Count > 0)
         {
             int idx = Random.Range(0, vexPool.Count);
-            _vexShopSlots.Add(vexPool[idx]);
+            var card = vexPool[idx];
             vexPool.RemoveAt(idx);
+            if (usedVexIds.Contains(card.cardId)) continue;
+            usedVexIds.Add(card.cardId);
+            _vexShopSlots.Add(card);
         }
 
-        // Generate 3 Trait cards (random, regardless of round)
+        // Generate 3 Trait cards (no duplicates)
         var traitPool = new List<TraitCardData>(CardDatabase.TraitCards);
-        for (int i = 0; i < 3 && traitPool.Count > 0; i++)
+        var usedTraitIds = new HashSet<string>();
+        while (_traitShopSlots.Count < 3 && traitPool.Count > 0)
         {
             int idx = Random.Range(0, traitPool.Count);
-            _traitShopSlots.Add(traitPool[idx]);
+            var trait = traitPool[idx];
             traitPool.RemoveAt(idx);
+            if (usedTraitIds.Contains(trait.traitId)) continue;
+            usedTraitIds.Add(trait.traitId);
+            _traitShopSlots.Add(trait);
         }
     }
 
@@ -127,53 +155,55 @@ public class ShopPhaseManager : MonoBehaviour
         if (botInv == null) return;
 
         int credits = botInv.credits;
+        bool inventoryFull = botInv.ownedCombatCards.Count >= 10;
 
-        // 1. Buy best affordable combat cards (prioritize higher rarity/damage)
-        var affordableCombat = new List<(CombatCardData card, int index)>();
-        for (int i = 0; i < _combatShopSlots.Count; i++)
+        // 1. Buy best affordable combat cards (respect 10-card inventory limit)
+        if (!inventoryFull)
         {
-            var card = _combatShopSlots[i];
-            if (card != null && card.cost <= credits && !botInv.ownedCombatCards.Contains(card.cardId))
-                affordableCombat.Add((card, i));
+            var affordableCombat = new List<(CombatCardData card, int index)>();
+            for (int i = 0; i < _combatShopSlots.Count; i++)
+            {
+                var card = _combatShopSlots[i];
+                if (card != null && card.cost <= credits && !botInv.ownedCombatCards.Contains(card.cardId))
+                    affordableCombat.Add((card, i));
+            }
+
+            // Sort by cost descending (prefer expensive/stronger cards), then by rarity
+            affordableCombat.Sort((a, b) =>
+            {
+                int costCompare = b.card.cost.CompareTo(a.card.cost);
+                if (costCompare != 0) return costCompare;
+                return b.card.rarity.CompareTo(a.card.rarity);
+            });
+
+            // Buy until inventory full or broke
+            foreach (var item in affordableCombat)
+            {
+                if (botInv.ownedCombatCards.Count >= 10) break;
+                if (botInv.credits < item.card.cost) break;
+                if (botInv.ownedCombatCards.Contains(item.card.cardId)) continue;
+
+                botInv.BuyCombatCard(item.card.cardId, item.card.cost);
+            }
         }
 
-        // Sort by cost descending (prefer expensive/stronger cards), then by rarity
-        affordableCombat.Sort((a, b) =>
-        {
-            int costCompare = b.card.cost.CompareTo(a.card.cost);
-            if (costCompare != 0) return costCompare;
-            return b.card.rarity.CompareTo(a.card.rarity);
-        });
-
-        // Buy up to 3 combat cards or until broke
-        int combatBought = 0;
-        foreach (var item in affordableCombat)
-        {
-            if (combatBought >= 3) break;
-            if (botInv.credits < item.card.cost) break;
-            if (botInv.ownedCombatCards.Contains(item.card.cardId)) continue;
-
-            botInv.BuyCombatCard(item.card.cardId, item.card.cost);
-            combatBought++;
-        }
-
-        // 2. Buy a Vex card if affordable and interesting
+        // 2. Buy a Vex card if affordable
         foreach (var vex in _vexShopSlots)
         {
             if (vex != null && botInv.credits >= vex.cost)
             {
                 botInv.BuyVexCard(vex.cardId, vex.cost);
-                break; // Buy one vex max
+                break;
             }
         }
 
-        // 3. Buy a Trait if affordable (prioritize offensive traits)
+        // 3. Buy a Trait if affordable
         foreach (var trait in _traitShopSlots)
         {
             if (trait != null && botInv.credits >= trait.cost)
             {
                 botInv.BuyTraitCard(trait.traitId, trait.cost);
-                break; // One trait max
+                break;
             }
         }
 
@@ -217,7 +247,9 @@ public class ShopPhaseManager : MonoBehaviour
         if (!isShopPhase) return;
         // Auto-equip all owned combat cards up to 10
         var equipList = new List<string>(inv.ownedCombatCards);
+        Debug.Log($"<color=yellow>SHOP LOCK-IN:</color> Player has {inv.ownedCombatCards.Count} owned cards, equipping: {string.Join(",", equipList)}");
         inv.EquipCombatCards(equipList);
+        Debug.Log($"<color=yellow>SHOP LOCK-IN:</color> Equipped {inv.equippedCombatCards.Count} cards: {string.Join(",", inv.equippedCombatCards)}");
 
         int idx = GetPlayerIndex(inv);
         if (idx == 0) _p1Locked = true;
@@ -237,8 +269,8 @@ public class ShopPhaseManager : MonoBehaviour
     private void FinalizeShop()
     {
         isShopPhase = false;
-        // Notify RhythmRoundManager to start next round
-        RhythmRoundManager.Instance?.StartSlowRound();
+        // Show round picker instead of auto-starting
+        RhythmRoundManager.Instance?.ShowRoundPicker();
     }
 
     // Client access for UI drawing

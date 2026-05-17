@@ -146,18 +146,106 @@ public class VoskSpeechToText : MonoBehaviour
         }
     }
 
+    // Dynamic grammar: only recognize words for cards currently in the player's hand.
+    // Call RebuildGrammar(handTriggers) whenever the player's equipped cards change.
+    private string _baseGrammar = "";
+    private List<string> _currentHandTriggers = new List<string>();
+
     private void UpdateGrammar()
     {
-        // --- THE MASSIVE SPEED HACK ---
-        // Instead of relying on the Unity Inspector, we hardcode the EXACT 
-        // JSON array of words your VoiceCommandManager uses.
-        // Vosk will instantly stop checking its 100,000 word dictionary.
-        
-        // Combat words + combo-card number words (with real Vosk mishears: "tree"=three, "for"=four)
-        // "crush" replaced "boom"/"room"/"doom" — boom triggered too many false positives
-        _grammar = "[\"punch\", \"jab\", \"flank\", \"frank\", \"hook\", \"block\", \"guard\", \"cage\", \"page\", \"engage\", \"crush\", \"crash\", \"left\", \"right\"]";
+        // Start with the base grammar (all possible words + mishears).
+        // This is used before the player's hand is known (menu, lobby, etc.)
+        _baseGrammar = BuildGrammarFromTriggers(null);
+        _grammar = _baseGrammar;
+        Debug.Log("<color=cyan>VOSK GRAMMAR:</color> Base grammar loaded. Will narrow to hand cards when round starts.");
+    }
 
-        Debug.Log("<color=cyan>VOSK GRAMMAR:</color> Locked to combat + combo-number words (one/two/tree/for).");
+    /// <summary>
+    /// Rebuilds the Vosk grammar to ONLY recognize words for cards in the player's hand.
+    /// Call this when cards are equipped at round start or after shop purchases.
+    /// </summary>
+    public void RebuildGrammar(List<string> handTriggers)
+    {
+        _currentHandTriggers = handTriggers ?? new List<string>();
+        string newGrammar = BuildGrammarFromTriggers(_currentHandTriggers);
+
+        // Only rebuild if the grammar actually changed
+        if (newGrammar == _grammar) return;
+
+        _grammar = newGrammar;
+
+        // Recreate the recognizer with the new grammar
+        if (_recognizerReady && _recognizer != null)
+        {
+            _recognizer.FinalResult(); // flush state
+            _recognizer = null;
+            _recognizerReady = false;
+        }
+
+        Debug.Log($"<color=cyan>VOSK GRAMMAR:</color> Narrowed to {_currentHandTriggers.Count} hand cards. Words: {_grammar}");
+    }
+
+    /// <summary>
+    /// Builds a Vosk grammar JSON array from trigger names.
+    /// If handTriggers is null/empty, returns the full base grammar (all 20 cards + mishears).
+    /// </summary>
+    private string BuildGrammarFromTriggers(List<string> handTriggers)
+    {
+        var words = new HashSet<string>();
+
+        // Always include "cancel" and utility words
+        words.Add("cancel");
+        words.Add("clear");
+
+        // If no hand specified, include ALL card words (full vocabulary)
+        bool useAll = handTriggers == null || handTriggers.Count == 0;
+        var triggersToUse = useAll ? new List<string>
+        {
+            "Jab", "Cross", "Hook", "Block", "Left", "Right",
+            "ParryIntent", "UnbreakablePunch",
+            "Grapple", "Feint", "Clutch",
+            "Uppercut", "Sweep", "Focus", "Taunt",
+            "Overclock", "Reverse", "Trap", "Cage", "Mirror"
+        } : handTriggers;
+
+        foreach (string t in triggersToUse)
+        {
+            switch (t)
+            {
+                case "Jab":           words.Add("punch"); words.Add("jab"); break;
+                case "Cross":         words.Add("flank"); words.Add("frank"); words.Add("blank"); break;
+                case "Hook":          words.Add("hook"); break;
+                case "Block":         words.Add("block"); words.Add("guard"); break;
+                case "Left":          words.Add("left"); break;
+                case "Right":         words.Add("right"); break;
+                case "ParryIntent":   words.Add("cage"); words.Add("page"); words.Add("engage"); break;
+                case "UnbreakablePunch": words.Add("crush"); words.Add("crash"); words.Add("crushing"); words.Add("crashing"); break;
+                case "Grapple":       words.Add("grapple"); words.Add("grab"); words.Add("wrap"); break;
+                case "Feint":         words.Add("feint"); words.Add("faint"); words.Add("paint"); break;
+                case "Clutch":        words.Add("clutch"); words.Add("catch"); words.Add("crunch"); break;
+                case "Uppercut":      words.Add("uppercut"); words.Add("upper"); words.Add("cutter"); break;
+                case "Sweep":         words.Add("sweep"); words.Add("swipe"); words.Add("sweet"); break;
+                case "Focus":         words.Add("focus"); words.Add("charge"); words.Add("power"); break;
+                case "Taunt":         words.Add("taunt"); words.Add("taught"); words.Add("tall"); break;
+                case "Overclock":     words.Add("overclock"); words.Add("over"); words.Add("clock"); words.Add("overload"); break;
+                case "Reverse":       words.Add("reverse"); words.Add("revert"); words.Add("reflect"); break;
+                case "Trap":          words.Add("trap"); words.Add("trip"); words.Add("track"); break;
+                case "Cage":          words.Add("cage"); words.Add("page"); words.Add("engage"); break;
+                case "Mirror":        words.Add("mirror"); words.Add("mere"); words.Add("near"); break;
+            }
+        }
+
+        // Build JSON array
+        var sb = new System.Text.StringBuilder("[");
+        bool first = true;
+        foreach (string w in words)
+        {
+            if (!first) sb.Append(", ");
+            sb.Append("\"").Append(w).Append("\"");
+            first = false;
+        }
+        sb.Append("]");
+        return sb.ToString();
     }
 
     
@@ -221,20 +309,26 @@ public class VoskSpeechToText : MonoBehaviour
         // Handle stop logic if needed
     }
 
+    private void CreateRecognizer()
+    {
+        if (_model == null) return;
+
+        if (!string.IsNullOrEmpty(_grammar))
+            _recognizer = new VoskRecognizer(_model, 16000.0f, _grammar);
+        else
+            _recognizer = new VoskRecognizer(_model, 16000.0f);
+
+        _recognizer.SetMaxAlternatives(0); // Speed hack
+        _recognizerReady = true;
+    }
+
     private IEnumerator ThreadedWorkCoroutine()
     {
+        // Initial setup
         if (!_recognizerReady)
         {
             UpdateGrammar();
-            
-            // Initialize with Grammar if valid
-            if (!string.IsNullOrEmpty(_grammar))
-                _recognizer = new VoskRecognizer(_model, 16000.0f, _grammar);
-            else
-                _recognizer = new VoskRecognizer(_model, 16000.0f);
-
-            _recognizer.SetMaxAlternatives(0); // Speed hack
-            _recognizerReady = true;
+            CreateRecognizer();
         }
 
         float lastLatticeReset = Time.time;
@@ -243,6 +337,13 @@ public class VoskSpeechToText : MonoBehaviour
 
         while (_running)
         {
+            // Grammar was changed (RebuildGrammar called) — recreate recognizer
+            if (!_recognizerReady)
+            {
+                CreateRecognizer();
+                lastLatticeReset = Time.time;
+            }
+
             // Drain ALL pending frames per Update instead of one.
             // Without this, a single slow frame causes audio to pile up and
             // recognition falls progressively further behind real-time.

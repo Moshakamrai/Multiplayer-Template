@@ -95,11 +95,18 @@ public class RhythmRoundManager : NetworkBehaviour
     [SyncVar] public bool isShopPhase = false;
     [SyncVar] public float shopTimeRemaining = 72f;
 
+    [Header("Round Picker")]
+    [SyncVar] public bool isRoundPickerActive = false;
+
     private readonly string[] _shopCardPool = { "Jab", "Cross", "Hook", "Block", "Left", "Right" };
     private List<string> _p1ShopSelection = new List<string>();
     private List<string> _p2ShopSelection = new List<string>();
     private bool _p1ShopLocked = false;
     private bool _p2ShopLocked = false;
+
+    // Track which round types have been used this match (one-use per match)
+    private HashSet<RoundType> _usedRoundTypes = new HashSet<RoundType>();
+    private HashSet<string> _usedCustomMaps = new HashSet<string>();
 
     private void Awake()
     {
@@ -310,6 +317,7 @@ public class RhythmRoundManager : NetworkBehaviour
         isShopPhase = false;
 
         // Sync selected cards to all clients via PlayerCombat SyncVar
+        // Also save starter cards to PlayerInventory as owned cards
         var players = new List<PlayerController>(GameManager.players);
         for (int i = 0; i < players.Count; i++)
         {
@@ -318,9 +326,71 @@ public class RhythmRoundManager : NetworkBehaviour
             var selection = (i == 0) ? _p1ShopSelection : _p2ShopSelection;
             if (pc != null)
                 pc.availableCardsString = string.Join("|", selection);
+
+            // Save starter cards to inventory as permanently owned
+            var inv = players[i].GetComponent<PlayerInventory>();
+            if (inv != null)
+            {
+                foreach (var cardName in selection)
+                {
+                    string cardId = TriggerToCardId(cardName);
+                    if (!string.IsNullOrEmpty(cardId) && !inv.ownedCombatCards.Contains(cardId))
+                        inv.ownedCombatCards.Add(cardId);
+                }
+                // Equip all owned cards for the round
+                var equipList = new System.Collections.Generic.List<string>(inv.ownedCombatCards);
+                inv.EquipCombatCards(equipList);
+                Debug.Log($"<color=green>STARTER CARDS:</color> {players[i].PlayerName} now owns: {string.Join(",", inv.ownedCombatCards)}");
+            }
         }
 
-        StartSlowRound();
+        // Don't auto-start round — show round picker instead
+        ShowRoundPicker();
+    }
+
+    [Server]
+    public void ShowRoundPicker()
+    {
+        isRoundPickerActive = true;
+    }
+
+    [Server]
+    public void SelectRoundType(RoundType type, string customMapName = "")
+    {
+        if (!isRoundPickerActive) return;
+        isRoundPickerActive = false;
+
+        _usedRoundTypes.Add(type);
+        if (type == RoundType.CustomTrack && !string.IsNullOrEmpty(customMapName))
+            _usedCustomMaps.Add(customMapName);
+
+        switch (type)
+        {
+            case RoundType.SlowRhythm: StartSlowRound(); break;
+            case RoundType.FastCombo: StartFastRound(); break;
+            case RoundType.CustomTrack:
+                if (!string.IsNullOrEmpty(customMapName))
+                    LoadAndPlayMap(customMapName, null);
+                else
+                    StartSlowRound();
+                break;
+        }
+    }
+
+    private string TriggerToCardId(string trigger)
+    {
+        return trigger switch
+        {
+            "Jab" => "jab",
+            "Cross" => "cross",
+            "Hook" => "hook",
+            "Block" => "block",
+            "Left" => "dodge_left",
+            "Right" => "dodge_right",
+            "ParryIntent" => "reflect",
+            "UnbreakablePunch" => "boom",
+            _ => trigger.ToLower()
+        };
     }
 
     public bool IsSingleMoveMode()
@@ -431,28 +501,36 @@ public class RhythmRoundManager : NetworkBehaviour
     {
         EnsureBotExists();
 
-        // Set bot cards so all clients can see them, and server bot AI can read them
-        if (_activeBot != null)
-        {
-            var botPc = _activeBot.GetComponent<PlayerCombat>();
-            if (botPc != null)
-                botPc.availableCardsString = string.Join("|", _p2ShopSelection);
-            var botCm = _activeBot.GetComponent<CardManager>();
-            if (botCm != null)
-                botCm.availableCardsForRound = new List<string>(_p2ShopSelection);
-        }
-
+        // Sync equipped cards from PlayerInventory to PlayerCombat for all players
         foreach (var player in GameManager.players)
         {
-            if (player != null)
+            if (player == null) continue;
+
+            var pc = player.GetComponent<PlayerCombat>();
+            var inv = player.GetComponent<PlayerInventory>();
+            var cm = player.GetComponent<CardManager>();
+
+            // Convert equipped card IDs to trigger names
+            if (inv != null && pc != null)
             {
-                CardManager cm = player.GetComponent<CardManager>();
-                if (cm != null && player.GetComponent<BotController>() == null)
+                var triggerList = new List<string>();
+                foreach (var cardId in inv.equippedCombatCards)
                 {
-                    cm.currentHandIndices.Clear();
-                    cm.ResetSlots();
-                    Debug.Log($"<color=green>SERVER:</color> Reset slots for {player.PlayerName}");
+                    string trigger = CardIdToTrigger(cardId);
+                    if (!string.IsNullOrEmpty(trigger))
+                        triggerList.Add(trigger);
                 }
+                pc.availableCardsString = string.Join("|", triggerList);
+                if (cm != null)
+                    cm.availableCardsForRound = new List<string>(triggerList);
+                Debug.Log($"<color=green>SETUP ROUND:</color> {player.PlayerName} equipped {inv.equippedCombatCards.Count} cards -> triggers: {pc.availableCardsString}");
+            }
+
+            if (cm != null && player.GetComponent<BotController>() == null)
+            {
+                cm.currentHandIndices.Clear();
+                cm.ResetSlots();
+                Debug.Log($"<color=green>SERVER:</color> Reset slots for {player.PlayerName}");
             }
         }
 
@@ -462,6 +540,34 @@ public class RhythmRoundManager : NetworkBehaviour
         _clusterBeatsLeftToFire = (_clusterSizes.Count > 0) ? _clusterSizes[0] : 1;
         isRoundActive = true;
         RpcClearLogs();
+    }
+
+    private string CardIdToTrigger(string cardId)
+    {
+        return cardId.ToLower() switch
+        {
+            "jab" => "Jab",
+            "cross" => "Cross",
+            "hook" => "Hook",
+            "block" => "Block",
+            "dodge_left" => "Left",
+            "dodge_right" => "Right",
+            "reflect" => "ParryIntent",
+            "boom" => "UnbreakablePunch",
+            "grapple" => "Grapple",
+            "feint" => "Feint",
+            "clutch" => "Clutch",
+            "uppercut" => "Uppercut",
+            "sweep" => "Sweep",
+            "focus" => "Focus",
+            "taunt" => "Taunt",
+            "overclock" => "Overclock",
+            "reverse" => "Reverse",
+            "trap" => "Trap",
+            "cage" => "Cage",
+            "mirror" => "Mirror",
+            _ => cardId
+        };
     }
 
     [Server]
@@ -923,12 +1029,12 @@ public class RhythmRoundManager : NetworkBehaviour
         }
 
         // --- BULLETPROOF PROTECTION ---
-        bool p1Protected = (m1.attack.Contains("Parry") || m1.attack == "ParryIntent" || m1.attack == "UnbreakablePunch");
-        bool p2Protected = (m2.attack.Contains("Parry") || m2.attack == "ParryIntent" || m2.attack == "UnbreakablePunch");
+        bool p1Protected = IsProtected(m1.attack);
+        bool p2Protected = IsProtected(m2.attack);
 
-        // --- INTERRUPTION LOGIC ---
-        bool p1Interrupted = !p1Protected && (p2WinsTie || (m2.attack == "Jab" && (m1.attack == "Cross" || m1.attack == "Strike" || m1.attack == "Blast" || m1.attack == "Hook")) || ((m2.attack == "Cross" || m2.attack == "Strike" || m2.attack == "Blast") && m1.attack == "Hook"));
-        bool p2Interrupted = !p2Protected && (p1WinsTie || (m1.attack == "Jab" && (m2.attack == "Cross" || m2.attack == "Strike" || m2.attack == "Blast" || m2.attack == "Hook")) || ((m1.attack == "Cross" || m1.attack == "Strike" || m1.attack == "Blast") && m2.attack == "Hook"));
+        // --- INTERRUPTION LOGIC (expanded RPS for all 20 cards) ---
+        bool p1Interrupted = !p1Protected && (p2WinsTie || DoesInterrupt(m2.attack, m1.attack));
+        bool p2Interrupted = !p2Protected && (p1WinsTie || DoesInterrupt(m1.attack, m2.attack));
 
         int p1DamageTaken = 0;
         int p2DamageTaken = 0;
@@ -986,19 +1092,83 @@ public class RhythmRoundManager : NetworkBehaviour
         if (attacker.IsStaggered) return 0;
 
         bool defenderStaggered = defender.IsStaggered;
+        string atk = move.attack;
+        string def = defMove.attack;
 
-        // --- 1. PARRY REFLECTION (bypassed when staggered) ---
+        // --- 1. DEFENSE CHECKS (bypassed when staggered) ---
+        // Mirror: returns damage +15% bonus (like Parry but for all attacks)
+        if (!defenderStaggered && def == "Mirror" && defender.IsParryActive)
+        {
+            if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Parry");
+            PlayHitParticle(defender.transform.position);
+            int baseRef = GetBaseDamage(atk);
+            Vector3 kbDir = (attacker.transform.position - defender.transform.position).normalized;
+            attacker.TakeDamage(Mathf.CeilToInt(baseRef * 1.15f), kbDir);
+            return -1;
+        }
+
+        // Parry / Cage reflection (Cage is the legendary trap version of Parry)
         if (!defenderStaggered && defender.IsParryActive)
         {
             if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Parry");
             PlayHitParticle(defender.transform.position);
 
-            bool isUnbreakable = (move.attack == "UnbreakablePunch");
-            int baseRef = isUnbreakable ? 15 : ((move.attack == "Hook") ? 25 : 10);
+            bool isUnbreakable = (atk == "UnbreakablePunch");
+            int baseRef = isUnbreakable ? 15 : ((atk == "Hook") ? 25 : 10);
             Vector3 parryKbDir = (attacker.transform.position - defender.transform.position).normalized;
             attacker.TakeDamage(Mathf.CeilToInt(baseRef * 1.2f), parryKbDir);
             return -1;
         }
+
+        // Reverse: negates all damage and returns it (legendary defense)
+        if (!defenderStaggered && def == "Reverse")
+        {
+            if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Parry");
+            PlayHitParticle(defender.transform.position);
+            int baseDmg = GetBaseDamage(atk);
+            Vector3 revDir = (attacker.transform.position - defender.transform.position).normalized;
+            attacker.TakeDamage(Mathf.CeilToInt(baseDmg * GetTimingMultiplier(defender)), revDir);
+            return -1;
+        }
+
+        // Clutch: HIGH RISK — nullify heavy attack on perfect timing, else self-damage
+        if (!defenderStaggered && def == "Clutch")
+        {
+            float cSpike = defender.lastVocalSpikeTime;
+            float offset = Mathf.Abs(GetNextBeatTime() - cSpike);
+            bool isHeavy = (atk == "UnbreakablePunch" || atk == "Hook" || atk == "Overclock");
+            if (cSpike > 0 && offset <= 0.15f && isHeavy)
+            {
+                // Perfect clutch — nullify and reflect
+                if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Parry");
+                PlayHitParticle(defender.transform.position);
+                int baseDmg = GetBaseDamage(atk);
+                Vector3 clutchDir = (attacker.transform.position - defender.transform.position).normalized;
+                attacker.TakeDamage(Mathf.CeilToInt(baseDmg * 0.5f), clutchDir);
+                return -1;
+            }
+            else
+            {
+                // Failed clutch — self-damage
+                defender.TakeDamage(5);
+                damageDealt = 5; // self-damage tracked separately
+            }
+        }
+
+        // Trap: damages opponent if they move or block
+        if (!defenderStaggered && def == "Trap")
+        {
+            if (atk == "Left" || atk == "Right" || atk == "Block")
+            {
+                defender.TakeDamage(8);
+                damageDealt = 8;
+                if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Hurt");
+                PlayHitParticle(defender.transform.position);
+            }
+        }
+
+        // Focus: charge up — next attack deals +50% (handled via state, not here)
+        // Taunt: forces opponent to only attack next turn (handled in bot AI / slot system)
 
         // --- 2. MOVEMENT & MITIGATION (bypassed when staggered) ---
         bool moveSuccessful = false;
@@ -1009,21 +1179,34 @@ public class RhythmRoundManager : NetworkBehaviour
             float dSpike = defender.lastVocalSpikeTime;
             if (dSpike > 0 && (GetNextBeatTime() - dSpike) <= 0.3f)
             {
-                moveSuccessful = true;
-                if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Dash");
-                PlayHitParticle(defender.transform.position);
+                // Uppercut catches dodges
+                if (atk == "Uppercut")
+                {
+                    moveSuccessful = false; // Uppercut beats dodge
+                }
+                else if (atk == "Grapple")
+                {
+                    moveSuccessful = false; // Grapple beats dodge
+                }
+                else
+                {
+                    moveSuccessful = true;
+                    if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Dash");
+                    PlayHitParticle(defender.transform.position);
+                }
             }
         }
 
-        if (!defenderStaggered && defMove.attack == "Block")
+        if (!defenderStaggered && def == "Block")
         {
             float bSpike  = defender.lastVocalSpikeTime;
             float offset  = Mathf.Abs(GetNextBeatTime() - bSpike);
             if (bSpike > 0 && offset <= 0.4f)
             {
-                if (move.attack == "Hook")
+                // Attacks that bypass Block: Hook, Grapple, Sweep, Feint
+                if (atk == "Hook" || atk == "Grapple" || atk == "Sweep" || atk == "Feint")
                 {
-                    blockMitigation = 0f; // Hook wraps around the guard
+                    blockMitigation = 0f;
                 }
                 else
                 {
@@ -1035,8 +1218,7 @@ public class RhythmRoundManager : NetworkBehaviour
         }
 
         // --- 3. ATTACK DAMAGE ---
-        bool moveIsUnbreakable = (move.attack == "UnbreakablePunch");
-        int finalDmg = moveIsUnbreakable ? 15 : 5;
+        int finalDmg = GetBaseDamage(atk);
 
         // Timing grade: EXCELLENT +25%, GOOD base, BAD −50%
         finalDmg = Mathf.RoundToInt(finalDmg * GetTimingMultiplier(attacker));
@@ -1054,23 +1236,25 @@ public class RhythmRoundManager : NetworkBehaviour
             }
         }
 
+        // Overclock self-damage
+        if (atk == "Overclock")
+        {
+            attacker.TakeDamage(Mathf.RoundToInt(finalDmg * 0.28f));
+        }
+
         // --- 4. HIT DETECTION ---
         bool hits;
         if (defenderStaggered)
         {
-            hits = true; // Staggered — all defenses down, every attack connects
+            hits = true; // Staggered — all defenses down
         }
-        else if (isInterrupted && !moveIsUnbreakable)
+        else if (isInterrupted && atk != "UnbreakablePunch" && atk != "Overclock" && atk != "Reverse")
         {
             hits = false;
         }
         else
         {
-            if (moveIsUnbreakable)                                                             hits = !moveSuccessful;
-            else if (move.attack == "Jab")                                                    hits = !moveSuccessful;
-            else if (move.attack == "Cross" || move.attack == "Strike" || move.attack == "Blast") hits = true;
-            else if (move.attack == "Hook")                                                    hits = !moveSuccessful;
-            else                                                                               hits = false;
+            hits = EvaluateHit(atk, def, moveSuccessful);
         }
 
         if (hits)
@@ -1080,7 +1264,7 @@ public class RhythmRoundManager : NetworkBehaviour
 
             if (damageDealt > 0)
             {
-                if (move.attack == "UnbreakablePunch") _heavyHitThisBeat = true;
+                if (atk == "UnbreakablePunch" || atk == "Overclock") _heavyHitThisBeat = true;
                 if (attacker.connectionToClient != null) attacker.TargetPlaySuccessSound("Attack");
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Hurt");
                 PlayHitParticle(defender.transform.position);
@@ -1090,6 +1274,107 @@ public class RhythmRoundManager : NetworkBehaviour
             }
         }
         return 0;
+    }
+
+    // Base damage values for all 20 combat cards
+    [Server]
+    private int GetBaseDamage(string attack)
+    {
+        return attack switch
+        {
+            "Jab"              => 8,
+            "Cross"            => 12,
+            "Hook"             => 15,
+            "UnbreakablePunch" => 20,
+            "Grapple"          => 14,
+            "Feint"            => 5,
+            "Uppercut"         => 16,
+            "Sweep"            => 13,
+            "Overclock"        => 28,
+            "Reverse"          => 0,
+            _                  => 5
+        };
+    }
+
+    // Hit evaluation: does attack hit given defense?
+    [Server]
+    private bool EvaluateHit(string attack, string defense, bool dodgeSuccessful)
+    {
+        // Unbreakable / Overclock / Reverse: only miss on successful dodge
+        if (attack == "UnbreakablePunch" || attack == "Overclock" || attack == "Reverse")
+            return !dodgeSuccessful;
+
+        // Jab: misses on dodge
+        if (attack == "Jab") return !dodgeSuccessful;
+
+        // Cross / Blast: always hits unless blocked
+        if (attack == "Cross" || attack == "Blast" || attack == "Strike")
+            return true;
+
+        // Hook: misses on dodge, but bypasses block (handled in mitigation)
+        if (attack == "Hook") return !dodgeSuccessful;
+
+        // Grapple: bypasses block and dodge (command grab)
+        if (attack == "Grapple") return true;
+
+        // Feint: bypasses block, misses on dodge
+        if (attack == "Feint") return !dodgeSuccessful;
+
+        // Uppercut: anti-dodge, catches dodgers
+        if (attack == "Uppercut") return true;
+
+        // Sweep: beats block, misses on dodge
+        if (attack == "Sweep") return !dodgeSuccessful;
+
+        // Default: attacks miss on successful dodge
+        return !dodgeSuccessful;
+    }
+
+    // Cards that cannot be interrupted (unstoppable attacks)
+    private bool IsProtected(string attack)
+    {
+        if (string.IsNullOrEmpty(attack)) return false;
+        return attack == "UnbreakablePunch" || attack == "Overclock" || attack == "Reverse";
+    }
+
+    // Rock-paper-scissors interruption: does attacker interrupt defender?
+    private bool DoesInterrupt(string attackerMove, string defenderMove)
+    {
+        if (string.IsNullOrEmpty(attackerMove) || string.IsNullOrEmpty(defenderMove)) return false;
+
+        // Jab interrupts Cross/Hook/Blast/Strike
+        if (attackerMove == "Jab" && (defenderMove == "Cross" || defenderMove == "Hook" || defenderMove == "Blast" || defenderMove == "Strike"))
+            return true;
+
+        // Cross interrupts Hook/Blast/Strike
+        if (attackerMove == "Cross" && (defenderMove == "Hook" || defenderMove == "Blast" || defenderMove == "Strike"))
+            return true;
+
+        // Grapple interrupts Block/Dodge/Focus/Taunt/Trap/Cage/Mirror/Clutch (defensive moves)
+        if (attackerMove == "Grapple" && IsDefenseMove(defenderMove))
+            return true;
+
+        // Feint interrupts Block/ParryIntent/Mirror/Clutch/Trap/Cage
+        if (attackerMove == "Feint" && (defenderMove == "Block" || defenderMove == "ParryIntent" || defenderMove == "Mirror" || defenderMove == "Clutch" || defenderMove == "Trap" || defenderMove == "Cage"))
+            return true;
+
+        // Uppercut interrupts Dodge (Left/Right)
+        if (attackerMove == "Uppercut" && (defenderMove == "Left" || defenderMove == "Right"))
+            return true;
+
+        // Sweep interrupts Block/Focus/Taunt
+        if (attackerMove == "Sweep" && (defenderMove == "Block" || defenderMove == "Focus" || defenderMove == "Taunt"))
+            return true;
+
+        return false;
+    }
+
+    private bool IsDefenseMove(string move)
+    {
+        if (string.IsNullOrEmpty(move)) return false;
+        return move == "Block" || move == "ParryIntent" || move == "Left" || move == "Right"
+            || move == "Clutch" || move == "Focus" || move == "Taunt" || move == "Trap"
+            || move == "Cage" || move == "Mirror" || move == "Reverse";
     }
 
     // [Server]
@@ -1190,9 +1475,28 @@ public class RhythmRoundManager : NetworkBehaviour
     {
         if (!string.IsNullOrEmpty(move.attack))
         {
-            if (move.attack == "ParryIntent") return "PARRY (CAGE)"; // Shows both in the log
-            if (move.attack == "UnbreakablePunch") return "BOOM";
-            return move.attack;
+            return move.attack switch
+            {
+                "ParryIntent"      => "CAGE",
+                "UnbreakablePunch" => "BOOM",
+                "Jab"              => "PUNCH",
+                "Cross"            => "FLANK",
+                "Hook"             => "HOOK",
+                "Block"            => "BLOCK",
+                "Grapple"          => "GRAPPLE",
+                "Feint"            => "FEINT",
+                "Clutch"           => "CLUTCH",
+                "Uppercut"         => "UPPERCUT",
+                "Sweep"            => "SWEEP",
+                "Focus"            => "FOCUS",
+                "Taunt"            => "TAUNT",
+                "Overclock"        => "OVERCLOCK",
+                "Reverse"          => "REVERSE",
+                "Trap"             => "TRAP",
+                "Cage"             => "CAGE",
+                "Mirror"           => "MIRROR",
+                _                  => move.attack.ToUpper()
+            };
         }
         return (move.dash != Vector3.zero) ? "DODGE" : "IDLE";
     }
@@ -1334,7 +1638,15 @@ public class RhythmRoundManager : NetworkBehaviour
     [Server]
     private void AssignRandomComboMove(PlayerCombat pc)
     {
-        string[] pool = { "Jab", "Cross", "Hook", "UnbreakablePunch", "ParryIntent" };
+        // Full pool of all 20 combat cards for combo mode
+        string[] pool =
+        {
+            "Jab", "Cross", "Hook", "Block", "Left", "Right",
+            "UnbreakablePunch", "ParryIntent",
+            "Grapple", "Feint", "Clutch",
+            "Uppercut", "Sweep", "Focus", "Taunt",
+            "Overclock", "Reverse", "Trap", "Cage", "Mirror"
+        };
         while (pc._comboBuffer.Count < currentComboCount)
         {
             string move = pool[Random.Range(0, pool.Length)];
@@ -1351,6 +1663,18 @@ public class RhythmRoundManager : NetworkBehaviour
             "Hook"             => 16,
             "UnbreakablePunch" => 20,
             "ParryIntent"      => 10,
+            "Grapple"          => 14,
+            "Feint"            => 5,
+            "Clutch"           => 0,
+            "Uppercut"         => 16,
+            "Sweep"            => 13,
+            "Focus"            => 0,
+            "Taunt"            => 3,
+            "Overclock"        => 25,
+            "Reverse"          => 0,
+            "Trap"             => 8,
+            "Cage"             => 8,
+            "Mirror"           => 10,
             _                  => 8
         };
         float mult = timingOffset <= 0.10f ? 1.25f : timingOffset <= 0.30f ? 1.0f : 0.5f;
@@ -1397,9 +1721,18 @@ public class RhythmRoundManager : NetworkBehaviour
 
         float offset = Mathf.Abs(targetBeat - pc.lastVocalSpikeTime);
 
-        float window = 0.3f;
-        if (move.attack == "Block") window = 0.4f;
-        else if (move.attack == "UnbreakablePunch") window = 0.2f;
+        float window = move.attack switch
+        {
+            "Block"            => 0.4f,
+            "Clutch"           => 0.15f,
+            "Reverse"          => 0.2f,
+            "Mirror"           => 0.2f,
+            "Trap"             => 0.35f,
+            "Cage"             => 0.35f,
+            "UnbreakablePunch" => 0.2f,
+            "Overclock"        => 0.2f,
+            _                  => 0.3f
+        };
 
         string rating = "BAD";
         if (offset <= 0.1f) rating = "EXCELLENT";
@@ -1422,18 +1755,28 @@ public class RhythmRoundManager : NetworkBehaviour
 
     void OnRoundStateChanged(bool oldVal, bool newVal) { if (BeatAnalyzer.Instance != null && BeatAnalyzer.Instance.audioSource != null && currentType != RoundType.CustomTrack) { if (newVal) BeatAnalyzer.Instance.audioSource.Play(); else BeatAnalyzer.Instance.audioSource.Stop(); } }
 
-    private void DrawRoundSelectionCards()
+    private void DrawRoundPicker()
     {
         if (_whiteTex == null) { _whiteTex = new Texture2D(1, 1); _whiteTex.SetPixel(0, 0, Color.white); _whiteTex.Apply(); }
 
-        float cardW = 155f, cardH = 105f;
-        float gap = 18f;
-        float startY = 80f;
+        // Dark overlay
+        GUI.color = new Color(0.02f, 0.02f, 0.04f, 0.98f);
+        GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), _whiteTex);
+        GUI.color = Color.white;
 
-        GUIStyle titleStyle = new GUIStyle(GUI.skin.label) { fontSize = 16, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
-        GUIStyle descStyle  = new GUIStyle(GUI.skin.label) { fontSize = 10, alignment = TextAnchor.MiddleCenter, wordWrap = true };
+        // Title
+        GUIStyle titleStyle = new GUIStyle(GUI.skin.label) { fontSize = 38, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+        titleStyle.normal.textColor = new Color(1f, 0.85f, 0.2f);
+        GUI.Label(new Rect(0, 20, Screen.width, 50), "PICK THE ROUND", titleStyle);
 
-        // Collect custom maps so we can calculate total width up front
+        float cardW = 180f, cardH = 130f;
+        float gap = 24f;
+        float startY = 100f;
+
+        GUIStyle cardTitleStyle = new GUIStyle(GUI.skin.label) { fontSize = 18, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+        GUIStyle descStyle  = new GUIStyle(GUI.skin.label) { fontSize = 11, alignment = TextAnchor.MiddleCenter, wordWrap = true };
+
+        // Collect custom maps
         var allMapNames = new List<string>();
         string registry = PlayerPrefs.GetString("CustomMapRegistry", "");
         if (!string.IsNullOrEmpty(registry))
@@ -1449,15 +1792,17 @@ public class RhythmRoundManager : NetworkBehaviour
         float totalW   = totalCards * cardW + (totalCards - 1) * gap;
         float startX   = Screen.width / 2f - totalW / 2f;
 
-        // SLOW ROUND CARD
-        DrawModeCard(startX, startY, cardW, cardH, "SLOW RHYTHM", "Single beat\nrhythm combat", Color.cyan,
-            () => StartSlowRound(), titleStyle, descStyle);
+        // SLOW ROUND CARD (dimmed if already used)
+        bool slowUsed = _usedRoundTypes.Contains(RoundType.SlowRhythm);
+        DrawModeCard(startX, startY, cardW, cardH, "SLOW RHYTHM", "Single beat\nrhythm combat", slowUsed ? Color.gray : Color.cyan,
+            () => { if (!slowUsed && isServer) SelectRoundType(RoundType.SlowRhythm); }, cardTitleStyle, descStyle);
 
-        // FAST ROUND CARD
-        DrawModeCard(startX + cardW + gap, startY, cardW, cardH, "FAST COMBO", "Cluster attack\nsequences", Color.magenta,
-            () => StartFastRound(), titleStyle, descStyle);
+        // FAST ROUND CARD (dimmed if already used)
+        bool fastUsed = _usedRoundTypes.Contains(RoundType.FastCombo);
+        DrawModeCard(startX + cardW + gap, startY, cardW, cardH, "FAST COMBO", "Cluster attack\nsequences", fastUsed ? Color.gray : Color.magenta,
+            () => { if (!fastUsed && isServer) SelectRoundType(RoundType.FastCombo); }, cardTitleStyle, descStyle);
 
-        // CUSTOM MAPS — same row, continuing to the right
+        // CUSTOM MAPS
         for (int idx = 0; idx < allMapNames.Count; idx++)
         {
             string mapName = allMapNames[idx];
@@ -1473,11 +1818,14 @@ public class RhythmRoundManager : NetworkBehaviour
             bool hasPath = PlayerPrefs.HasKey("CustomMapPath_" + mapName);
             bool loading = _isLoadingClip && _loadingClipName == mapName;
 
+            bool mapUsed = _usedCustomMaps.Contains(mapName);
+            Color mapColor = mapUsed ? Color.gray : Color.green;
+
             if (loading)
-                DrawModeCard(customX, startY, cardW, cardH, "LOADING...", mapName, Color.yellow, () => { }, titleStyle, descStyle);
+                DrawModeCard(customX, startY, cardW, cardH, "LOADING...", mapName, Color.yellow, () => { }, cardTitleStyle, descStyle);
             else if (clip != null || hasPath)
-                DrawModeCard(customX, startY, cardW, cardH, mapName.ToUpper(), "Custom map", Color.green,
-                    () => LoadAndPlayMap(mapName, clip), titleStyle, descStyle);
+                DrawModeCard(customX, startY, cardW, cardH, mapName.ToUpper(), "Custom map", mapColor,
+                    () => { if (!mapUsed && isServer) SelectRoundType(RoundType.CustomTrack, mapName); }, cardTitleStyle, descStyle);
         }
     }
 
@@ -1562,6 +1910,13 @@ public class RhythmRoundManager : NetworkBehaviour
             return;
         }
 
+        // --- ROUND PICKER OVERLAY ---
+        if (isRoundPickerActive)
+        {
+            DrawRoundPicker();
+            return;
+        }
+
         // --- 1. SERVER CONTROLS (Top Left) ---
         if (NetworkServer.active && isServer)
         {
@@ -1571,7 +1926,7 @@ public class RhythmRoundManager : NetworkBehaviour
             {
                 GUI.color = Color.white;
                 GUILayout.EndArea();
-                DrawRoundSelectionCards();
+                // Round picker is now shown as full-screen overlay instead
                 GUILayout.BeginArea(new Rect(10, 10, 220, 500));
             }
             else

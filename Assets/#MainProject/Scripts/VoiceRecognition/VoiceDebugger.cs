@@ -23,7 +23,22 @@ public class VoiceDebugger : MonoBehaviour
     public string ModelPath = "vosk-model-small-en-us-0.15";
 
     [Tooltip("Words to highlight in the history log (helps spot near-misses)")]
-    public List<string> WatchWords = new List<string> { "one", "two", "three", "four", "won", "to", "too", "for", "fore", "free" };
+    public List<string> WatchWords = new List<string>
+    {
+        // Basic cards
+        "punch", "jab", "flank", "frank", "blank", "hook", "block", "guard",
+        "cage", "page", "engage", "crush", "crash", "crushing", "crashing",
+        "left", "right", "grapple", "grab", "wrap", "feint", "faint", "paint",
+        "clutch", "catch", "crunch",
+        // Advanced cards
+        "uppercut", "upper", "cutter", "sweep", "swipe", "sweet",
+        "focus", "charge", "power", "taunt", "taught", "tall",
+        // Legendary cards
+        "overclock", "over", "clock", "overload", "reverse", "revert", "reflect",
+        "trap", "trip", "track", "mirror", "mere", "near",
+        // Utility
+        "cancel", "clear"
+    };
 
     private Model          _model;
     private VoskRecognizer _recognizer;
@@ -117,7 +132,56 @@ public class VoiceDebugger : MonoBehaviour
     // ── GUI ───────────────────────────────────────────────────────────────
     private void OnGUI()
     {
-        return; // DEBUG UI COMPLETELY DISABLED
+        if (_bg == null) { _bg = new Texture2D(1, 1); _bg.SetPixel(0, 0, Color.white); _bg.Apply(); }
+
+        float sw = Screen.width, sh = Screen.height;
+        float panelW = 420f, panelH = 340f;
+        float px = sw - panelW - 12f, py = 12f;
+
+        // Background
+        GUI.color = new Color(0.02f, 0.02f, 0.04f, 0.92f);
+        GUI.DrawTexture(new Rect(px, py, panelW, panelH), _bg);
+
+        // Border
+        GUI.color = new Color(0.4f, 0.8f, 1f, 0.6f);
+        GUI.DrawTexture(new Rect(px, py, panelW, 2f), _bg);
+        GUI.DrawTexture(new Rect(px, py + panelH - 2f, panelW, 2f), _bg);
+        GUI.DrawTexture(new Rect(px, py, 2f, panelH), _bg);
+        GUI.DrawTexture(new Rect(px + panelW - 2f, py, 2f, panelH), _bg);
+
+        GUI.color = Color.white;
+        float mx = px + 10f, my = py + 8f, mw = panelW - 20f;
+
+        // Title
+        GUI.Label(new Rect(mx, my, mw, 26f), "VOICE DEBUGGER (Open Vocab)", Style(16, FontStyle.Bold, new Color(0.3f, 1f, 0.8f)));
+        my += 28f;
+
+        // Status
+        GUI.Label(new Rect(mx, my, mw, 20f), _statusMsg, Style(11, FontStyle.Normal, new Color(0.7f, 0.7f, 0.7f)));
+        my += 24f;
+
+        // Current partial (live)
+        GUI.Label(new Rect(mx, my, 70f, 20f), "LIVE:", Style(11, FontStyle.Bold, new Color(0.6f, 0.6f, 0.6f)));
+        GUI.Label(new Rect(mx + 50f, my, mw - 50f, 22f),
+            string.IsNullOrEmpty(_currentPartial) ? "(silence)" : _currentPartial,
+            Style(13, FontStyle.Bold, Color.yellow));
+        my += 26f;
+
+        // History header
+        GUI.Label(new Rect(mx, my, mw, 18f), "HISTORY (newest first):", Style(11, FontStyle.Bold, new Color(0.5f, 0.5f, 0.5f)));
+        my += 20f;
+
+        // History entries
+        float entryH = 18f;
+        int maxEntries = Mathf.FloorToInt((py + panelH - my - 8f) / entryH);
+        for (int i = 0; i < _history.Count && i < maxEntries; i++)
+        {
+            string entry = _history[i];
+            bool isWatch = entry.StartsWith(">>>");
+            GUI.Label(new Rect(mx, my, mw, entryH), entry,
+                Style(10, FontStyle.Normal, isWatch ? new Color(1f, 0.85f, 0.2f) : new Color(0.75f, 0.75f, 0.8f)));
+            my += entryH;
+        }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────

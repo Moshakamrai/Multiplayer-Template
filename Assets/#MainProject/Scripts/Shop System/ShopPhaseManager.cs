@@ -207,8 +207,9 @@ public class ShopPhaseManager : MonoBehaviour
             }
         }
 
-        // 4. Auto-equip all owned combat cards (up to 10)
+        // 4. Auto-equip all owned combat and Vex cards (up to 10)
         var equipList = new List<string>(botInv.ownedCombatCards);
+        equipList.AddRange(botInv.ownedVexCards);
         botInv.EquipCombatCards(equipList);
     }
 
@@ -245,9 +246,10 @@ public class ShopPhaseManager : MonoBehaviour
     public void LockInShop(PlayerInventory inv)
     {
         if (!isShopPhase) return;
-        // Auto-equip all owned combat cards up to 10
+        // Auto-equip all owned combat and Vex cards up to 10
         var equipList = new List<string>(inv.ownedCombatCards);
-        Debug.Log($"<color=yellow>SHOP LOCK-IN:</color> Player has {inv.ownedCombatCards.Count} owned cards, equipping: {string.Join(",", equipList)}");
+        equipList.AddRange(inv.ownedVexCards);
+        Debug.Log($"<color=yellow>SHOP LOCK-IN:</color> Player has {inv.ownedCombatCards.Count} combat + {inv.ownedVexCards.Count} vex cards, equipping: {string.Join(",", equipList)}");
         inv.EquipCombatCards(equipList);
         Debug.Log($"<color=yellow>SHOP LOCK-IN:</color> Equipped {inv.equippedCombatCards.Count} cards: {string.Join(",", inv.equippedCombatCards)}");
 

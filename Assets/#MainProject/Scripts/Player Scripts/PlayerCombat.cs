@@ -21,6 +21,22 @@ public class PlayerCombat : NetworkBehaviour
     [SyncVar] public bool IsStaggered    = false;
     [SyncVar] public int  StaggerBeatsRemaining = 0;
 
+    // ── Persistent card effects (tracked across beats) ───────────────────────
+    [SyncVar] public bool HasPendingTrap  = false;
+    [SyncVar] public bool HasPendingCage  = false;
+    [SyncVar] public bool HasFocusBuff    = false;
+    [SyncVar] public bool HasMirrorBuff   = false;
+    [SyncVar] public int  FocusBuffBeatsRemaining  = 0;
+    [SyncVar] public int  MirrorBuffBeatsRemaining = 0;
+    [SyncVar] public bool IsTauntedNextTurn = false;
+    [SyncVar] public int TauntTurnsRemaining = 0;
+
+    // ── Trait & Vex Card Effects ──────────────────────────────────────────────
+    [SyncVar] public string activeTraitId = "";
+    [SyncVar] public string activeVexCardId = "";
+    [SyncVar] public int VexCardBeatsRemaining = 0;
+    [SyncVar] public int ConsecutiveHitsChain = 0; // For Chain trait and Momentum vex card
+
     private Queue<string> _attackQueue = new Queue<string>();
     public SphereCollider weaponGloveLeft;
     public SphereCollider weaponGloveRight;
@@ -89,6 +105,25 @@ public class PlayerCombat : NetworkBehaviour
     {
         var inv = GetComponent<PlayerInventory>();
         if (inv != null) ShopPhaseManager.Instance?.TryBuyTraitCard(inv, slotIndex);
+    }
+
+    [Command]
+    public void CmdRemoveCard(string cardId)
+    {
+        var inv = GetComponent<PlayerInventory>();
+        if (inv != null && inv.credits >= 1)
+        {
+            // Remove from appropriate list
+            if (inv.ownedCombatCards.Contains(cardId))
+                inv.ownedCombatCards.Remove(cardId);
+            else if (inv.ownedVexCards.Contains(cardId))
+                inv.ownedVexCards.Remove(cardId);
+            else if (inv.equippedTraitId == cardId)
+                inv.equippedTraitId = "";
+
+            // Deduct 1 credit
+            inv.credits = Mathf.Max(0, inv.credits - 1);
+        }
     }
 
     [Header("VFX Settings")]
@@ -163,6 +198,18 @@ public class PlayerCombat : NetworkBehaviour
         _staggerRecoveryCharge = 0f;
         _staggerTimingEscaped = false;
         _spikeLockedThisBeat = false;
+        HasPendingTrap = false;
+        HasPendingCage = false;
+        HasFocusBuff = false;
+        HasMirrorBuff = false;
+        FocusBuffBeatsRemaining = 0;
+        MirrorBuffBeatsRemaining = 0;
+        IsTauntedNextTurn = false;
+        TauntTurnsRemaining = 0;
+        activeTraitId = "";
+        activeVexCardId = "";
+        VexCardBeatsRemaining = 0;
+        ConsecutiveHitsChain = 0;
     }
 
     private void Start()
@@ -252,6 +299,23 @@ public class PlayerCombat : NetworkBehaviour
         // Plus additional reduction based on damage percentage (every 50% = -4% window, max -20%)
         float percentageReduction = GetShoutWindowReduction(CurrentPercentage);
         float effectiveWindow = SHOUT_WINDOW * (1f - _pressureLevel * 0.4f - percentageReduction);
+
+        // Trait/Vex card timing window modifiers
+        float timingWindowMult = 1f;
+        // Heavy trait: +0.05s (easier for this player)
+        if (!string.IsNullOrEmpty(activeTraitId) && activeTraitId == "heavy")
+            timingWindowMult *= 1.10f; // 0.05s / 0.5s = 10% increase
+
+        // Speedster vex card: +20% window (easier for this player)
+        if (!string.IsNullOrEmpty(activeVexCardId) && activeVexCardId == "speedster")
+            timingWindowMult *= 1.20f;
+
+        // Check opponent's Stunning trait (makes our window harder)
+        PlayerCombat opponent = GetComponent<PlayerController>()?.GetOpponent()?.GetComponent<PlayerCombat>();
+        if (opponent != null && !string.IsNullOrEmpty(opponent.activeTraitId) && opponent.activeTraitId == "stunning")
+            timingWindowMult *= 0.90f; // 0.05s reduction = ~10% tighter
+
+        effectiveWindow *= timingWindowMult;
         bool inShoutWindow = timeUntilImpact > 0f && timeUntilImpact <= effectiveWindow;
         if (!inShoutWindow) return;
 
@@ -456,7 +520,7 @@ public class PlayerCombat : NetworkBehaviour
             "Hook"             => 25,
             "UnbreakablePunch" => 30,
             "Grapple"          => 18,
-            "Feint"            => 5,
+            "Fake"            => 5,
             "Uppercut"         => 20,
             "Sweep"            => 16,
             "Overclock"        => 35,
@@ -584,7 +648,7 @@ public class PlayerCombat : NetworkBehaviour
             else if (attack == "UnbreakablePunch") animToPlay = "Uppercut";
             // New cards: most use their trigger name directly as animator state
             // If your animator doesn't have these states yet, they'll gracefully fall through
-            // Animator states needed: Grapple, Feint, Clutch, Uppercut, Sweep, Focus, Taunt, Overclock, Reverse, Trap, Cage, Mirror
+            // Animator states needed: Grapple, Fake, Clutch, Uppercut, Sweep, Focus, Taunt, Overclock, Reverse, Trap, Cage, Mirror
 
             if (animator != null)
             {
@@ -609,12 +673,22 @@ public class PlayerCombat : NetworkBehaviour
     [ClientRpc] void RpcTriggerAttack(string t) { if (isLocalPlayer) return; if (animator != null) animator.SetTrigger(t); }
 
     [Server]
-    public void TakeDamage(int damage, Vector3 knockbackDir = default)
+    public void TakeDamage(int damage, Vector3 knockbackDir = default, bool isOpponentDamage = false)
     {
         StartCoroutine(FlashEffectRoutine());
         CurrentPercentage += damage;
         RpcTriggerHurt("Hurt " + Random.Range(1, 5), 0f, damage);
+        RpcShowDamageNumber(damage, isOpponentDamage);
         if (knockbackDir != default) RpcNudgeBack(knockbackDir);
+    }
+
+    [ClientRpc]
+    private void RpcShowDamageNumber(int damage, bool isOpponentDamage)
+    {
+        if (FloatingDamageTextManager.Instance == null) return;
+        // Red if taking damage (local player), Green if opponent taking damage (remote player)
+        Color damageColor = isLocalPlayer ? new Color(1f, 0.3f, 0.3f) : new Color(0.3f, 1f, 0.3f);
+        FloatingDamageTextManager.Instance.ShowDamage(damage, damageColor, transform.position + Vector3.up);
     }
 
     [ClientRpc]
@@ -639,9 +713,14 @@ public class PlayerCombat : NetworkBehaviour
 
         if (animator) animator.SetTrigger(trigger);
 
-        float shakeDur = damage > 15 ? 0.35f : damage > 8 ? 0.20f : 0.10f;
-        float shakeMag = damage > 15 ? 0.65f : damage > 8 ? 0.38f : 0.18f;
-        CameraShake.Instance?.Shake(shakeDur, shakeMag);
+        if (isLocalPlayer)
+        {
+            float shakeDur = damage > 15 ? 0.5f : damage > 8 ? 0.35f : 0.25f;
+            float shakeMag = damage > 15 ? 1.2f : damage > 8 ? 0.7f : 0.4f;
+            CameraShake.Instance?.Shake(shakeDur, shakeMag);
+
+            _hurtFlashFade = Mathf.Max(_hurtFlashFade, Mathf.Min(1f, damage / 20f));
+        }
 
         // ── SINGLE MODE ONLY: hurt slow-mo effect ──
         var rmm = RhythmRoundManager.Instance;
@@ -796,9 +875,23 @@ public class PlayerCombat : NetworkBehaviour
         // --- HURT FLASH (red vignette) ---
         if (_hurtFlashFade > 0)
         {
-            _hurtFlashFade -= Time.deltaTime * 3.5f;
-            GUI.color = new Color(0.9f, 0f, 0f, Mathf.Clamp01(_hurtFlashFade) * 0.45f);
+            _hurtFlashFade -= Time.deltaTime * 2.5f;
+            float flashAlpha = Mathf.Clamp01(_hurtFlashFade) * 0.65f;
+            GUI.color = new Color(1f, 0.1f, 0.1f, flashAlpha);
             GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), _whiteTexture);
+            GUI.color = Color.white;
+
+            float vignetteAlpha = Mathf.Clamp01(_hurtFlashFade) * 0.4f;
+            float vignetteSize = Mathf.Lerp(100f, 300f, Mathf.Clamp01(_hurtFlashFade));
+            GUI.color = new Color(0.8f, 0f, 0f, vignetteAlpha);
+            for (int i = 0; i < 4; i++)
+            {
+                float offset = vignetteSize * (1f - Mathf.Clamp01(_hurtFlashFade));
+                if (i == 0) GUI.DrawTexture(new Rect(-offset, -offset, Screen.width + offset * 2, vignetteSize), _whiteTexture);
+                else if (i == 1) GUI.DrawTexture(new Rect(-offset, Screen.height - vignetteSize + offset, Screen.width + offset * 2, vignetteSize), _whiteTexture);
+                else if (i == 2) GUI.DrawTexture(new Rect(-offset, 0, vignetteSize, Screen.height), _whiteTexture);
+                else GUI.DrawTexture(new Rect(Screen.width - vignetteSize + offset, 0, vignetteSize, Screen.height), _whiteTexture);
+            }
             GUI.color = Color.white;
         }
 
@@ -818,8 +911,8 @@ public class PlayerCombat : NetworkBehaviour
             if (oppCombat != null)
             {
                 float barWidth = 400f;
-                float barHeight = 60f; 
-                float posX = Screen.width - barWidth - 20f;
+                float barHeight = 60f;
+                float posX = Screen.width / 2f - barWidth / 2f;
                 float posY = 20f;
 
                 GUI.color = new Color(0.1f, 0.1f, 0.1f, 1f);
@@ -841,14 +934,14 @@ public class PlayerCombat : NetworkBehaviour
                 string oppName = string.IsNullOrEmpty(opponent.PlayerName) ? "BOT UNIT" : opponent.PlayerName;
                 GUI.Label(new Rect(posX, posY, barWidth, barHeight), $"{oppName}: {oppCombat.CurrentPercentage:F0}%", nameStyle);
 
-                // --- OPPONENT CARDS PANEL (Left Middle) ---
+                // --- OPPONENT CARDS PANEL (Top Left) ---
                 if (!string.IsNullOrEmpty(oppCombat.availableCardsString))
                 {
                     var oppCards = new List<string>(oppCombat.availableCardsString.Split('|'));
                     float panelW = 220f;
                     float panelH = 36f + oppCards.Count * 34f;
                     float panelX = 20f;
-                    float panelY = Screen.height / 2f - panelH / 2f;
+                    float panelY = 100f;
 
                     GUI.color = new Color(0.06f, 0.06f, 0.1f, 0.92f);
                     GUI.DrawTexture(new Rect(panelX, panelY, panelW, panelH), _whiteTexture);
@@ -881,7 +974,7 @@ public class PlayerCombat : NetworkBehaviour
                             "UnbreakablePunch" => "  BOOM",
                             "ParryIntent" => "  CAGE",
                             "Grapple" => "  GRAPPLE",
-                            "Feint" => "  FEINT",
+                            "Fake" => "  FEINT",
                             "Clutch" => "  CLUTCH",
                             "Uppercut" => "  UPPERCUT",
                             "Sweep" => "  SWEEP",
@@ -903,7 +996,7 @@ public class PlayerCombat : NetworkBehaviour
             }
         }
 
-        // --- 2. MIC THRESHOLD (Middle Right, Above Cards) ---
+        // --- 2. MIC THRESHOLD (Bottom Right) ---
         if (vp != null)
         {
             float vol = vp.CurrentRawVolume;
@@ -911,7 +1004,7 @@ public class PlayerCombat : NetworkBehaviour
             float w = 240f;
             float h = 100f;
             float mx = Screen.width - w - 20f;
-            float my = Screen.height / 2f - 150f;
+            float my = Screen.height - h - 20f;
 
             // Background
             GUI.color = new Color(0.08f, 0.08f, 0.08f, 0.95f);
@@ -947,13 +1040,13 @@ public class PlayerCombat : NetworkBehaviour
             GUI.color = Color.white;
         }
 
-        // --- 3. COMBAT QUEUE (Middle Right) ---
+        // --- 3. COMBAT QUEUE (Top Right) ---
         if (RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive)
         {
             float w = 280f;
             float h = 200f;
             float qx = Screen.width - w - 20f;
-            float qy = 140f;
+            float qy = 100f;
 
             GUILayout.BeginArea(new Rect(qx, qy, w, h));
             GUIStyle headerStyle = new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold, fontSize = 20 };
@@ -984,7 +1077,7 @@ public class PlayerCombat : NetworkBehaviour
         {
             float w = 240f;
             float h = 280f;
-            Rect chainRect = new Rect(20, Screen.height - h - 180f, w, h);
+            Rect chainRect = new Rect(20, Screen.height - h - 20f, w, h);
 
             GUI.Box(chainRect, "<b>NEXT COMBO CHAIN</b>");
 
@@ -1023,7 +1116,43 @@ public class PlayerCombat : NetworkBehaviour
             GUILayout.EndArea();
         }
 
-        // --- 5. TIMING FEEDBACK FLOATER (Center Screen) ---
+        // --- 5. ACTIVE VEX CARD DISPLAY (Circular UI) ---
+        if (!string.IsNullOrEmpty(activeVexCardId) && isLocalPlayer)
+        {
+            float circleX = Screen.width - 100f;
+            float circleY = Screen.height - 120f;
+            float circleRadius = 45f;
+
+            // Background circle
+            GUI.color = new Color(0.2f, 0.2f, 0.3f, 0.9f);
+            for (int i = 0; i < 60; i++)
+            {
+                float angle = (i / 60f) * Mathf.PI * 2f;
+                float x = circleX + Mathf.Cos(angle) * circleRadius;
+                float y = circleY + Mathf.Sin(angle) * circleRadius;
+                if (_whiteTexture != null)
+                    GUI.DrawTexture(new Rect(x - 2, y - 2, 4, 4), _whiteTexture);
+            }
+
+            // Border glow
+            GUI.color = new Color(0.3f, 1f, 0.7f, 0.8f);
+            for (int i = 0; i < 60; i++)
+            {
+                float angle = (i / 60f) * Mathf.PI * 2f;
+                float x = circleX + Mathf.Cos(angle) * (circleRadius + 3);
+                float y = circleY + Mathf.Sin(angle) * (circleRadius + 3);
+                if (_whiteTexture != null)
+                    GUI.DrawTexture(new Rect(x - 1, y - 1, 2, 2), _whiteTexture);
+            }
+
+            // Vex card name and icon
+            GUI.color = Color.white;
+            GUIStyle vexStyle = new GUIStyle(GUI.skin.label)
+            { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 14 };
+            GUI.Label(new Rect(circleX - 40, circleY - 20, 80, 40), activeVexCardId.ToUpper(), vexStyle);
+        }
+
+        // --- 6. TIMING FEEDBACK FLOATER (Center Screen) ---
         if (_timingFade > 0)
         {
             GUIStyle timingStyle = new GUIStyle(GUI.skin.label) 

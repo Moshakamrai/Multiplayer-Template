@@ -36,9 +36,9 @@ public class CardManager : NetworkBehaviour
 
     // ── Classification ─────────────────────────────────────────────────────
     private static readonly HashSet<string> _atkSet = new HashSet<string>
-        { "Jab", "Cross", "Hook", "UnbreakablePunch", "Grapple", "Feint", "Uppercut", "Sweep", "Overclock", "Reverse" };
+        { "Jab", "Cross", "Hook", "UnbreakablePunch", "Grapple", "Fake", "Uppercut", "Sweep", "Overclock", "Reverse" };
     private static readonly HashSet<string> _defSet = new HashSet<string>
-        { "Block", "ParryIntent", "Left", "Right", "Clutch", "Focus", "Taunt", "Trap", "Cage", "Mirror" };
+        { "Block", "ParryIntent", "Left", "Right", "Clutch", "Focus", "Taunt", "Trap", "Cage", "Mirror", "Striker", "Tank", "Speedster", "Grappler", "Trickster", "Vampire", "Glass", "Momentum" };
 
     public static bool IsAttackTrigger(string t)  => _atkSet.Contains(t);
     public static bool IsDefenseTrigger(string t) => _defSet.Contains(t);
@@ -85,6 +85,15 @@ public class CardManager : NetworkBehaviour
     public List<string> availableCardsForRound = new List<string>();
     private string _lastCardsString = "";
 
+    public string availableCardsString
+    {
+        get
+        {
+            if (_myPCombat == null) _myPCombat = GetComponent<PlayerCombat>();
+            return _myPCombat?.availableCardsString ?? "";
+        }
+    }
+
     private void UpdateAvailableCardsFromCombat()
     {
         if (_myPCombat == null) _myPCombat = GetComponent<PlayerCombat>();
@@ -111,7 +120,7 @@ public class CardManager : NetworkBehaviour
         new CombatCard { cardName="Parry",  triggerName="ParryIntent",      description="Elite Parry. Reflects 120% damage back to the attacker." },
         new CombatCard { cardName="Boom",  triggerName="UnbreakablePunch", description="Unstoppable. Ignores blocks and deals massive dmg." },
         new CombatCard { cardName="Grapple", triggerName="Grapple",         description="Command grab. Bypasses blocks and dodges." },
-        new CombatCard { cardName="Feint",  triggerName="Feint",           description="Cancels opponent defense. Mind game tool." },
+        new CombatCard { cardName="Fake",  triggerName="Fake",           description="Cancels opponent defense. Mind game tool." },
         new CombatCard { cardName="Clutch", triggerName="Clutch",          description="HIGH RISK. Nullify heavy attack on perfect timing." },
         // Advanced (4 cards)
         new CombatCard { cardName="Uppercut", triggerName="Uppercut",       description="Anti-dodge attack. Punishes evasive play." },
@@ -148,6 +157,11 @@ public class CardManager : NetworkBehaviour
 
         // Block the last-used card for one full input window
         if (trigger == blockedTrigger) return false;
+
+        // Taunt effect: opponent can only use attack cards next turn
+        PlayerCombat pc = GetComponent<PlayerCombat>();
+        if (pc != null && pc.IsTauntedNextTurn && IsDefenseTrigger(trigger))
+            return false; // Prevent all defense cards
 
         if (trigger.StartsWith("Combo"))
         {
@@ -262,7 +276,7 @@ public class CardManager : NetworkBehaviour
                 "ParryIntent" => "reflect",
                 "UnbreakablePunch" => "boom",
                 "Grapple" => "grapple",
-                "Feint" => "feint",
+                "Fake" => "fake",
                 "Clutch" => "clutch",
                 "Uppercut" => "uppercut",
                 "Sweep" => "sweep",
@@ -333,8 +347,8 @@ public class CardManager : NetworkBehaviour
 
     private float GetCardScreenX(string trigger)
     {
-        var allDefCards = new[] { "Block", "ParryIntent", "Left", "Right", "Clutch", "Focus", "Taunt", "Trap", "Cage", "Mirror" };
-        var allAtkCards = new[] { "Jab", "Cross", "Hook", "UnbreakablePunch", "Grapple", "Feint", "Uppercut", "Sweep", "Overclock", "Reverse" };
+        var allDefCards = new[] { "Block", "ParryIntent", "Left", "Right", "Clutch", "Focus", "Taunt", "Trap", "Cage", "Mirror", "Striker", "Tank", "Speedster", "Grappler", "Trickster", "Vampire", "Glass", "Momentum" };
+        var allAtkCards = new[] { "Jab", "Cross", "Hook", "UnbreakablePunch", "Grapple", "Fake", "Uppercut", "Sweep", "Overclock", "Reverse" };
 
         var defCards = (availableCardsForRound.Count > 0)
             ? allDefCards.Where(c => availableCardsForRound.Contains(c)).ToArray()
@@ -416,8 +430,8 @@ public class CardManager : NetworkBehaviour
             float baseY     = Screen.height - nHeight - 60f + hoverY;
             float gap       = 120f;
 
-            var allDefCards = new[] { "Block", "ParryIntent", "Left", "Right", "Clutch", "Focus", "Taunt", "Trap", "Cage", "Mirror" };
-            var allAtkCards = new[] { "Jab", "Cross", "Hook", "UnbreakablePunch", "Grapple", "Feint", "Uppercut", "Sweep", "Overclock", "Reverse" };
+            var allDefCards = new[] { "Block", "ParryIntent", "Left", "Right", "Clutch", "Focus", "Taunt", "Trap", "Cage", "Mirror", "Striker", "Tank", "Speedster", "Grappler", "Trickster", "Vampire", "Glass", "Momentum" };
+            var allAtkCards = new[] { "Jab", "Cross", "Hook", "UnbreakablePunch", "Grapple", "Fake", "Uppercut", "Sweep", "Overclock", "Reverse" };
 
             var defCards = (availableCardsForRound.Count > 0)
                 ? System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Where(allDefCards, c => availableCardsForRound.Contains(c)))
@@ -546,26 +560,28 @@ public class CardManager : NetworkBehaviour
         GUI.color = new Color(bCol.r, bCol.g, bCol.b, 0.50f + approachFrac * 0.50f);
         DrawBrackets(px, py, COMBO_W, COMBO_H, bLen, bThick);
 
-        // Combo chain badge
+        // Combo chain badge with orange glow
         GUI.color = Color.white;
-        _comboLabelStyle.normal.textColor = new Color(1f, 0.6f, 0.1f);
-        GUI.Label(new Rect(px + 8f, py + 6f, 200f, 20f),
-                  $"COMBO  {chainPos + 1} / {chainSize}×", _comboLabelStyle);
+        Color badgeColor = new Color(1f, 0.6f, 0.1f);
+        CyberpunkGUIUtils.DrawGlowText(new Rect(px + 8f, py + 6f, 200f, 20f),
+                  $"COMBO  {chainPos + 1} / {chainSize}×", badgeColor, _comboLabelStyle, badgeColor);
 
-        // Move name (large)
-        _comboMoveStyle.normal.textColor = inShout
+        // Move name (large) with magenta glow
+        Color moveColor = inShout
             ? Color.Lerp(new Color(0.95f, 0.60f, 1f), Color.white, pulse * 0.45f)
             : Color.white;
-        GUI.Label(new Rect(px, py + 22f, COMBO_W, 52f), moveName, _comboMoveStyle);
+        CyberpunkGUIUtils.DrawGlowText(new Rect(px, py + 22f, COMBO_W, 52f), moveName, moveColor, _comboMoveStyle, CyberpunkGUIUtils.NEON_MAGENTA);
 
-        // Status text
+        // Status text with glow
         string statusText;
         Color  statusCol;
+        Color  glowCol;
         if (inShout)
         {
             statusText = "!! SHOUT NOW !!";
             statusCol  = Color.Lerp(new Color(0.85f, 0.45f, 1f), Color.white, pulse * 0.35f);
             statusCol.a = 0.80f + pulse * 0.20f;
+            glowCol    = new Color(0.85f, 0.45f, 1f, 0.4f);
         }
         else if (approachFrac > 0.68f)
         {
@@ -573,14 +589,15 @@ public class CardManager : NetworkBehaviour
             statusText = "GET READY";
             statusCol  = new Color(1f, Mathf.Lerp(0.65f, 0.90f, ramp), 0.15f,
                                    Mathf.Lerp(0.50f, 0.90f, ramp));
+            glowCol    = new Color(1f, 1f, 0.3f, 0.3f);
         }
         else
         {
             statusText = string.IsNullOrEmpty(moveId) ? "INCOMING..." : "SHOUT ON BEAT";
             statusCol  = new Color(1f, 1f, 1f, 0.32f);
+            glowCol    = new Color(0.2f, 0.8f, 1f, 0.2f);
         }
-        _comboStatusStyle.normal.textColor = statusCol;
-        GUI.Label(new Rect(px, py + 82f, COMBO_W, 24f), statusText, _comboStatusStyle);
+        CyberpunkGUIUtils.DrawGlowText(new Rect(px, py + 82f, COMBO_W, 24f), statusText, statusCol, _comboStatusStyle, glowCol);
 
         // Approach bar
         DrawComboBar(px + 8f, py + COMBO_H - 38f, COMBO_W - 16f, 22f, approachFrac, inShout, pulse);
@@ -661,7 +678,7 @@ public class CardManager : NetworkBehaviour
         "UnbreakablePunch"  => "BOOM",
         "ParryIntent"       => "CAGE",
         "Grapple"           => "GRAPPLE",
-        "Feint"             => "FEINT",
+        "Fake"             => "FEINT",
         "Clutch"            => "CLUTCH",
         "Uppercut"          => "UPPERCUT",
         "Sweep"             => "SWEEP",
@@ -825,21 +842,27 @@ public class CardManager : NetworkBehaviour
 
         // Text
         GUI.color = Color.white;
-        _titleStyle.normal.textColor  = new Color(1f,    1f,    1f,    alpha);
-        _descStyle.normal.textColor   = new Color(0.72f, 0.88f, 1f,    0.82f * alpha);
-        _statusStyle.normal.textColor = Color.white;
 
-        GUI.Label(new Rect(r.x, r.y + 8f, r.width, 34f), card.cardName, _titleStyle);
-        GUI.Label(new Rect(r.x + 5f, r.y + 46f, r.width - 10f, 54f), card.description, _descStyle);
+        // Card name with cyan glow
+        Color cardNameColor = new Color(0f, 1f, 1f, alpha);
+        CyberpunkGUIUtils.DrawGlowText(new Rect(r.x, r.y + 8f, r.width, 34f), card.cardName, cardNameColor, _titleStyle, new Color(0f, 1f, 1f, alpha * 0.3f));
+
+        // Description with light cyan glow
+        Color descColor = new Color(0.72f, 0.88f, 1f, 0.82f * alpha);
+        CyberpunkGUIUtils.DrawGlowText(new Rect(r.x + 5f, r.y + 46f, r.width - 10f, 54f), card.description, descColor, _descStyle, new Color(0.3f, 0.8f, 1f, descColor.a * 0.25f));
+
+        _statusStyle.normal.textColor = Color.white;
 
         if (isRhythm && !isBlocked)
         {
             string stateText;
             Color  stateCol;
+            Color  glowCol;
             if (isShout)
             {
                 stateText = "!! SHOUT !!";
                 stateCol  = new Color(0.2f, 1f, 0.5f, (0.78f + pulse * 0.22f) * alpha);
+                glowCol   = new Color(0.2f, 1f, 0.5f, 0.4f * alpha);
             }
             else if (approachFrac > 0.68f)
             {
@@ -847,14 +870,15 @@ public class CardManager : NetworkBehaviour
                 stateText  = "GET READY";
                 stateCol   = new Color(1f, Mathf.Lerp(0.65f, 0.9f, ramp), 0.1f,
                                        Mathf.Lerp(0.5f, 0.9f, ramp) * alpha);
+                glowCol    = new Color(1f, 1f, 0.3f, 0.3f * alpha);
             }
             else
             {
                 stateText = "Command your\nattack now";
                 stateCol  = new Color(1f, 1f, 1f, 0.25f * alpha);
+                glowCol   = new Color(0.2f, 0.8f, 1f, 0.15f * alpha);
             }
-            _statusStyle.normal.textColor = stateCol;
-            GUI.Label(new Rect(r.x, r.y + r.height - 30f, r.width, 24f), stateText, _statusStyle);
+            CyberpunkGUIUtils.DrawGlowText(new Rect(r.x, r.y + r.height - 30f, r.width, 24f), stateText, stateCol, _statusStyle, glowCol);
         }
 
         // Blocked overlay — drawn last so it sits on top of everything

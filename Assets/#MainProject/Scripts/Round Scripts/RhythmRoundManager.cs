@@ -555,7 +555,7 @@ public class RhythmRoundManager : NetworkBehaviour
             "reflect" => "ParryIntent",
             "boom" => "UnbreakablePunch",
             "grapple" => "Grapple",
-            "feint" => "Feint",
+            "fake" => "Fake",
             "clutch" => "Clutch",
             "uppercut" => "Uppercut",
             "sweep" => "Sweep",
@@ -566,6 +566,14 @@ public class RhythmRoundManager : NetworkBehaviour
             "trap" => "Trap",
             "cage" => "Cage",
             "mirror" => "Mirror",
+            "striker" => "Striker",
+            "tank" => "Tank",
+            "speedster" => "Speedster",
+            "grappler" => "Grappler",
+            "trickster" => "Trickster",
+            "vampire" => "Vampire",
+            "glass" => "Glass",
+            "momentum" => "Momentum",
             _ => cardId
         };
     }
@@ -861,7 +869,7 @@ public class RhythmRoundManager : NetworkBehaviour
                             if (!string.IsNullOrEmpty(m1.attack) && m1.attack == m2.attack)
                             {
                                 _tiebreakerPaused = true;
-                                TiebreakerManager.Instance?.StartTiebreaker();
+                                TiebreakerManager.Instance?.StartTiebreaker(m1.attack); // pass tied card for blocking
                                 return; // skip impact — tiebreaker handles it
                             }
                         }
@@ -1088,50 +1096,140 @@ public class RhythmRoundManager : NetworkBehaviour
     private int ProcessDamage(PlayerCombat attacker, PlayerCombat.RhythmAction move, PlayerCombat defender, PlayerCombat.RhythmAction defMove, bool isInterrupted, out int damageDealt)
     {
         damageDealt = 0;
-        if (string.IsNullOrEmpty(move.attack) || move.attack == "Block") return 0;
+        if (string.IsNullOrEmpty(move.attack)) return 0;
         if (attacker.IsStaggered) return 0;
 
         bool defenderStaggered = defender.IsStaggered;
         string atk = move.attack;
         string def = defMove.attack;
 
+        // --- ACTIVATE VEX CARDS WHEN PLAYED AS DEFENSE ---
+        if (!string.IsNullOrEmpty(def) && IsVexCard(def))
+        {
+            defender.activeVexCardId = def.ToLower();
+            defender.VexCardBeatsRemaining = 1; // lasts 1 beat, will be reset next beat
+        }
+
+        // --- HANDLE CARD EFFECTS THAT PERSIST FROM LAST TURN ---
+        // Trap: trigger if opponent moves or blocks
+        if (defender.HasPendingTrap && !defenderStaggered)
+        {
+            if (atk == "Left" || atk == "Right" || atk == "Block")
+            {
+                int trapDmg = 15;
+                // Trickster doubles Trap damage
+                if (!string.IsNullOrEmpty(attacker.activeVexCardId) && attacker.activeVexCardId == "trickster")
+                    trapDmg *= 2;
+                trapDmg = ApplyTraitMultiplier(trapDmg);
+                defender.TakeDamage(trapDmg, isOpponentDamage: true);
+                damageDealt = trapDmg;
+                if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Hurt");
+                PlayHitParticle(defender.transform.position);
+                defender.HasPendingTrap = false;
+                return 1;
+            }
+            defender.HasPendingTrap = false;
+        }
+
+        // Cage: trigger if opponent plays a card
+        if (defender.HasPendingCage && !defenderStaggered && !string.IsNullOrEmpty(atk))
+        {
+            int cageDmg = 10;
+            // Trickster doubles Cage damage
+            if (!string.IsNullOrEmpty(attacker.activeVexCardId) && attacker.activeVexCardId == "trickster")
+                cageDmg *= 2;
+            cageDmg = ApplyTraitMultiplier(cageDmg);
+            defender.TakeDamage(cageDmg, isOpponentDamage: true);
+            damageDealt = cageDmg;
+            if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Hurt");
+            PlayHitParticle(defender.transform.position);
+            defender.HasPendingCage = false;
+            return 1;
+        }
+
         // --- 1. DEFENSE CHECKS (bypassed when staggered) ---
-        // Mirror: returns damage +15% bonus (like Parry but for all attacks)
-        if (!defenderStaggered && def == "Mirror" && defender.IsParryActive)
+        // Fake: cancels opponent defense with at least good timing
+        if (!defenderStaggered && atk == "Fake")
         {
-            if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Parry");
-            PlayHitParticle(defender.transform.position);
-            int baseRef = GetBaseDamage(atk);
-            Vector3 kbDir = (attacker.transform.position - defender.transform.position).normalized;
-            attacker.TakeDamage(Mathf.CeilToInt(baseRef * 1.15f), kbDir);
-            return -1;
+            float fSpike = attacker.lastVocalSpikeTime;
+            float offset = Mathf.Abs(GetNextBeatTime() - fSpike);
+            if (fSpike > 0 && offset <= 0.3f) // at least good timing
+            {
+                // Fake succeeds — bypass all defenses
+                if (attacker.connectionToClient != null) attacker.TargetPlaySuccessSound("Attack");
+                int fakeDmg = 5;
+                // Trickster doubles Fake damage
+                if (!string.IsNullOrEmpty(attacker.activeVexCardId) && attacker.activeVexCardId == "trickster")
+                    fakeDmg *= 2;
+                fakeDmg = ApplyTraitMultiplier(fakeDmg);
+                if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Hurt");
+                PlayHitParticle(defender.transform.position);
+                Vector3 dir = (defender.transform.position - attacker.transform.position).normalized;
+                defender.TakeDamage(fakeDmg, dir, isOpponentDamage: true);
+                damageDealt = fakeDmg;
+                return 1;
+            }
+            return 0; // Fake fails
         }
 
-        // Parry / Cage reflection (Cage is the legendary trap version of Parry)
-        if (!defenderStaggered && defender.IsParryActive)
-        {
-            if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Parry");
-            PlayHitParticle(defender.transform.position);
-
-            bool isUnbreakable = (atk == "UnbreakablePunch");
-            int baseRef = isUnbreakable ? 15 : ((atk == "Hook") ? 25 : 10);
-            Vector3 parryKbDir = (attacker.transform.position - defender.transform.position).normalized;
-            attacker.TakeDamage(Mathf.CeilToInt(baseRef * 1.2f), parryKbDir);
-            return -1;
-        }
-
-        // Reverse: negates all damage and returns it (legendary defense)
-        if (!defenderStaggered && def == "Reverse")
+        // Mirror: returns damage +15% bonus
+        if (!defenderStaggered && def == "Mirror" && defender.HasMirrorBuff)
         {
             if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Parry");
             PlayHitParticle(defender.transform.position);
             int baseDmg = GetBaseDamage(atk);
-            Vector3 revDir = (attacker.transform.position - defender.transform.position).normalized;
-            attacker.TakeDamage(Mathf.CeilToInt(baseDmg * GetTimingMultiplier(defender)), revDir);
+            int reflectedDmg = ApplyTraitMultiplier(Mathf.RoundToInt(baseDmg * 1.15f));
+            Vector3 kbDir = (attacker.transform.position - defender.transform.position).normalized;
+            attacker.TakeDamage(reflectedDmg, kbDir);
+            defender.HasMirrorBuff = false;
             return -1;
         }
 
-        // Clutch: HIGH RISK — nullify heavy attack on perfect timing, else self-damage
+        // ParryIntent: reflects damage with perfect timing
+        if (!defenderStaggered && def == "ParryIntent")
+        {
+            float pSpike = defender.lastVocalSpikeTime;
+            float offset = Mathf.Abs(GetNextBeatTime() - pSpike);
+            if (pSpike > 0 && offset <= 0.15f) // perfect timing
+            {
+                if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Parry");
+                PlayHitParticle(defender.transform.position);
+                int baseDmg = GetBaseDamage(atk);
+                int reflectedDmg = ApplyTraitMultiplier(Mathf.RoundToInt(baseDmg * 1.1f));
+                Vector3 parryDir = (attacker.transform.position - defender.transform.position).normalized;
+                attacker.TakeDamage(reflectedDmg, parryDir);
+                return -1;
+            }
+        }
+
+        // Reverse: high risk/reward — negate damage on good+ timing, or take 50% more on bad
+        if (!defenderStaggered && def == "Reverse")
+        {
+            float rSpike = defender.lastVocalSpikeTime;
+            float offset = Mathf.Abs(GetNextBeatTime() - rSpike);
+            int baseDmg = GetBaseDamage(atk);
+            Vector3 revDir = (attacker.transform.position - defender.transform.position).normalized;
+
+            if (rSpike > 0 && offset <= 0.3f) // good or excellent timing
+            {
+                // Success: negate and return damage
+                if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Parry");
+                PlayHitParticle(defender.transform.position);
+                int returnDmg = ApplyTraitMultiplier(baseDmg);
+                attacker.TakeDamage(returnDmg, revDir);
+                return -1;
+            }
+            else // bad timing
+            {
+                // Failure: take 50% MORE damage
+                int failedReverseDmg = ApplyTraitMultiplier(Mathf.RoundToInt(baseDmg * 1.5f));
+                defender.TakeDamage(failedReverseDmg, revDir);
+                damageDealt = failedReverseDmg;
+                return 1;
+            }
+        }
+
+        // Clutch: HIGH RISK — nullify heavy attack on perfect timing ±120% self-damage
         if (!defenderStaggered && def == "Clutch")
         {
             float cSpike = defender.lastVocalSpikeTime;
@@ -1139,54 +1237,40 @@ public class RhythmRoundManager : NetworkBehaviour
             bool isHeavy = (atk == "UnbreakablePunch" || atk == "Hook" || atk == "Overclock");
             if (cSpike > 0 && offset <= 0.15f && isHeavy)
             {
-                // Perfect clutch — nullify and reflect
+                // Perfect clutch — nullify and reflect half damage
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Parry");
                 PlayHitParticle(defender.transform.position);
                 int baseDmg = GetBaseDamage(atk);
+                int clutchReflect = ApplyTraitMultiplier(Mathf.RoundToInt(baseDmg * 0.5f));
                 Vector3 clutchDir = (attacker.transform.position - defender.transform.position).normalized;
-                attacker.TakeDamage(Mathf.CeilToInt(baseDmg * 0.5f), clutchDir);
+                attacker.TakeDamage(clutchReflect, clutchDir);
                 return -1;
             }
             else
             {
-                // Failed clutch — self-damage
-                defender.TakeDamage(5);
-                damageDealt = 5; // self-damage tracked separately
+                // Failed clutch — self-damage 10%
+                int selfDmg = ApplyTraitMultiplier(10);
+                defender.TakeDamage(selfDmg);
+                damageDealt = selfDmg;
+                return 0;
             }
         }
 
-        // Trap: damages opponent if they move or block
-        if (!defenderStaggered && def == "Trap")
-        {
-            if (atk == "Left" || atk == "Right" || atk == "Block")
-            {
-                defender.TakeDamage(8);
-                damageDealt = 8;
-                if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Hurt");
-                PlayHitParticle(defender.transform.position);
-            }
-        }
-
-        // Focus: charge up — next attack deals +50% (handled via state, not here)
-        // Taunt: forces opponent to only attack next turn (handled in bot AI / slot system)
-
-        // --- 2. MOVEMENT & MITIGATION (bypassed when staggered) ---
+        // Movement dodge check
         bool moveSuccessful = false;
-        float blockMitigation = 0f;
-
         if (!defenderStaggered && defMove.dash != Vector3.zero)
         {
             float dSpike = defender.lastVocalSpikeTime;
             if (dSpike > 0 && (GetNextBeatTime() - dSpike) <= 0.3f)
             {
-                // Uppercut catches dodges
-                if (atk == "Uppercut")
+                // Check if attack catches the dodge
+                if (atk == "Uppercut" || atk == "Grapple")
                 {
-                    moveSuccessful = false; // Uppercut beats dodge
+                    moveSuccessful = false; // Uppercut and Grapple catch dodges
                 }
-                else if (atk == "Grapple")
+                else if (atk == "UnbreakablePunch") // Boom is hard to dodge
                 {
-                    moveSuccessful = false; // Grapple beats dodge
+                    moveSuccessful = false;
                 }
                 else
                 {
@@ -1197,33 +1281,40 @@ public class RhythmRoundManager : NetworkBehaviour
             }
         }
 
+        // Block check and mitigation
+        float blockMitigation = 0f;
         if (!defenderStaggered && def == "Block")
         {
-            float bSpike  = defender.lastVocalSpikeTime;
-            float offset  = Mathf.Abs(GetNextBeatTime() - bSpike);
-            if (bSpike > 0 && offset <= 0.4f)
+            float bSpike = defender.lastVocalSpikeTime;
+            float offset = Mathf.Abs(GetNextBeatTime() - bSpike);
+            if (bSpike > 0 && offset <= 0.4f) // block has longest window
             {
-                // Attacks that bypass Block: Hook, Grapple, Sweep, Feint
-                if (atk == "Hook" || atk == "Grapple" || atk == "Sweep" || atk == "Feint")
+                // Attacks that bypass block: Hook, Grapple, Sweep, Fake
+                if (atk == "Hook" || atk == "Grapple" || atk == "Sweep")
                 {
                     blockMitigation = 0f;
                 }
                 else
                 {
                     blockMitigation = 1.0f;
+                    // Piercing trait: ignores 30% of block reduction
+                    if (!string.IsNullOrEmpty(attacker.activeTraitId) && attacker.activeTraitId == "piercing")
+                    {
+                        blockMitigation = 0.30f; // 70% blocked instead of 100%
+                    }
                     if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Block");
                     PlayHitParticle(defender.transform.position);
                 }
             }
         }
 
-        // --- 3. ATTACK DAMAGE ---
+        // --- 2. CALCULATE ATTACK DAMAGE ---
         int finalDmg = GetBaseDamage(atk);
 
-        // Timing grade: EXCELLENT +25%, GOOD base, BAD −50%
+        // Timing multiplier: EXCELLENT +25%, GOOD base, BAD −50%
         finalDmg = Mathf.RoundToInt(finalDmg * GetTimingMultiplier(attacker));
 
-        // Voice volume bonus: louder shout = up to +25%
+        // Volume bonus: louder shout = up to +25%
         float atkSpike = attacker.lastVocalSpikeTime;
         if (atkSpike > 0f && attacker.lastVocalSpikeVolume > 0f)
         {
@@ -1236,19 +1327,50 @@ public class RhythmRoundManager : NetworkBehaviour
             }
         }
 
-        // Overclock self-damage
-        if (atk == "Overclock")
+        // Focus buff: next attack deals +50%
+        if (attacker.HasFocusBuff)
         {
-            attacker.TakeDamage(Mathf.RoundToInt(finalDmg * 0.28f));
+            finalDmg = Mathf.RoundToInt(finalDmg * 1.5f);
+            attacker.HasFocusBuff = false;
         }
 
-        // --- 4. HIT DETECTION ---
-        bool hits;
+        // Chain trait: +5% per consecutive hit
+        if (!string.IsNullOrEmpty(attacker.activeTraitId) && attacker.activeTraitId == "chain")
+        {
+            int chainBonus = Mathf.RoundToInt(finalDmg * 0.05f * attacker.ConsecutiveHitsChain);
+            finalDmg += chainBonus;
+        }
+
+        // Momentum vex card: +10% per consecutive hit
+        if (!string.IsNullOrEmpty(attacker.activeVexCardId) && attacker.activeVexCardId == "momentum")
+        {
+            int momentumBonus = Mathf.RoundToInt(finalDmg * 0.10f * attacker.ConsecutiveHitsChain);
+            finalDmg += momentumBonus;
+        }
+
+        // Grappler vex card: +30% damage on Grapple for next 2 uses
+        if (atk == "Grapple" && !string.IsNullOrEmpty(attacker.activeVexCardId) && attacker.activeVexCardId == "grappler")
+        {
+            finalDmg = Mathf.RoundToInt(finalDmg * 1.30f);
+        }
+
+        // Overclock self-damage: +10% of final damage to self
+        if (atk == "Overclock")
+        {
+            int selfDmg = ApplyTraitMultiplier(Mathf.RoundToInt(finalDmg * 0.1f), attacker);
+            attacker.TakeDamage(selfDmg);
+        }
+
+        // Apply trait multiplier to final damage
+        finalDmg = ApplyTraitMultiplier(finalDmg, attacker);
+
+        // --- 3. HIT DETECTION (rock-paper-scissors) ---
+        bool hits = false;
         if (defenderStaggered)
         {
             hits = true; // Staggered — all defenses down
         }
-        else if (isInterrupted && atk != "UnbreakablePunch" && atk != "Overclock" && atk != "Reverse")
+        else if (isInterrupted && !IsProtected(atk))
         {
             hits = false;
         }
@@ -1257,10 +1379,42 @@ public class RhythmRoundManager : NetworkBehaviour
             hits = EvaluateHit(atk, def, moveSuccessful);
         }
 
+        // --- 4. APPLY DAMAGE ---
         if (hits)
         {
             float mitigMult = defenderStaggered ? 1f : (1f - blockMitigation);
             damageDealt = Mathf.RoundToInt(finalDmg * mitigMult);
+
+            // Glass vex card: takes 20% LESS damage (opposite of striker - high risk high reward)
+            if (!string.IsNullOrEmpty(defender.activeVexCardId) && defender.activeVexCardId == "glass")
+            {
+                damageDealt = Mathf.RoundToInt(damageDealt * 0.80f);
+            }
+
+            // Tank vex card: takes 25% LESS damage
+            if (!string.IsNullOrEmpty(defender.activeVexCardId) && defender.activeVexCardId == "tank")
+            {
+                damageDealt = Mathf.RoundToInt(damageDealt * 0.75f);
+            }
+
+            // Defensive trait: reduce consecutive hits taken damage by 8%, max 40%
+            if (!string.IsNullOrEmpty(defender.activeTraitId) && defender.activeTraitId == "defensive")
+            {
+                float defensiveReduction = Mathf.Min(0.40f, defender.ConsecutiveHitsChain * 0.08f);
+                damageDealt = Mathf.RoundToInt(damageDealt * (1f - defensiveReduction));
+            }
+
+            // Set persistent effects after hit (even if 0 damage, like Taunt)
+            if (atk == "Trap") attacker.HasPendingTrap = true;
+            if (atk == "Cage") attacker.HasPendingCage = true;
+            if (atk == "Mirror") attacker.HasMirrorBuff = true;
+            if (atk == "Taunt")
+            {
+                // Trickster doubles Taunt duration (2 turns instead of 1)
+                int tauntDuration = (!string.IsNullOrEmpty(attacker.activeVexCardId) && attacker.activeVexCardId == "trickster") ? 2 : 1;
+                defender.TauntTurnsRemaining = tauntDuration;
+                defender.IsTauntedNextTurn = true;
+            }
 
             if (damageDealt > 0)
             {
@@ -1268,15 +1422,47 @@ public class RhythmRoundManager : NetworkBehaviour
                 if (attacker.connectionToClient != null) attacker.TargetPlaySuccessSound("Attack");
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Hurt");
                 PlayHitParticle(defender.transform.position);
+                PlayCardActivationEffect(attacker, atk);
                 Vector3 kbDir = (defender.transform.position - attacker.transform.position).normalized;
-                defender.TakeDamage(damageDealt, kbDir);
-                return 1;
+                defender.TakeDamage(damageDealt, kbDir, isOpponentDamage: true);
+
+                // Draining trait: heal 3% self on hit
+                if (!string.IsNullOrEmpty(attacker.activeTraitId) && attacker.activeTraitId == "draining")
+                {
+                    int healAmount = Mathf.Max(1, Mathf.RoundToInt(damageDealt * 0.03f));
+                    attacker.CurrentPercentage -= healAmount; // Reduce percentage (healing)
+                }
+
+                // Vampire vex card: heal 5% on every successful hit
+                if (!string.IsNullOrEmpty(attacker.activeVexCardId) && attacker.activeVexCardId == "vampire")
+                {
+                    int vampireHeal = Mathf.Max(1, Mathf.RoundToInt(damageDealt * 0.05f));
+                    attacker.CurrentPercentage -= vampireHeal; // Reduce percentage (healing)
+                }
+
+                // Track consecutive hits for Chain/Momentum/Defensive
+                attacker.ConsecutiveHitsChain++;
+                defender.ConsecutiveHitsChain = 0; // Reset defender's chain
+            }
+
+            return 1;
+        }
+        else
+        {
+            // Miss/no hit: reset attacker's consecutive hits chain
+            attacker.ConsecutiveHitsChain = 0;
+
+            // Volatile trait: +5% self-damage on miss/bad timing
+            if (!string.IsNullOrEmpty(attacker.activeTraitId) && attacker.activeTraitId == "volatile")
+            {
+                int volatileDmg = Mathf.Max(1, Mathf.RoundToInt(finalDmg * 0.05f));
+                attacker.TakeDamage(volatileDmg);
             }
         }
         return 0;
     }
 
-    // Base damage values for all 20 combat cards
+    // Base damage values for all 20 combat cards (from card balance sheet)
     [Server]
     private int GetBaseDamage(string attack)
     {
@@ -1285,48 +1471,137 @@ public class RhythmRoundManager : NetworkBehaviour
             "Jab"              => 8,
             "Cross"            => 12,
             "Hook"             => 15,
-            "UnbreakablePunch" => 20,
-            "Grapple"          => 14,
-            "Feint"            => 5,
-            "Uppercut"         => 16,
-            "Sweep"            => 13,
-            "Overclock"        => 28,
+            "Block"            => 2,
+            "Left"             => 0,
+            "Right"            => 0,
+            "ParryIntent"      => 10,
+            "UnbreakablePunch" => 25,
+            "Grapple"          => 18,
+            "Fake"            => 5,
+            "Clutch"           => 0,
+            "Uppercut"         => 20,
+            "Sweep"            => 16,
+            "Focus"            => 0,
+            "Taunt"            => 0,
+            "Overclock"        => 35,
             "Reverse"          => 0,
+            "Trap"             => 15,
+            "Cage"             => 10,
+            "Mirror"           => 15,
             _                  => 5
         };
     }
 
-    // Hit evaluation: does attack hit given defense?
+    // Apply trait and vex card damage multipliers
+    [Server]
+    private int ApplyTraitMultiplier(int baseDmg, PlayerCombat player = null)
+    {
+        if (baseDmg <= 0) return baseDmg;
+        if (player == null) return baseDmg;
+
+        float multiplier = 1f;
+
+        // Trait effects
+        if (!string.IsNullOrEmpty(player.activeTraitId))
+        {
+            multiplier *= GetTraitDamageMultiplier(player.activeTraitId);
+        }
+
+        // Vex card effects
+        if (!string.IsNullOrEmpty(player.activeVexCardId))
+        {
+            multiplier *= GetVexCardDamageMultiplier(player.activeVexCardId);
+        }
+
+        return Mathf.RoundToInt(baseDmg * multiplier);
+    }
+
+    private float GetTraitDamageMultiplier(string traitId)
+    {
+        return traitId switch
+        {
+            "heavy" => 1.10f, // +10% damage
+            "volatile" => 1.10f, // +10% damage (with self-damage on miss)
+            "piercing" => 1.0f, // Piercing doesn't modify raw damage, it modifies block
+            "draining" => 1.0f, // Draining heals, doesn't modify damage
+            "chain" => 1.0f, // Chain is handled separately per hit
+            "defensive" => 1.0f, // Defensive reduces damage taken
+            "stunning" => 1.0f, // Stunning affects timing, not damage
+            _ => 1.0f
+        };
+    }
+
+    private float GetVexCardDamageMultiplier(string vexId)
+    {
+        return vexId switch
+        {
+            "striker" => 1.15f, // +15% all attack damage
+            "speedster" => 0.92f, // -8% damage
+            "glass" => 1.40f, // +40% damage dealt
+            "vampire" => 1.0f, // Vampire heals instead of modifying damage
+            "tank" => 1.0f, // Tank reduces damage taken
+            "grappler" => 1.0f, // Grappler modifies specific card
+            "trickster" => 1.0f, // Trickster extends effects
+            "momentum" => 1.0f, // Momentum handled per consecutive hit
+            _ => 1.0f
+        };
+    }
+
+    // Hit evaluation: does attack hit given defense? (Rock-Paper-Scissors matchups)
     [Server]
     private bool EvaluateHit(string attack, string defense, bool dodgeSuccessful)
     {
-        // Unbreakable / Overclock / Reverse: only miss on successful dodge
-        if (attack == "UnbreakablePunch" || attack == "Overclock" || attack == "Reverse")
-            return !dodgeSuccessful;
-
-        // Jab: misses on dodge
-        if (attack == "Jab") return !dodgeSuccessful;
-
-        // Cross / Blast: always hits unless blocked
-        if (attack == "Cross" || attack == "Blast" || attack == "Strike")
-            return true;
-
-        // Hook: misses on dodge, but bypasses block (handled in mitigation)
-        if (attack == "Hook") return !dodgeSuccessful;
-
-        // Grapple: bypasses block and dodge (command grab)
+        // Grapple: beats block and dodge (command grab)
         if (attack == "Grapple") return true;
 
-        // Feint: bypasses block, misses on dodge
-        if (attack == "Feint") return !dodgeSuccessful;
+        // UnbreakablePunch / Boom: only miss on successful dodge, beats block
+        if (attack == "UnbreakablePunch") return !dodgeSuccessful;
 
-        // Uppercut: anti-dodge, catches dodgers
-        if (attack == "Uppercut") return true;
+        // Overclock: only miss on successful dodge
+        if (attack == "Overclock") return !dodgeSuccessful;
+
+        // Reverse: only miss on successful dodge
+        if (attack == "Reverse") return !dodgeSuccessful;
 
         // Sweep: beats block, misses on dodge
-        if (attack == "Sweep") return !dodgeSuccessful;
+        if (attack == "Sweep")
+        {
+            if (defense == "Block") return true; // sweep bypasses block
+            return !dodgeSuccessful;
+        }
 
-        // Default: attacks miss on successful dodge
+        // Hook: beats jab and block, misses on dodge, loses to cross
+        if (attack == "Hook")
+        {
+            if (defense == "Block") return true; // hook bypasses block
+            return !dodgeSuccessful;
+        }
+
+        // Uppercut: beats dodge and grapple, loses to block and cross
+        if (attack == "Uppercut")
+        {
+            if (defense == "Left" || defense == "Right") return true; // catches dodges
+            return true; // anti-dodge, always hits
+        }
+
+        // Cross: beats hook and block and movement, loses to jab and boom
+        if (attack == "Cross") return true;
+
+        // Jab: beats cross, loses to hook and boom
+        if (attack == "Jab") return !dodgeSuccessful;
+
+        // Fake: beats block and parry (handled in ProcessDamage), loses to all attacks
+        if (attack == "Fake") return !dodgeSuccessful;
+
+        // Block, Taunt, Focus: defensive/utility, never hit
+        if (attack == "Block" || attack == "Taunt" || attack == "Focus")
+            return false;
+
+        // Movement: never hits
+        if (attack == "Left" || attack == "Right")
+            return false;
+
+        // Default: misses on successful dodge
         return !dodgeSuccessful;
     }
 
@@ -1342,28 +1617,55 @@ public class RhythmRoundManager : NetworkBehaviour
     {
         if (string.IsNullOrEmpty(attackerMove) || string.IsNullOrEmpty(defenderMove)) return false;
 
-        // Jab interrupts Cross/Hook/Blast/Strike
-        if (attackerMove == "Jab" && (defenderMove == "Cross" || defenderMove == "Hook" || defenderMove == "Blast" || defenderMove == "Strike"))
+        // --- ATTACK vs ATTACK RPS ---
+        // Jab beats Cross
+        if (attackerMove == "Jab" && defenderMove == "Cross") return true;
+        // Cross beats Hook
+        if (attackerMove == "Cross" && defenderMove == "Hook") return true;
+        // Hook beats Jab
+        if (attackerMove == "Hook" && defenderMove == "Jab") return true;
+        // Boom (UnbreakablePunch) beats all attacks
+        if (attackerMove == "UnbreakablePunch" && (defenderMove == "Jab" || defenderMove == "Cross" || defenderMove == "Hook")) return true;
+
+        // --- ATTACK vs DEFENSE ---
+        // Grapple beats Block/Dodge (no interrupts, handled in EvaluateHit)
+
+        // Fake beats ALL defense cards
+        if (attackerMove == "Fake" && IsDefenseMove(defenderMove))
             return true;
 
-        // Cross interrupts Hook/Blast/Strike
-        if (attackerMove == "Cross" && (defenderMove == "Hook" || defenderMove == "Blast" || defenderMove == "Strike"))
+        // Uppercut beats Dodge and Grapple
+        if (attackerMove == "Uppercut" && (defenderMove == "Left" || defenderMove == "Right" || defenderMove == "Grapple"))
             return true;
 
-        // Grapple interrupts Block/Dodge/Focus/Taunt/Trap/Cage/Mirror/Clutch (defensive moves)
-        if (attackerMove == "Grapple" && IsDefenseMove(defenderMove))
+        // Sweep beats Block (plus loses to Dodge/Cross handled in EvaluateHit)
+        if (attackerMove == "Sweep" && defenderMove == "Block")
             return true;
 
-        // Feint interrupts Block/ParryIntent/Mirror/Clutch/Trap/Cage
-        if (attackerMove == "Feint" && (defenderMove == "Block" || defenderMove == "ParryIntent" || defenderMove == "Mirror" || defenderMove == "Clutch" || defenderMove == "Trap" || defenderMove == "Cage"))
+        // --- DEFENSE vs ATTACK (attacks that interrupt defenses) ---
+        // Jab interrupts Grapple
+        if (attackerMove == "Jab" && defenderMove == "Grapple")
             return true;
 
-        // Uppercut interrupts Dodge (Left/Right)
-        if (attackerMove == "Uppercut" && (defenderMove == "Left" || defenderMove == "Right"))
+        // Cross interrupts Grapple and Sweep
+        if (attackerMove == "Cross" && (defenderMove == "Grapple" || defenderMove == "Sweep"))
             return true;
 
-        // Sweep interrupts Block/Focus/Taunt
-        if (attackerMove == "Sweep" && (defenderMove == "Block" || defenderMove == "Focus" || defenderMove == "Taunt"))
+        // Hook interrupts Grapple
+        if (attackerMove == "Hook" && defenderMove == "Grapple")
+            return true;
+
+        // All attacks interrupt Fake
+        if (defenderMove == "Fake" && CardManager.IsAttackTrigger(attackerMove))
+            return true;
+
+        // Boom beats Focus
+        if (attackerMove == "UnbreakablePunch" && defenderMove == "Focus")
+            return true;
+
+        // All attacks interrupt Focus, Taunt, Trap, Cage (they're passive)
+        if ((defenderMove == "Focus" || defenderMove == "Taunt" || defenderMove == "Trap" || defenderMove == "Cage")
+            && (CardManager.IsAttackTrigger(attackerMove) && attackerMove != "Fake"))
             return true;
 
         return false;
@@ -1375,6 +1677,14 @@ public class RhythmRoundManager : NetworkBehaviour
         return move == "Block" || move == "ParryIntent" || move == "Left" || move == "Right"
             || move == "Clutch" || move == "Focus" || move == "Taunt" || move == "Trap"
             || move == "Cage" || move == "Mirror" || move == "Reverse";
+    }
+
+    private bool IsVexCard(string cardName)
+    {
+        if (string.IsNullOrEmpty(cardName)) return false;
+        string lower = cardName.ToLower();
+        return lower == "striker" || lower == "tank" || lower == "speedster" || lower == "grappler"
+            || lower == "trickster" || lower == "vampire" || lower == "glass" || lower == "momentum";
     }
 
     // [Server]
@@ -1484,7 +1794,7 @@ public class RhythmRoundManager : NetworkBehaviour
                 "Hook"             => "HOOK",
                 "Block"            => "BLOCK",
                 "Grapple"          => "GRAPPLE",
-                "Feint"            => "FEINT",
+                "Fake"            => "FEINT",
                 "Clutch"           => "CLUTCH",
                 "Uppercut"         => "UPPERCUT",
                 "Sweep"            => "SWEEP",
@@ -1581,6 +1891,33 @@ public class RhythmRoundManager : NetworkBehaviour
                         {
                             pc.TriggerStagger(3);
                         }
+
+                        // Decay persistent card effects each beat
+                        if (pc.HasFocusBuff) pc.FocusBuffBeatsRemaining--;
+                        if (pc.HasMirrorBuff) pc.MirrorBuffBeatsRemaining--;
+                        // Trap and Cage persist for 1 beat (triggered next turn), so they naturally clear
+
+                        // Decay Taunt effect (lasts 1-2 turns based on Trickster)
+                        if (pc.TauntTurnsRemaining > 0)
+                        {
+                            pc.TauntTurnsRemaining--;
+                            if (pc.TauntTurnsRemaining <= 0)
+                                pc.IsTauntedNextTurn = false;
+                        }
+                        else
+                        {
+                            pc.IsTauntedNextTurn = false;
+                        }
+
+                        // Vex card countdown (lasts 2 turns)
+                        if (!string.IsNullOrEmpty(pc.activeVexCardId))
+                        {
+                            pc.VexCardBeatsRemaining--;
+                            if (pc.VexCardBeatsRemaining <= 0)
+                            {
+                                pc.activeVexCardId = "";
+                            }
+                        }
                     }
                 }
             }
@@ -1636,6 +1973,41 @@ public class RhythmRoundManager : NetworkBehaviour
     }
 
     [Server]
+    private void PlayCardActivationEffect(PlayerCombat player, string cardName)
+    {
+        RpcPlayCardActivationEffect(player, cardName);
+    }
+
+    [ClientRpc]
+    private void RpcPlayCardActivationEffect(PlayerCombat player, string cardName)
+    {
+        if (player == null) return;
+        // Brief glow effect on the player
+        StartCoroutine(CardActivationEffectRoutine(player.transform));
+    }
+
+    private System.Collections.IEnumerator CardActivationEffectRoutine(Transform target)
+    {
+        Renderer renderer = target.GetComponentInChildren<Renderer>();
+        if (renderer == null) yield break;
+
+        Material mat = renderer.material;
+        Color originalColor = mat.color;
+        float duration = 0.3f;
+        float elapsed = 0f;
+
+        // Brief white flash
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            float t = elapsed / duration;
+            mat.color = Color.Lerp(Color.white, originalColor, t);
+            yield return null;
+        }
+        mat.color = originalColor;
+    }
+
+    [Server]
     private void AssignRandomComboMove(PlayerCombat pc)
     {
         // Full pool of all 20 combat cards for combo mode
@@ -1643,7 +2015,7 @@ public class RhythmRoundManager : NetworkBehaviour
         {
             "Jab", "Cross", "Hook", "Block", "Left", "Right",
             "UnbreakablePunch", "ParryIntent",
-            "Grapple", "Feint", "Clutch",
+            "Grapple", "Fake", "Clutch",
             "Uppercut", "Sweep", "Focus", "Taunt",
             "Overclock", "Reverse", "Trap", "Cage", "Mirror"
         };
@@ -1664,7 +2036,7 @@ public class RhythmRoundManager : NetworkBehaviour
             "UnbreakablePunch" => 20,
             "ParryIntent"      => 10,
             "Grapple"          => 14,
-            "Feint"            => 5,
+            "Fake"            => 5,
             "Clutch"           => 0,
             "Uppercut"         => 16,
             "Sweep"            => 13,
@@ -2047,6 +2419,12 @@ public class RhythmRoundManager : NetworkBehaviour
             overlayStyle.normal.textColor = Color.cyan;
             GUI.Label(new Rect(Screen.width / 2 - 300, Screen.height / 2 - 20, 600, 40), $"Final Score: {p1RoundWins} - {p2RoundWins}", overlayStyle);
             GUI.Label(new Rect(Screen.width / 2 - 300, Screen.height / 2 + 30, 600, 40), $"P1 Credits: {p1TotalCredits}  |  P2 Credits: {p2TotalCredits}", overlayStyle);
+        }
+
+        // --- CYBERPUNK SCANLINES OVERLAY ---
+        if (isRoundActive && !isShopPhase && !isRoundPickerActive)
+        {
+            CyberpunkGUIUtils.DrawScanlines(speed: 3f, alpha: 0.12f);
         }
 
         DrawBackButton();

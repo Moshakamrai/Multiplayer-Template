@@ -932,7 +932,8 @@ public class PlayerCombat : NetworkBehaviour
                 };
 
                 string oppName = string.IsNullOrEmpty(opponent.PlayerName) ? "BOT UNIT" : opponent.PlayerName;
-                GUI.Label(new Rect(posX, posY, barWidth, barHeight), $"{oppName}: {oppCombat.CurrentPercentage:F0}%", nameStyle);
+                CyberpunkGUIUtils.DrawGlowText(new Rect(posX, posY, barWidth, barHeight), $"{oppName}: {oppCombat.CurrentPercentage:F0}%",
+                    CyberpunkGUIUtils.NEON_CYAN, nameStyle, CyberpunkGUIUtils.NEON_CYAN);
 
                 // --- OPPONENT CARDS PANEL (Top Left) ---
                 if (!string.IsNullOrEmpty(oppCombat.availableCardsString))
@@ -952,14 +953,12 @@ public class PlayerCombat : NetworkBehaviour
                     GUI.DrawTexture(new Rect(panelX, panelY, 3f, panelH), _whiteTexture);
                     GUI.DrawTexture(new Rect(panelX + panelW - 3f, panelY, 3f, panelH), _whiteTexture);
 
-                    GUIStyle hdrStyle = new GUIStyle(GUI.skin.label)
-                    { fontSize = 14, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
-                    hdrStyle.normal.textColor = new Color(1f, 0.3f, 0.6f);
+                    GUIStyle hdrStyle = CyberpunkGUIUtils.CreateCyberpunkStyle(TextAnchor.MiddleCenter, 14);
                     GUI.color = Color.white;
-                    GUI.Label(new Rect(panelX, panelY + 6f, panelW, 26f), $"{oppName}'s CARDS", hdrStyle);
+                    CyberpunkGUIUtils.DrawGlowText(new Rect(panelX, panelY + 6f, panelW, 26f), $"{oppName}'s CARDS",
+                        CyberpunkGUIUtils.NEON_BLUE, hdrStyle, CyberpunkGUIUtils.NEON_MAGENTA);
 
-                    GUIStyle cardStyle = new GUIStyle(GUI.skin.label)
-                    { fontSize = 13, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleLeft };
+                    GUIStyle cardStyle = CyberpunkGUIUtils.CreateCyberpunkStyle(TextAnchor.MiddleLeft, 13);
                     for (int i = 0; i < oppCards.Count; i++)
                     {
                         string card = oppCards[i];
@@ -988,8 +987,8 @@ public class PlayerCombat : NetworkBehaviour
                             _ => $"  {card.ToUpper()}"
                         };
                         bool isAtk = CardManager.IsAttackTrigger(card);
-                        cardStyle.normal.textColor = isAtk ? new Color(1f, 0.4f, 0.4f) : new Color(0.4f, 0.75f, 1f);
-                        GUI.Label(new Rect(panelX + 8f, panelY + 34f + i * 30f, panelW - 16f, 28f), display, cardStyle);
+                        Color cardColor = isAtk ? new Color(1f, 0.4f, 0.4f) : CyberpunkGUIUtils.NEON_BLUE;
+                        CyberpunkGUIUtils.DrawGlowText(new Rect(panelX + 8f, panelY + 34f + i * 30f, panelW - 16f, 28f), display, cardColor, cardStyle, cardColor);
                     }
                     GUI.color = Color.white;
                 }
@@ -1019,14 +1018,12 @@ public class PlayerCombat : NetworkBehaviour
 
             // Text
             GUI.color = Color.white;
-            GUIStyle micStyle = new GUIStyle(GUI.skin.label)
-            { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 14 };
-            GUI.Label(new Rect(mx, my + 8f, w, 25f), "MIC LEVEL", micStyle);
+            GUIStyle micStyle = CyberpunkGUIUtils.CreateCyberpunkStyle(TextAnchor.MiddleCenter, 14);
+            CyberpunkGUIUtils.DrawGlowText(new Rect(mx, my + 8f, w, 25f), "MIC LEVEL", CyberpunkGUIUtils.NEON_CYAN, micStyle, CyberpunkGUIUtils.NEON_CYAN);
 
-            GUIStyle volStyle = new GUIStyle(GUI.skin.label)
-            { alignment = TextAnchor.MiddleCenter, fontSize = 12 };
-            volStyle.normal.textColor = vol >= thr ? new Color(0f, 1f, 0.5f) : new Color(1f, 0.6f, 0.2f);
-            GUI.Label(new Rect(mx, my + 35f, w, 20f), $"{vol:F2} / {thr:F2}", volStyle);
+            GUIStyle volStyle = CyberpunkGUIUtils.CreateCyberpunkStyle(TextAnchor.MiddleCenter, 12);
+            Color volColor = vol >= thr ? CyberpunkGUIUtils.NEON_GREEN : CyberpunkGUIUtils.NEON_ORANGE;
+            CyberpunkGUIUtils.DrawGlowText(new Rect(mx, my + 35f, w, 20f), $"{vol:F2} / {thr:F2}", volColor, volStyle, volColor);
 
             // Bar
             float barW = w - 20f;
@@ -1049,12 +1046,13 @@ public class PlayerCombat : NetworkBehaviour
             float qy = 100f;
 
             GUILayout.BeginArea(new Rect(qx, qy, w, h));
-            GUIStyle headerStyle = new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold, fontSize = 20 };
-            headerStyle.normal.textColor = Color.green;
+            GUIStyle headerStyle = CyberpunkGUIUtils.CreateCyberpunkStyle(TextAnchor.MiddleLeft, 20);
+            GUI.color = Color.white;
 
             if (RhythmRoundManager.Instance.IsSingleMoveMode())
             {
-                GUILayout.Label("LOCKED ACTION:", headerStyle);
+                CyberpunkGUIUtils.DrawGlowText(new Rect(qx + 10, qy + 10, w - 20, 30), "LOCKED ACTION:",
+                    CyberpunkGUIUtils.NEON_GREEN, headerStyle, CyberpunkGUIUtils.NEON_GREEN);
                 string atk = string.IsNullOrEmpty(_pendingAttackTrigger) ? "None" : _pendingAttackTrigger;
                 string atkDisplay = atk switch
                 {
@@ -1064,10 +1062,10 @@ public class PlayerCombat : NetworkBehaviour
                     "Cross" => "FLANK",
                     _ => atk
                 };
-                if (atk == "ParryIntent" || atk == "Mirror" || atk == "Trap" || atk == "Cage" || atk == "Reverse" || atk == "Clutch")
-                    GUI.color = Color.cyan;
-                GUILayout.Label($"Attack: {atkDisplay}", new GUIStyle(GUI.skin.label) { fontSize = 18 });
-                GUI.color = Color.white;
+                Color atkColor = (atk == "ParryIntent" || atk == "Mirror" || atk == "Trap" || atk == "Cage" || atk == "Reverse" || atk == "Clutch")
+                    ? CyberpunkGUIUtils.NEON_CYAN : CyberpunkGUIUtils.NEON_ORANGE;
+                GUIStyle atkStyle = CyberpunkGUIUtils.CreateCyberpunkStyle(TextAnchor.MiddleLeft, 18);
+                CyberpunkGUIUtils.DrawGlowText(new Rect(qx + 10, qy + 45, w - 20, 30), $"Attack: {atkDisplay}", atkColor, atkStyle, atkColor);
             }
             GUILayout.EndArea();
         }
@@ -1079,7 +1077,10 @@ public class PlayerCombat : NetworkBehaviour
             float h = 280f;
             Rect chainRect = new Rect(20, Screen.height - h - 20f, w, h);
 
-            GUI.Box(chainRect, "<b>NEXT COMBO CHAIN</b>");
+            GUI.Box(chainRect, "");
+            GUIStyle chainHeaderStyle = CyberpunkGUIUtils.CreateCyberpunkStyle(TextAnchor.MiddleCenter, 14);
+            CyberpunkGUIUtils.DrawGlowText(new Rect(chainRect.x, chainRect.y + 5, chainRect.width, 25), "NEXT COMBO CHAIN",
+                CyberpunkGUIUtils.NEON_CYAN, chainHeaderStyle, CyberpunkGUIUtils.NEON_CYAN);
 
             GUILayout.BeginArea(new Rect(chainRect.x + 10, chainRect.y + 30, w - 20, h - 40));
 
@@ -1101,12 +1102,12 @@ public class PlayerCombat : NetworkBehaviour
                         _ => moveName
                     };
 
-                    GUI.color = Color.cyan;
+                    GUI.color = CyberpunkGUIUtils.NEON_CYAN;
                     GUILayout.Box($"{i + 1}. {moveName.ToUpper()}", GUILayout.Height(40));
                 }
                 else
                 {
-                    GUI.color = new Color(1, 1, 1, 0.2f);
+                    GUI.color = new Color(1, 1, 1, 0.15f);
                     GUILayout.Box($"{i + 1}. [WAITING]", GUILayout.Height(40));
                 }
 

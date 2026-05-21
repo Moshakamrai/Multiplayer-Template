@@ -715,8 +715,9 @@ public class PlayerCombat : NetworkBehaviour
 
         if (isLocalPlayer)
         {
-            float shakeDur = damage > 15 ? 0.5f : damage > 8 ? 0.35f : 0.25f;
-            float shakeMag = damage > 15 ? 1.2f : damage > 8 ? 0.7f : 0.4f;
+            // Increased shake magnitudes for dramatic impact on screen
+            float shakeDur = damage > 15 ? 0.6f : damage > 8 ? 0.4f : 0.3f;
+            float shakeMag = damage > 15 ? 8f : damage > 8 ? 5f : 3f;
             CameraShake.Instance?.Shake(shakeDur, shakeMag);
 
             _hurtFlashFade = Mathf.Max(_hurtFlashFade, Mathf.Min(1f, damage / 20f));

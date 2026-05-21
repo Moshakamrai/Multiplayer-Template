@@ -8,8 +8,8 @@ public class CameraShake : MonoBehaviour
     private Vector3 _originalLocalPos;
     private Coroutine _shakeCoroutine;
     private float _headBobPhase = 0f;
-    public float headBobIntensity = 0.08f;
-    public float headBobSpeed = 4f;
+    public float headBobIntensity = 0.4f;
+    public float headBobSpeed = 3f;
 
     void Awake()
     {
@@ -20,14 +20,21 @@ public class CameraShake : MonoBehaviour
 
     void Update()
     {
-        // Apply subtle head bob during active rounds for fighter perspective immersion
+        // Apply continuous head bob during active rounds for fighter perspective immersion
         var rmm = RhythmRoundManager.Instance;
-        if (rmm != null && rmm.isRoundActive && _shakeCoroutine == null)
+        if (rmm != null && rmm.isRoundActive)
         {
+            // Head bob continues even during shake, adding to the immersion
             _headBobPhase += Time.deltaTime * headBobSpeed;
             float bobX = Mathf.Sin(_headBobPhase * 0.7f) * headBobIntensity;
             float bobY = Mathf.Sin(_headBobPhase * 0.5f) * headBobIntensity * 0.6f;
-            transform.localPosition = _originalLocalPos + new Vector3(bobX, bobY, 0f);
+
+            // If not shaking, apply head bob directly
+            if (_shakeCoroutine == null)
+            {
+                transform.localPosition = _originalLocalPos + new Vector3(bobX, bobY, 0f);
+            }
+            // Note: During shake, the ShakeRoutine sets localPosition directly, overriding head bob temporarily
         }
         else if (_shakeCoroutine == null)
         {
@@ -54,7 +61,6 @@ public class CameraShake : MonoBehaviour
 
     IEnumerator ShakeRoutine(float duration, float magnitude)
     {
-        Debug.Log($"<color=green>[CameraShake] Shake started on '{gameObject.name}' — magnitude={magnitude}</color>");
         float elapsed = 0f;
         while (elapsed < duration)
         {
@@ -64,12 +70,10 @@ public class CameraShake : MonoBehaviour
             float randomY = Random.Range(-1f, 1f) * dampened;
             Vector3 randomOffset = new Vector3(randomX, randomY, 0f);
             transform.localPosition = _originalLocalPos + randomOffset;
-            Debug.Log($"<color=yellow>[CameraShake] Offset applied: {randomOffset}, dampened: {dampened}</color>");
             elapsed += Time.deltaTime;
             yield return null;
         }
         transform.localPosition = _originalLocalPos;
         _shakeCoroutine = null;
-        Debug.Log($"<color=green>[CameraShake] Shake finished.</color>");
     }
 }

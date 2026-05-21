@@ -125,8 +125,8 @@ public class ShopUI : MonoBehaviour
             // Combat cards
             if (inv.ownedCombatCards.Count > 0)
             {
-                GUI.color = new Color(0.3f, 0.3f, 0.4f);
-                GUI.Label(new Rect(x + MARGIN, cardY, cardW, 22), $"COMBAT ({inv.ownedCombatCards.Count})", _descStyle);
+                GUIStyle combatHeaderStyle = new GUIStyle(_descStyle);
+                CyberpunkGUIUtils.DrawGlowText(new Rect(x + MARGIN, cardY, cardW, 22), $"COMBAT ({inv.ownedCombatCards.Count})", CyberpunkGUIUtils.NEON_ORANGE, combatHeaderStyle, CyberpunkGUIUtils.NEON_ORANGE);
                 cardY += 24f;
 
                 foreach (var cardId in inv.ownedCombatCards)
@@ -140,8 +140,8 @@ public class ShopUI : MonoBehaviour
             // Vex cards
             if (inv.ownedVexCards.Count > 0)
             {
-                GUI.color = new Color(0.3f, 0.3f, 0.4f);
-                GUI.Label(new Rect(x + MARGIN, cardY, cardW, 22), $"VEX ({inv.ownedVexCards.Count})", _descStyle);
+                GUIStyle vexHeaderStyle = new GUIStyle(_descStyle);
+                CyberpunkGUIUtils.DrawGlowText(new Rect(x + MARGIN, cardY, cardW, 22), $"VEX ({inv.ownedVexCards.Count})", CyberpunkGUIUtils.NEON_MAGENTA, vexHeaderStyle, CyberpunkGUIUtils.NEON_MAGENTA);
                 cardY += 24f;
 
                 foreach (var cardId in inv.ownedVexCards)
@@ -155,8 +155,8 @@ public class ShopUI : MonoBehaviour
             // Trait
             if (!string.IsNullOrEmpty(inv.equippedTraitId))
             {
-                GUI.color = new Color(0.3f, 0.3f, 0.4f);
-                GUI.Label(new Rect(x + MARGIN, cardY, cardW, 22), "TRAIT", _descStyle);
+                GUIStyle traitHeaderStyle = new GUIStyle(_descStyle);
+                CyberpunkGUIUtils.DrawGlowText(new Rect(x + MARGIN, cardY, cardW, 22), "TRAIT", CyberpunkGUIUtils.NEON_GREEN, traitHeaderStyle, CyberpunkGUIUtils.NEON_GREEN);
                 cardY += 24f;
                 DrawInventoryCard(x + MARGIN, cardY, cardW, cardH, inv.equippedTraitId, "Trait", false);
             }
@@ -344,27 +344,50 @@ public class ShopUI : MonoBehaviour
 
     private void DrawCombatCard(float x, float y, float w, float h, CombatCardData card, PlayerInventory inv, int slotIndex)
     {
-        GUI.color = new Color(0.05f, 0.06f, 0.12f);
-        GUI.DrawTexture(new Rect(x, y, w, h), _whiteTex);
+        Rect fullCardRect = new Rect(x, y, w, h);
+        bool isHovered = fullCardRect.Contains(Event.current.mousePosition);
+
+        // Background
+        GUI.color = isHovered ? new Color(0.08f, 0.1f, 0.18f) : new Color(0.05f, 0.06f, 0.12f);
+        GUI.DrawTexture(fullCardRect, _whiteTex);
 
         Color rarityCol = card.rarity == CardRarity.Basic ? new Color(0.6f, 0.6f, 0.6f) :
                          card.rarity == CardRarity.Advanced ? new Color(0.2f, 0.5f, 1f) :
                          new Color(1f, 0.75f, 0.1f);
-        GUI.color = rarityCol;
-        GUI.DrawTexture(new Rect(x, y, w, 2f), _whiteTex);
-        GUI.DrawTexture(new Rect(x, y + h - 2f, w, 2f), _whiteTex);
 
-        GUI.color = Color.white;
-        GUI.Label(new Rect(x + 8f, y + 4f, w - 70f, 18f), card.displayName.ToUpper(), _cardNameStyle);
+        // Enhanced glow border on hover
+        if (isHovered)
+        {
+            GUI.color = new Color(1f, 0.5f, 0.15f, 0.8f); // Orange glow
+            GUI.DrawTexture(new Rect(x - 2, y - 2, w + 4, 4f), _whiteTex);
+            GUI.DrawTexture(new Rect(x - 2, y + h - 2, w + 4, 4f), _whiteTex);
+            GUI.DrawTexture(new Rect(x - 2, y, 4f, h), _whiteTex);
+            GUI.DrawTexture(new Rect(x + w - 2, y, 4f, h), _whiteTex);
+        }
+        else
+        {
+            GUI.color = rarityCol;
+            GUI.DrawTexture(new Rect(x, y, w, 2f), _whiteTex);
+            GUI.DrawTexture(new Rect(x, y + h - 2f, w, 2f), _whiteTex);
+        }
 
+        // Card name with glow
+        GUIStyle nameStyle = new GUIStyle(_cardNameStyle);
+        Color nameColor = isHovered ? new Color(1f, 1f, 0.3f) : Color.white;
+        CyberpunkGUIUtils.DrawGlowText(new Rect(x + 8f, y + 4f, w - 70f, 18f), card.displayName.ToUpper(), nameColor, nameStyle, nameColor);
+
+        // Description with better visibility
         _descStyle.fontSize = 11;
+        GUI.color = isHovered ? new Color(1f, 1f, 1f, 0.95f) : new Color(0.9f, 0.9f, 0.9f, 0.85f);
         GUI.Label(new Rect(x + 8f, y + 24f, w - 16f, h - 54f), card.description, _descStyle);
 
-        _costStyle.normal.textColor = new Color(1f, 1f, 0f);
-        GUI.Label(new Rect(x + 8f, y + h - 22f, 50f, 18f), $"{card.cost} CR", _costStyle);
+        // Cost with glow
+        GUIStyle costStyle = new GUIStyle(_costStyle);
+        CyberpunkGUIUtils.DrawGlowText(new Rect(x + 8f, y + h - 22f, 50f, 18f), $"{card.cost} CR", CyberpunkGUIUtils.NEON_YELLOW, costStyle, CyberpunkGUIUtils.NEON_YELLOW);
 
+        // Buy button with hover effect
         Rect btnRect = new Rect(x + w - 55f, y + h - 24f, 50f, 22f);
-        GUI.color = new Color(0.15f, 0.7f, 0.3f, 0.8f);
+        GUI.color = isHovered ? new Color(0.2f, 0.9f, 0.4f, 0.9f) : new Color(0.15f, 0.7f, 0.3f, 0.8f);
         if (GUI.Button(btnRect, "BUY", _buttonStyle))
         {
             var localPc = GameManager.localPlayer?.GetComponent<PlayerCombat>();
@@ -372,8 +395,7 @@ public class ShopUI : MonoBehaviour
         }
         GUI.color = Color.white;
 
-        Rect fullCardRect = new Rect(x, y, w, h);
-        if (fullCardRect.Contains(Event.current.mousePosition))
+        if (isHovered)
         {
             _hoveredCardId = card.cardId;
             _tooltipPos = Event.current.mousePosition;
@@ -385,25 +407,47 @@ public class ShopUI : MonoBehaviour
 
     private void DrawVexCard(float x, float y, float w, float h, VexCardData card, PlayerInventory inv, int slotIndex)
     {
-        GUI.color = new Color(0.05f, 0.06f, 0.12f);
-        GUI.DrawTexture(new Rect(x, y, w, h), _whiteTex);
+        Rect fullCardRect = new Rect(x, y, w, h);
+        bool isHovered = fullCardRect.Contains(Event.current.mousePosition);
 
-        GUI.color = new Color(0.9f, 0.3f, 1f);
-        GUI.DrawTexture(new Rect(x, y, w, 2f), _whiteTex);
-        GUI.DrawTexture(new Rect(x, y + h - 2f, w, 2f), _whiteTex);
+        // Background
+        GUI.color = isHovered ? new Color(0.12f, 0.05f, 0.15f) : new Color(0.05f, 0.06f, 0.12f);
+        GUI.DrawTexture(fullCardRect, _whiteTex);
 
-        GUI.color = Color.white;
-        GUI.Label(new Rect(x + 8f, y + 4f, w - 70f, 18f), card.displayName.ToUpper(), _cardNameStyle);
+        // Enhanced glow border on hover
+        if (isHovered)
+        {
+            GUI.color = new Color(1f, 0.2f, 0.8f, 0.8f); // Magenta glow
+            GUI.DrawTexture(new Rect(x - 2, y - 2, w + 4, 4f), _whiteTex);
+            GUI.DrawTexture(new Rect(x - 2, y + h - 2, w + 4, 4f), _whiteTex);
+            GUI.DrawTexture(new Rect(x - 2, y, 4f, h), _whiteTex);
+            GUI.DrawTexture(new Rect(x + w - 2, y, 4f, h), _whiteTex);
+        }
+        else
+        {
+            GUI.color = new Color(0.9f, 0.3f, 1f);
+            GUI.DrawTexture(new Rect(x, y, w, 2f), _whiteTex);
+            GUI.DrawTexture(new Rect(x, y + h - 2f, w, 2f), _whiteTex);
+        }
 
+        // Card name with glow
+        GUIStyle nameStyle = new GUIStyle(_cardNameStyle);
+        Color nameColor = isHovered ? CyberpunkGUIUtils.NEON_MAGENTA : Color.white;
+        CyberpunkGUIUtils.DrawGlowText(new Rect(x + 8f, y + 4f, w - 70f, 18f), card.displayName.ToUpper(), nameColor, nameStyle, nameColor);
+
+        // Effect and description with better visibility
         _descStyle.fontSize = 10;
         string fullDesc = $"{card.effect}\n{card.description}";
+        GUI.color = isHovered ? new Color(1f, 1f, 1f, 0.95f) : new Color(0.9f, 0.9f, 0.9f, 0.85f);
         GUI.Label(new Rect(x + 8f, y + 24f, w - 16f, h - 54f), fullDesc, _descStyle);
 
-        _costStyle.normal.textColor = new Color(1f, 1f, 0f);
-        GUI.Label(new Rect(x + 8f, y + h - 22f, 50f, 18f), $"{card.cost} CR", _costStyle);
+        // Cost with glow
+        GUIStyle costStyle = new GUIStyle(_costStyle);
+        CyberpunkGUIUtils.DrawGlowText(new Rect(x + 8f, y + h - 22f, 50f, 18f), $"{card.cost} CR", CyberpunkGUIUtils.NEON_YELLOW, costStyle, CyberpunkGUIUtils.NEON_YELLOW);
 
+        // Buy button with hover effect
         Rect btnRect = new Rect(x + w - 55f, y + h - 24f, 50f, 22f);
-        GUI.color = new Color(0.15f, 0.7f, 0.3f, 0.8f);
+        GUI.color = isHovered ? new Color(0.2f, 0.9f, 0.4f, 0.9f) : new Color(0.15f, 0.7f, 0.3f, 0.8f);
         if (GUI.Button(btnRect, "BUY", _buttonStyle))
         {
             var localPc = GameManager.localPlayer?.GetComponent<PlayerCombat>();
@@ -411,8 +455,7 @@ public class ShopUI : MonoBehaviour
         }
         GUI.color = Color.white;
 
-        Rect fullCardRect = new Rect(x, y, w, h);
-        if (fullCardRect.Contains(Event.current.mousePosition))
+        if (isHovered)
         {
             _hoveredCardId = card.cardId;
             _tooltipPos = Event.current.mousePosition;
@@ -424,25 +467,47 @@ public class ShopUI : MonoBehaviour
 
     private void DrawTraitCard(float x, float y, float w, float h, TraitCardData card, PlayerInventory inv, int slotIndex)
     {
-        GUI.color = new Color(0.05f, 0.06f, 0.12f);
-        GUI.DrawTexture(new Rect(x, y, w, h), _whiteTex);
+        Rect fullCardRect = new Rect(x, y, w, h);
+        bool isHovered = fullCardRect.Contains(Event.current.mousePosition);
 
-        GUI.color = new Color(0.25f, 0.9f, 0.4f);
-        GUI.DrawTexture(new Rect(x, y, w, 2f), _whiteTex);
-        GUI.DrawTexture(new Rect(x, y + h - 2f, w, 2f), _whiteTex);
+        // Background
+        GUI.color = isHovered ? new Color(0.05f, 0.15f, 0.08f) : new Color(0.05f, 0.06f, 0.12f);
+        GUI.DrawTexture(fullCardRect, _whiteTex);
 
-        GUI.color = Color.white;
-        GUI.Label(new Rect(x + 8f, y + 4f, w - 70f, 18f), card.displayName.ToUpper(), _cardNameStyle);
+        // Enhanced glow border on hover
+        if (isHovered)
+        {
+            GUI.color = new Color(0.25f, 1f, 0.4f, 0.8f); // Green glow
+            GUI.DrawTexture(new Rect(x - 2, y - 2, w + 4, 4f), _whiteTex);
+            GUI.DrawTexture(new Rect(x - 2, y + h - 2, w + 4, 4f), _whiteTex);
+            GUI.DrawTexture(new Rect(x - 2, y, 4f, h), _whiteTex);
+            GUI.DrawTexture(new Rect(x + w - 2, y, 4f, h), _whiteTex);
+        }
+        else
+        {
+            GUI.color = new Color(0.25f, 0.9f, 0.4f);
+            GUI.DrawTexture(new Rect(x, y, w, 2f), _whiteTex);
+            GUI.DrawTexture(new Rect(x, y + h - 2f, w, 2f), _whiteTex);
+        }
 
+        // Card name with glow
+        GUIStyle nameStyle = new GUIStyle(_cardNameStyle);
+        Color nameColor = isHovered ? CyberpunkGUIUtils.NEON_GREEN : Color.white;
+        CyberpunkGUIUtils.DrawGlowText(new Rect(x + 8f, y + 4f, w - 70f, 18f), card.displayName.ToUpper(), nameColor, nameStyle, nameColor);
+
+        // Effect and description with better visibility
         _descStyle.fontSize = 10;
         string fullDesc = $"{card.effect}\n{card.description}";
+        GUI.color = isHovered ? new Color(1f, 1f, 1f, 0.95f) : new Color(0.9f, 0.9f, 0.9f, 0.85f);
         GUI.Label(new Rect(x + 8f, y + 24f, w - 16f, h - 54f), fullDesc, _descStyle);
 
-        _costStyle.normal.textColor = new Color(1f, 1f, 0f);
-        GUI.Label(new Rect(x + 8f, y + h - 22f, 50f, 18f), $"{card.cost} CR", _costStyle);
+        // Cost with glow
+        GUIStyle costStyle = new GUIStyle(_costStyle);
+        CyberpunkGUIUtils.DrawGlowText(new Rect(x + 8f, y + h - 22f, 50f, 18f), $"{card.cost} CR", CyberpunkGUIUtils.NEON_YELLOW, costStyle, CyberpunkGUIUtils.NEON_YELLOW);
 
+        // Buy button with hover effect
         Rect btnRect = new Rect(x + w - 55f, y + h - 24f, 50f, 22f);
-        GUI.color = new Color(0.15f, 0.7f, 0.3f, 0.8f);
+        GUI.color = isHovered ? new Color(0.2f, 0.9f, 0.4f, 0.9f) : new Color(0.15f, 0.7f, 0.3f, 0.8f);
         if (GUI.Button(btnRect, "BUY", _buttonStyle))
         {
             var localPc = GameManager.localPlayer?.GetComponent<PlayerCombat>();
@@ -450,8 +515,7 @@ public class ShopUI : MonoBehaviour
         }
         GUI.color = Color.white;
 
-        Rect fullCardRect = new Rect(x, y, w, h);
-        if (fullCardRect.Contains(Event.current.mousePosition))
+        if (isHovered)
         {
             _hoveredCardId = card.traitId;
             _tooltipPos = Event.current.mousePosition;
@@ -620,11 +684,10 @@ public class ShopUI : MonoBehaviour
 
     private void DrawSectionHeader(float x, float y, float w, string text, Color accent)
     {
-        GUI.color = accent;
+        GUI.color = new Color(accent.r, accent.g, accent.b, 0.3f);
         GUI.DrawTexture(new Rect(x, y, w, 32f), _whiteTex);
         GUI.color = Color.white;
-        _sectionStyle.normal.textColor = Color.white;
-        GUI.Label(new Rect(x, y, w, 32f), text, _sectionStyle);
+        CyberpunkGUIUtils.DrawGlowText(new Rect(x, y, w, 32f), text, accent, _sectionStyle, accent);
     }
 
     private void DrawLockInButton()

@@ -2310,8 +2310,8 @@ public class RhythmRoundManager : NetworkBehaviour
             GUILayout.EndArea();
         }
 
-        // --- 2. MATCH STATUS (Top Left under server controls) ---
-        GUILayout.BeginArea(new Rect(10, 130, 260, 280));
+        // --- 2. MATCH STATUS (Top Right, clear of overlapping UI) ---
+        GUILayout.BeginArea(new Rect(Screen.width - 280, 100, 260, 280));
         GUIStyle matchStyle = new GUIStyle(GUI.skin.box) { fontSize = 16, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleLeft };
         matchStyle.normal.textColor = Color.cyan;
         GUILayout.Label($"ROUND {currentRoundNumber} / 9", matchStyle, GUILayout.Height(30));

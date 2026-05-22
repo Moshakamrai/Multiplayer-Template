@@ -10,10 +10,13 @@ public class ShopPhaseManager : MonoBehaviour
     public float shopTimeRemaining = 120f;
     public int currentShopRound = 1;
 
-    // Server-only shop state
+    // Server-only shop state (8 combat cards + 4 traits/vex cards)
     private List<CombatCardData> _combatShopSlots = new List<CombatCardData>();
-    private List<VexCardData> _vexShopSlots = new List<VexCardData>();
-    private List<TraitCardData> _traitShopSlots = new List<TraitCardData>();
+    private List<VexCardData> _traitShopSlots = new List<VexCardData>(); // Vex cards act as traits now
+
+    // Track which slots have been purchased (for empty slot display)
+    private HashSet<int> _purchasedCombatSlots = new HashSet<int>();
+    private HashSet<int> _purchasedTraitSlots = new HashSet<int>();
 
     private bool _p1Locked = false;
     private bool _p2Locked = false;
@@ -54,8 +57,9 @@ public class ShopPhaseManager : MonoBehaviour
     private void GenerateShop(int roundNumber)
     {
         _combatShopSlots.Clear();
-        _vexShopSlots.Clear();
         _traitShopSlots.Clear();
+        _purchasedCombatSlots.Clear();
+        _purchasedTraitSlots.Clear();
 
         CardDatabase.GetRarityChances(roundNumber, out float basicChance, out float advancedChance, out float legendaryChance);
 
@@ -69,10 +73,10 @@ public class ShopPhaseManager : MonoBehaviour
                     ownedCardIds.Add(id);
         }
 
-        // Generate 6 combat card slots (no duplicates, no owned cards)
+        // Generate 8 combat card slots (no duplicates, no owned cards)
         var usedIds = new HashSet<string>();
         int attempts = 0;
-        while (_combatShopSlots.Count < 6 && attempts < 50)
+        while (_combatShopSlots.Count < 8 && attempts < 80)
         {
             attempts++;
             float roll = Random.value;
@@ -92,30 +96,17 @@ public class ShopPhaseManager : MonoBehaviour
             _combatShopSlots.Add(card);
         }
 
-        // Generate 3 Vex cards (no duplicates)
+        // Generate 4 Trait slots (Vex cards act as buyable traits, unlimited owned)
         var vexPool = new List<VexCardData>(CardDatabase.VexCards);
         var usedVexIds = new HashSet<string>();
-        while (_vexShopSlots.Count < 3 && vexPool.Count > 0)
+        while (_traitShopSlots.Count < 4 && vexPool.Count > 0)
         {
             int idx = Random.Range(0, vexPool.Count);
             var card = vexPool[idx];
             vexPool.RemoveAt(idx);
             if (usedVexIds.Contains(card.cardId)) continue;
             usedVexIds.Add(card.cardId);
-            _vexShopSlots.Add(card);
-        }
-
-        // Generate 3 Trait cards (no duplicates)
-        var traitPool = new List<TraitCardData>(CardDatabase.TraitCards);
-        var usedTraitIds = new HashSet<string>();
-        while (_traitShopSlots.Count < 3 && traitPool.Count > 0)
-        {
-            int idx = Random.Range(0, traitPool.Count);
-            var trait = traitPool[idx];
-            traitPool.RemoveAt(idx);
-            if (usedTraitIds.Contains(trait.traitId)) continue;
-            usedTraitIds.Add(trait.traitId);
-            _traitShopSlots.Add(trait);
+            _traitShopSlots.Add(card);
         }
     }
 
@@ -187,22 +178,12 @@ public class ShopPhaseManager : MonoBehaviour
             }
         }
 
-        // 2. Buy a Vex card if affordable
-        foreach (var vex in _vexShopSlots)
+        // 2. Buy a Trait/Vex card if affordable (Vex cards act as traits now)
+        foreach (var vex in _traitShopSlots)
         {
             if (vex != null && botInv.credits >= vex.cost)
             {
                 botInv.BuyVexCard(vex.cardId, vex.cost);
-                break;
-            }
-        }
-
-        // 3. Buy a Trait if affordable
-        foreach (var trait in _traitShopSlots)
-        {
-            if (trait != null && botInv.credits >= trait.cost)
-            {
-                botInv.BuyTraitCard(trait.traitId, trait.cost);
                 break;
             }
         }
@@ -224,23 +205,15 @@ public class ShopPhaseManager : MonoBehaviour
         inv.BuyCombatCard(card.cardId, card.cost);
     }
 
-    
+
     public void TryBuyVexCard(PlayerInventory inv, int slotIndex)
     {
-        if (!isShopPhase || slotIndex < 0 || slotIndex >= _vexShopSlots.Count) return;
-        var card = _vexShopSlots[slotIndex];
+        if (!isShopPhase || slotIndex < 0 || slotIndex >= _traitShopSlots.Count) return;
+        var card = _traitShopSlots[slotIndex];
         if (card == null) return;
         inv.BuyVexCard(card.cardId, card.cost);
     }
 
-    
-    public void TryBuyTraitCard(PlayerInventory inv, int slotIndex)
-    {
-        if (!isShopPhase || slotIndex < 0 || slotIndex >= _traitShopSlots.Count) return;
-        var trait = _traitShopSlots[slotIndex];
-        if (trait == null) return;
-        inv.BuyTraitCard(trait.traitId, trait.cost);
-    }
 
     
     public void LockInShop(PlayerInventory inv)
@@ -275,8 +248,15 @@ public class ShopPhaseManager : MonoBehaviour
         RhythmRoundManager.Instance?.ShowRoundPicker();
     }
 
-    // Client access for UI drawing
+    // Client access for UI drawing (8 combat + 4 traits/vex)
     public IReadOnlyList<CombatCardData> CombatShopSlots => _combatShopSlots;
-    public IReadOnlyList<VexCardData> VexShopSlots => _vexShopSlots;
-    public IReadOnlyList<TraitCardData> TraitShopSlots => _traitShopSlots;
+    public IReadOnlyList<VexCardData> TraitShopSlots => _traitShopSlots;
+
+    // Check if a shop slot has been purchased
+    public bool IsCombatSlotPurchased(int slotIndex) => _purchasedCombatSlots.Contains(slotIndex);
+    public bool IsTraitSlotPurchased(int slotIndex) => _purchasedTraitSlots.Contains(slotIndex);
+
+    // Mark a slot as purchased (empty)
+    public void MarkCombatSlotPurchased(int slotIndex) => _purchasedCombatSlots.Add(slotIndex);
+    public void MarkTraitSlotPurchased(int slotIndex) => _purchasedTraitSlots.Add(slotIndex);
 }

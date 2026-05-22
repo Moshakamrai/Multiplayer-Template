@@ -20,6 +20,7 @@ public class TiebreakerManager : NetworkBehaviour
     private AudioSource _sfxSource;
 
     [SyncVar] public bool IsTiebreakerActive = false;
+    private string _tiedCardName = ""; // card that triggered tiebreaker (needs to be blocked)
 
     // ── Word Burst config ──────────────────────────────────────────────────────
     private static readonly string[] WORD_POOL =
@@ -110,9 +111,11 @@ public class TiebreakerManager : NetworkBehaviour
     }
 
     // ── Called by RhythmRoundManager on same-move clash ────────────────────────
-    public void StartTiebreaker()
+    public void StartTiebreaker(string tiedCard = "")
     {
         if (IsTiebreakerActive) return;
+
+        _tiedCardName = tiedCard; // store for blocking after tiebreaker
 
         var pool = new List<string>(WORD_POOL);
         _sequence = new string[WORD_COUNT];
@@ -396,6 +399,14 @@ public class TiebreakerManager : NetworkBehaviour
             bool isBot = p.GetComponent<BotController>() != null;
             if ( humanWins && isBot)  pc.TakeDamage(TIEBREAKER_DMG);
             if (!humanWins && !isBot) pc.TakeDamage(TIEBREAKER_DMG);
+
+            // Block the tied card from being reused immediately
+            if (!string.IsNullOrEmpty(_tiedCardName))
+            {
+                CardManager cm = pc.GetComponent<CardManager>();
+                if (cm != null)
+                    cm.justUsedTrigger = _tiedCardName;
+            }
         }
 
         RhythmRoundManager.Instance?.ResumeAfterTiebreaker(_totalRealElapsed);

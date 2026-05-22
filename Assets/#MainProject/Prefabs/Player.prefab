@@ -797,6 +797,19 @@ MonoBehaviour:
   IsParryActive: 0
   IsStaggered: 0
   StaggerBeatsRemaining: 0
+  HasPendingTrap: 0
+  HasPendingCage: 0
+  HasFocusBuff: 0
+  HasMirrorBuff: 0
+  FocusBuffBeatsRemaining: 0
+  MirrorBuffBeatsRemaining: 0
+  IsTauntedNextTurn: 0
+  TauntTurnsRemaining: 0
+  activeTraitId: 
+  activeVexCardId: 
+  VexCardBeatsRemaining: 0
+  ConsecutiveHitsChain: 0
+  HasStalwartBuff: 0
   weaponGloveLeft: {fileID: 4246265404567632835}
   weaponGloveRight: {fileID: 6838551958696098282}
   localShopSelection: []
@@ -2162,6 +2175,10 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 1298824334076145077, guid: 62f0c49781bc0a646bfc9a3d022907f8, type: 3}
       propertyPath: m_LocalEulerAnglesHint.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 8943591542730139556, guid: 62f0c49781bc0a646bfc9a3d022907f8, type: 3}
+      propertyPath: m_Enabled
       value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 8943591542730139556, guid: 62f0c49781bc0a646bfc9a3d022907f8, type: 3}

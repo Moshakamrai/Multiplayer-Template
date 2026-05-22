@@ -36,6 +36,7 @@ public class PlayerCombat : NetworkBehaviour
     [SyncVar] public string activeVexCardId = "";
     [SyncVar] public int VexCardBeatsRemaining = 0;
     [SyncVar] public int ConsecutiveHitsChain = 0; // For Chain trait and Momentum vex card
+    [SyncVar] public bool HasStalwartBuff = false; // Stalwart trait: +10% next attack after block
 
     private Queue<string> _attackQueue = new Queue<string>();
     public SphereCollider weaponGloveLeft;
@@ -104,7 +105,7 @@ public class PlayerCombat : NetworkBehaviour
     public void CmdBuyTraitCard(int slotIndex)
     {
         var inv = GetComponent<PlayerInventory>();
-        if (inv != null) ShopPhaseManager.Instance?.TryBuyTraitCard(inv, slotIndex);
+        if (inv != null) ShopPhaseManager.Instance?.TryBuyVexCard(inv, slotIndex);
     }
 
     [Command]
@@ -302,6 +303,10 @@ public class PlayerCombat : NetworkBehaviour
 
         // Trait/Vex card timing window modifiers
         float timingWindowMult = 1f;
+        // Quicktrigger trait: +0.1s timing window (easier for this player)
+        if (!string.IsNullOrEmpty(activeTraitId) && activeTraitId == "quicktrigger")
+            timingWindowMult *= 1.20f; // +0.1s / 0.5s = 20% increase
+
         // Heavy trait: +0.05s (easier for this player)
         if (!string.IsNullOrEmpty(activeTraitId) && activeTraitId == "heavy")
             timingWindowMult *= 1.10f; // 0.05s / 0.5s = 10% increase
@@ -715,9 +720,9 @@ public class PlayerCombat : NetworkBehaviour
 
         if (isLocalPlayer)
         {
-            // Increased shake magnitudes for dramatic impact on screen
-            float shakeDur = damage > 15 ? 0.6f : damage > 8 ? 0.4f : 0.3f;
-            float shakeMag = damage > 15 ? 8f : damage > 8 ? 5f : 3f;
+            // Camera shake on hit with damage scaling
+            float shakeDur = damage > 15 ? 0.4f : damage > 8 ? 0.3f : 0.2f;
+            float shakeMag = damage > 15 ? 1.5f : damage > 8 ? 1.0f : 0.6f;
             CameraShake.Instance?.Shake(shakeDur, shakeMag);
 
             _hurtFlashFade = Mathf.Max(_hurtFlashFade, Mathf.Min(1f, damage / 20f));
@@ -943,7 +948,7 @@ public class PlayerCombat : NetworkBehaviour
                     float panelW = 220f;
                     float panelH = 36f + oppCards.Count * 34f;
                     float panelX = 20f;
-                    float panelY = 100f;
+                    float panelY = 170f;
 
                     GUI.color = new Color(0.06f, 0.06f, 0.1f, 0.92f);
                     GUI.DrawTexture(new Rect(panelX, panelY, panelW, panelH), _whiteTexture);
@@ -996,14 +1001,14 @@ public class PlayerCombat : NetworkBehaviour
             }
         }
 
-        // --- 2. MIC THRESHOLD (Bottom Right) ---
+        // --- 2. MIC THRESHOLD (Right Bottom Corner) ---
         if (vp != null)
         {
             float vol = vp.CurrentRawVolume;
             float thr = (_vcm != null) ? _vcm.parryVolumeThreshold : 0.4f;
-            float w = 240f;
+            float w = 400f;
             float h = 100f;
-            float mx = Screen.width - w - 20f;
+            float mx = Screen.width - 420f;
             float my = Screen.height - h - 20f;
 
             // Background
@@ -1038,13 +1043,13 @@ public class PlayerCombat : NetworkBehaviour
             GUI.color = Color.white;
         }
 
-        // --- 3. COMBAT QUEUE (Top Right) ---
+        // --- 3. COMBAT QUEUE (Stacked Right Side) ---
         if (RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive)
         {
-            float w = 280f;
-            float h = 200f;
-            float qx = Screen.width - w - 20f;
-            float qy = 100f;
+            float w = 400f;
+            float h = 160f;
+            float qx = Screen.width - 420f;
+            float qy = 364f;
 
             GUILayout.BeginArea(new Rect(qx, qy, w, h));
             GUIStyle headerStyle = CyberpunkGUIUtils.CreateCyberpunkStyle(TextAnchor.MiddleLeft, 20);

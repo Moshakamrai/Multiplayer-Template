@@ -5,16 +5,18 @@ public class CameraShake : MonoBehaviour
 {
     public static CameraShake Instance { get; private set; }
 
-    private Vector3 _originalLocalPos;
     private Coroutine _shakeCoroutine;
     private float _headBobPhase = 0f;
-    public float headBobIntensity = 0.4f;
+    public float headBobIntensity = 0.15f;
     public float headBobSpeed = 3f;
+
+    // Current shake offset applied to camera
+    private Vector3 _currentShakeOffset = Vector3.zero;
+    public Vector3 CurrentShakeOffset => _currentShakeOffset;
 
     void Awake()
     {
         Instance = this;
-        _originalLocalPos = transform.localPosition;
         Debug.Log($"<color=cyan>[CameraShake] Initialized on '{gameObject.name}'. Instance set.</color>");
     }
 
@@ -22,23 +24,17 @@ public class CameraShake : MonoBehaviour
     {
         // Apply continuous head bob during active rounds for fighter perspective immersion
         var rmm = RhythmRoundManager.Instance;
-        if (rmm != null && rmm.isRoundActive)
+        if (rmm != null && rmm.isRoundActive && _shakeCoroutine == null)
         {
-            // Head bob continues even during shake, adding to the immersion
+            // Head bob continues during idle, adds to immersion
             _headBobPhase += Time.deltaTime * headBobSpeed;
             float bobX = Mathf.Sin(_headBobPhase * 0.7f) * headBobIntensity;
             float bobY = Mathf.Sin(_headBobPhase * 0.5f) * headBobIntensity * 0.6f;
-
-            // If not shaking, apply head bob directly
-            if (_shakeCoroutine == null)
-            {
-                transform.localPosition = _originalLocalPos + new Vector3(bobX, bobY, 0f);
-            }
-            // Note: During shake, the ShakeRoutine sets localPosition directly, overriding head bob temporarily
+            _currentShakeOffset = new Vector3(bobX, bobY, 0f);
         }
         else if (_shakeCoroutine == null)
         {
-            transform.localPosition = _originalLocalPos;
+            _currentShakeOffset = Vector3.zero;
         }
     }
 
@@ -68,12 +64,11 @@ public class CameraShake : MonoBehaviour
             // Use more aggressive random offset - ensures visible shake
             float randomX = Random.Range(-1f, 1f) * dampened;
             float randomY = Random.Range(-1f, 1f) * dampened;
-            Vector3 randomOffset = new Vector3(randomX, randomY, 0f);
-            transform.localPosition = _originalLocalPos + randomOffset;
+            _currentShakeOffset = new Vector3(randomX, randomY, 0f);
             elapsed += Time.deltaTime;
             yield return null;
         }
-        transform.localPosition = _originalLocalPos;
+        _currentShakeOffset = Vector3.zero;
         _shakeCoroutine = null;
     }
 }

@@ -440,17 +440,25 @@ public override void Start()
         }
         
         Transform camTransform = _cam.transform;
-        
+
         if (CameraPosition != null)
         {
+            // Apply base camera follow position
             camTransform.position = CameraPosition.position;
+
+            // Apply shake and head bob offsets from CameraShake
+            var shakeComponent = CameraShake.Instance;
+            if (shakeComponent != null)
+            {
+                camTransform.position += shakeComponent.CurrentShakeOffset;
+            }
+
             camTransform.rotation = CameraPosition.rotation;
             _cam.fieldOfView = 90; // Wider for First Person
-        
-            // NEW: Hide our own body so we don't see our neck/shoulders
+
+            // Hide our own body so we don't see our neck/shoulders
             if (localPlayer != null)
             {
-                // Assuming your mesh is a child or referenced in PlayerCombat
                 localPlayer.GetComponentInChildren<SkinnedMeshRenderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.ShadowsOnly;
             }
         }

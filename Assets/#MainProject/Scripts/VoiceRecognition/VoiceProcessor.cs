@@ -35,9 +35,12 @@ public class VoiceProcessor : MonoBehaviour
     }
 
     [Header("Voice Detection Settings")]
-    [SerializeField, Range(0.0f, 1.0f)] private float _minimumSpeakingSampleValue = 0.05f;
+    [Tooltip("Volume level that STARTS transmission. Keep low so plosive onsets (p-, b-, t-) are never clipped.")]
+    [SerializeField, Range(0.0f, 1.0f)] private float _voiceStartThreshold = 0.015f;
+    [Tooltip("Volume level that SUSTAINS transmission once started. Must be >= start threshold.")]
+    [SerializeField, Range(0.0f, 1.0f)] private float _minimumSpeakingSampleValue = 0.04f;
     [Tooltip("How long silence must persist before audio transmission stops. Keep low for rhythm games (0.2–0.3s).")]
-    [SerializeField] private float _silenceTimer = 0.25f;
+    [SerializeField] private float _silenceTimer = 0.30f;
     [SerializeField] private bool _autoDetect;
 
     // Fast volume peek — reads a tiny window every Unity frame so CurrentRawVolume
@@ -171,29 +174,33 @@ public class VoiceProcessor : MonoBehaviour
             // Keep CurrentRawVolume as the freshest value (peek may be more recent than full frame)
             if (maxVolume > CurrentRawVolume) CurrentRawVolume = maxVolume;
 
-            // --- THE VAD FIX ---
-            if (_autoDetect == false) 
+            // --- VAD: Schmitt-trigger to prevent word-onset clipping ---
+            // _voiceStartThreshold  (low)  — triggers transmission; catches plosive onsets (p-, b-, t-)
+            // _minimumSpeakingSampleValue (higher) — sustains transmission once active
+            // Using two thresholds means a quiet word start is never missed, but noise
+            // doesn't keep the gate open forever.
+            if (_autoDetect == false)
             {
-                _transmit = _audioDetected = true; 
+                _transmit = _audioDetected = true;
             }
             else
             {
-                if (maxVolume >= _minimumSpeakingSampleValue) 
-                { 
-                    _audioDetected = true; 
-                    _timeAtSilenceBegan = Time.time; 
+                float activeThreshold = _audioDetected
+                    ? _minimumSpeakingSampleValue   // already talking — need sustained volume to stay open
+                    : _voiceStartThreshold;         // silent — only needs a small onset to open
+
+                if (maxVolume >= activeThreshold)
+                {
+                    _audioDetected = true;
+                    _timeAtSilenceBegan = Time.time;
                 }
-                else 
-                { 
-                    // If we drop below the volume threshold, check if the silence timer has expired
-                    if (_audioDetected && Time.time - _timeAtSilenceBegan > _silenceTimer) 
-                    {
-                        _audioDetected = false; 
-                    }
+                else
+                {
+                    if (_audioDetected && Time.time - _timeAtSilenceBegan > _silenceTimer)
+                        _audioDetected = false;
                 }
-                
-                // Keep transmitting as long as audio is considered "detected" (including the silence tail)
-                _transmit = _audioDetected; 
+
+                _transmit = _audioDetected;
             }
 
             if (_audioDetected)

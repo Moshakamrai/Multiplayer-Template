@@ -87,6 +87,7 @@ public class RhythmRoundManager : NetworkBehaviour
     private int _p1RoundDamageDealt = 0;
     private int _p2RoundDamageDealt = 0;
     private bool _isEndingRound = false;
+    private bool _pendingCustomAudioPlay = false;
 
     private readonly Vector3 _spawnP1 = new Vector3(0f, 0f, -2.5f);
     private readonly Vector3 _spawnP2 = new Vector3(0f, 0f, 2.5f);
@@ -131,6 +132,11 @@ public class RhythmRoundManager : NetworkBehaviour
         {
             var cdGo = new GameObject("CardDatabase");
             cdGo.AddComponent<CardDatabase>();
+        }
+        if (RoundCountdownUI.Instance == null)
+        {
+            var go = new GameObject("RoundCountdownUI");
+            go.AddComponent<RoundCountdownUI>();
         }
     }
 
@@ -415,13 +421,10 @@ public class RhythmRoundManager : NetworkBehaviour
         if (slowRhythmMusic != null && BeatAnalyzer.Instance != null)
             BeatAnalyzer.Instance.audioSource.clip = slowRhythmMusic;
 
-        // We want 90 seconds total.
-        // At 4-second intervals, i <= 22 gives us 88 seconds.
-        for (int i = 1; i <= 22; i++)
-        {
-            float t = i * 4.0f;
-            _upcomingImpacts.Add(t);
-        }
+        // 4-second intervals up to the 60s round cap (beat at 60s would land exactly at the limit,
+        // so stop at 56s — the time-limit check in Update handles the cutoff cleanly).
+        for (int i = 1; i * 4.0f <= 60f; i++)
+            _upcomingImpacts.Add(i * 4.0f);
 
         SetupRound();
     }
@@ -489,7 +492,7 @@ public class RhythmRoundManager : NetworkBehaviour
 
         BeatAnalyzer.Instance.audioSource.Stop();
         BeatAnalyzer.Instance.audioSource.time = 0f;
-        BeatAnalyzer.Instance.audioSource.Play();
+        _pendingCustomAudioPlay = true;
 
         _isWindUpFired = false;
         SetupRound();
@@ -534,12 +537,31 @@ public class RhythmRoundManager : NetworkBehaviour
             }
         }
 
-        _startTime = NetworkTime.time + 1.0;
         lastBeatFireTime = 0f;
         currentChainPosition = 0;
         _clusterBeatsLeftToFire = (_clusterSizes.Count > 0) ? _clusterSizes[0] : 1;
-        isRoundActive = true;
         RpcClearLogs();
+        RpcStartCountdown();
+        StartCoroutine(DelayedRoundActivation(5f));
+    }
+
+    [Server]
+    private IEnumerator DelayedRoundActivation(float delay)
+    {
+        yield return new WaitForSeconds(delay);
+        if (_pendingCustomAudioPlay)
+        {
+            _pendingCustomAudioPlay = false;
+            BeatAnalyzer.Instance.audioSource.Play();
+        }
+        _startTime = NetworkTime.time + 1.0;
+        isRoundActive = true;
+    }
+
+    [ClientRpc]
+    private void RpcStartCountdown()
+    {
+        RoundCountdownUI.Instance?.StartCountdown(5);
     }
 
     private string CardIdToTrigger(string cardId)
@@ -608,6 +630,16 @@ public class RhythmRoundManager : NetworkBehaviour
         yield return new WaitForSeconds(1.5f);
 
         var playerList = new List<PlayerController>(GameManager.players);
+
+        // Bot is spawned via NetworkServer.Spawn but may not be in GameManager.players.
+        // Always include it so solo-play rounds end and flow into the shop correctly.
+        if (_activeBot != null)
+        {
+            var botCtrl = _activeBot.GetComponent<PlayerController>();
+            if (botCtrl != null && !playerList.Contains(botCtrl))
+                playerList.Add(botCtrl);
+        }
+
         if (playerList.Count < 2)
         {
             _isEndingRound = false;
@@ -811,16 +843,12 @@ public class RhythmRoundManager : NetworkBehaviour
         {
             // --- ROUND END CHECKS ---
             bool shouldEndRound = false;
+            float currentTime = GetCurrentTrackTime();
 
             if (_upcomingImpacts.Count == 0) shouldEndRound = true;
 
-            if (!shouldEndRound)
-            {
-                foreach (var p in GameManager.players)
-                {
-                    // Percentage limit removed — round only ends when music finishes
-                }
-            }
+            // Hard 60-second cap — applies to all round types regardless of beat map length
+            if (currentTime >= 60f) shouldEndRound = true;
 
             if (shouldEndRound && !_isEndingRound)
             {
@@ -829,14 +857,8 @@ public class RhythmRoundManager : NetworkBehaviour
                 return;
             }
 
-            float currentTime = GetCurrentTrackTime();
+            if (_upcomingImpacts.Count == 0) return;
 
-            if (_upcomingImpacts.Count == 0)
-            {
-                return;
-            }
-
-            if (_upcomingImpacts.Count > 0)
             {
                 float targetBeat = _upcomingImpacts[0];
 
@@ -866,7 +888,7 @@ public class RhythmRoundManager : NetworkBehaviour
                         {
                             var m1 = playerList[0].GetComponent<PlayerCombat>().PeekNextMove();
                             var m2 = playerList[1].GetComponent<PlayerCombat>().PeekNextMove();
-                            if (!string.IsNullOrEmpty(m1.attack) && m1.attack == m2.attack)
+                            if (!string.IsNullOrEmpty(m1.attack) && m1.attack == m2.attack && CardManager.IsAttackTrigger(m1.attack))
                             {
                                 _tiebreakerPaused = true;
                                 TiebreakerManager.Instance?.StartTiebreaker(m1.attack); // pass tied card for blocking
@@ -1302,6 +1324,11 @@ public class RhythmRoundManager : NetworkBehaviour
                     {
                         blockMitigation = 0.30f; // 70% blocked instead of 100%
                     }
+                    // Stalwart trait: block sets up next attack buff
+                    if (!string.IsNullOrEmpty(defender.activeTraitId) && defender.activeTraitId == "stalwart")
+                    {
+                        defender.HasStalwartBuff = true;
+                    }
                     if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Block");
                     PlayHitParticle(defender.transform.position);
                 }
@@ -1332,6 +1359,13 @@ public class RhythmRoundManager : NetworkBehaviour
         {
             finalDmg = Mathf.RoundToInt(finalDmg * 1.5f);
             attacker.HasFocusBuff = false;
+        }
+
+        // Stalwart buff: successful block sets +10% next attack
+        if (attacker.HasStalwartBuff)
+        {
+            finalDmg = Mathf.RoundToInt(finalDmg * 1.10f);
+            attacker.HasStalwartBuff = false;
         }
 
         // Chain trait: +5% per consecutive hit
@@ -1395,6 +1429,12 @@ public class RhythmRoundManager : NetworkBehaviour
             if (!string.IsNullOrEmpty(defender.activeVexCardId) && defender.activeVexCardId == "tank")
             {
                 damageDealt = Mathf.RoundToInt(damageDealt * 0.75f);
+            }
+
+            // Fortress trait: reduce damage taken by 18%
+            if (!string.IsNullOrEmpty(defender.activeTraitId) && defender.activeTraitId == "fortress")
+            {
+                damageDealt = Mathf.RoundToInt(damageDealt * 0.82f);
             }
 
             // Defensive trait: reduce consecutive hits taken damage by 8%, max 40%
@@ -1501,10 +1541,29 @@ public class RhythmRoundManager : NetworkBehaviour
 
         float multiplier = 1f;
 
-        // Trait effects
+        // Trait effects with state-based bonuses
         if (!string.IsNullOrEmpty(player.activeTraitId))
         {
             multiplier *= GetTraitDamageMultiplier(player.activeTraitId);
+
+            // State-based trait bonuses
+            string trait = player.activeTraitId;
+
+            // Bloodlust: +6% per consecutive hit
+            if (trait == "bloodlust")
+                multiplier *= (1f + (player.ConsecutiveHitsChain * 0.06f));
+
+            // Momentum: +10% per consecutive hit (max +40%)
+            if (trait == "momentum")
+                multiplier *= (1f + Mathf.Min(player.ConsecutiveHitsChain * 0.10f, 0.40f));
+
+            // Executioner: +35% when opponent > 65% health
+            if (trait == "executioner")
+            {
+                PlayerCombat opponent = player.GetComponent<PlayerController>()?.GetOpponent()?.GetComponent<PlayerCombat>();
+                if (opponent != null && opponent.CurrentPercentage > 65f)
+                    multiplier *= 1.35f;
+            }
         }
 
         // Vex card effects
@@ -1520,13 +1579,29 @@ public class RhythmRoundManager : NetworkBehaviour
     {
         return traitId switch
         {
-            "heavy" => 1.10f, // +10% damage
-            "volatile" => 1.10f, // +10% damage (with self-damage on miss)
-            "piercing" => 1.0f, // Piercing doesn't modify raw damage, it modifies block
-            "draining" => 1.0f, // Draining heals, doesn't modify damage
-            "chain" => 1.0f, // Chain is handled separately per hit
-            "defensive" => 1.0f, // Defensive reduces damage taken
-            "stunning" => 1.0f, // Stunning affects timing, not damage
+            // Offense traits
+            "bloodlust" => 1.0f, // Handled via ConsecutiveHitsChain - bonus per consecutive hit
+            "executioner" => 1.0f, // Handled in ApplyDamage based on opponent health
+            "momentum" => 1.0f, // Handled in ApplyDamage based on consecutive hits
+            "piercing" => 1.0f, // Piercing doesn't modify raw damage, ignores block defense instead
+
+            // Defense traits
+            "fortress" => 1.0f, // Damage reduction handled in ApplyDamage (incoming damage)
+            "anchored" => 1.0f, // Stagger reduction handled in stagger calculation
+            "stalwart" => 1.0f, // Block bonus handled separately in card effect
+
+            // Utility traits
+            "quicktrigger" => 1.0f, // Timing window handled in VoiceCommandManager
+            "regenerate" => 1.0f, // Healing handled per beat
+            "echo" => 1.0f, // Card refresh handled in card consumption logic
+
+            // Legacy (kept for compatibility)
+            "heavy" => 1.10f,
+            "volatile" => 1.10f,
+            "draining" => 1.0f,
+            "chain" => 1.0f,
+            "defensive" => 1.0f,
+            "stunning" => 1.0f,
             _ => 1.0f
         };
     }
@@ -1917,6 +1992,13 @@ public class RhythmRoundManager : NetworkBehaviour
                             {
                                 pc.activeVexCardId = "";
                             }
+                        }
+
+                        // Regenerate trait: heal 4% health every beat
+                        if (!string.IsNullOrEmpty(pc.activeTraitId) && pc.activeTraitId == "regenerate")
+                        {
+                            int healAmount = Mathf.Max(1, Mathf.RoundToInt(pc.CurrentPercentage * 0.04f));
+                            pc.CurrentPercentage -= healAmount; // Reduce percentage = healing
                         }
                     }
                 }
@@ -2310,8 +2392,8 @@ public class RhythmRoundManager : NetworkBehaviour
             GUILayout.EndArea();
         }
 
-        // --- 2. MATCH STATUS (Top Right, clear of overlapping UI) ---
-        GUILayout.BeginArea(new Rect(Screen.width - 280, 100, 260, 280));
+        // --- 2. MATCH STATUS (Left Bottom Corner) ---
+        GUILayout.BeginArea(new Rect(10, Screen.height - 280 - 20, 220, 280));
         GUIStyle matchStyle = new GUIStyle(GUI.skin.box) { fontSize = 16, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleLeft };
         matchStyle.normal.textColor = Color.cyan;
         GUILayout.Label($"ROUND {currentRoundNumber} / 9", matchStyle, GUILayout.Height(30));
@@ -2375,11 +2457,10 @@ public class RhythmRoundManager : NetworkBehaviour
         }
 
         // --- 4. COMBAT LOG (Right Side) ---
-        // x/width aligned with the health bar and enemy-slots panel (Screen.width-420, w=400)
-        // y=175 starts below enemy-slots panel bottom (88+76=164) with an 11px gap
+        // Stacked below Enemy Slots (100+76+4=180), aligned left with Enemy Slots
         if (combatLogs.Count > 0)
         {
-            GUILayout.BeginArea(new Rect(Screen.width - 420, 175, 400, 220));
+            GUILayout.BeginArea(new Rect(Screen.width - 420, 180, 400, 180));
             GUIStyle logStyle = new GUIStyle(GUI.skin.label) { fontSize = 16, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
             GUIStyle boxStyle = new GUIStyle(GUI.skin.box);
             GUILayout.Label("COMBAT LOG", logStyle); GUILayout.Space(5);

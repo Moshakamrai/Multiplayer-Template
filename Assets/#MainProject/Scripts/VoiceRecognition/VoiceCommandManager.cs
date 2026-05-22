@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using Mirror; // REQUIRED for [Command]
+using System.Collections.Generic;
 
 [RequireComponent(typeof(PlayerController), typeof(PlayerCombat), typeof(PlayerEnergy))]
 public class VoiceCommandManager : NetworkBehaviour
@@ -187,13 +188,13 @@ public class VoiceCommandManager : NetworkBehaviour
             else if (word == "flank" || word == "blank" || word == "frank" || GetSimilarity(word, "flank") > 0.75f) { trigger = "Cross"; recognized = true; }
             else if (GetSimilarity(word, "hook") > 0.75f) { trigger = "Hook"; recognized = true; }
             else if (GetSimilarity(word, "block") > 0.75f || GetSimilarity(word, "guard") > 0.75f) { trigger = "Block"; recognized = true; }
-            else if (GetSimilarity(word, "cage") > 0.70f || word == "page" || word == "engage") { trigger = "ParryIntent"; recognized = true; }
+            else if (GetSimilarity(word, "parry") > 0.75f || word == "reflect") { trigger = "ParryIntent"; recognized = true; }
             else if (word == "crush" || word == "crash" || word == "crushing" || word == "crashing" || GetSimilarity(word, "crush") > 0.75f) { trigger = "UnbreakablePunch"; recognized = true; }
             else if (GetSimilarity(word, "left") > 0.75f) { trigger = "Left"; dashDir = Vector3.left; recognized = true; }
             else if (GetSimilarity(word, "right") > 0.75f) { trigger = "Right"; dashDir = Vector3.right; recognized = true; }
             // ── NEW CARDS (Basic) ──
             else if (GetSimilarity(word, "grapple") > 0.75f || word == "grab" || word == "wrap") { trigger = "Grapple"; recognized = true; }
-            else if (GetSimilarity(word, "feint") > 0.70f || word == "faint" || word == "paint") { trigger = "Feint"; recognized = true; }
+            else if (GetSimilarity(word, "fake") > 0.70f || word == "faint" || word == "paint") { trigger = "Fake"; recognized = true; }
             else if (GetSimilarity(word, "clutch") > 0.75f || word == "catch" || word == "crunch") { trigger = "Clutch"; recognized = true; }
             // ── NEW CARDS (Advanced) ──
             else if (GetSimilarity(word, "uppercut") > 0.75f || word == "upper" || word == "cutter") { trigger = "Uppercut"; recognized = true; }
@@ -205,9 +206,10 @@ public class VoiceCommandManager : NetworkBehaviour
             else if (GetSimilarity(word, "reverse") > 0.75f || word == "revert" || word == "reflect") { trigger = "Reverse"; recognized = true; }
             else if (GetSimilarity(word, "trap") > 0.75f || word == "trip" || word == "track") { trigger = "Trap"; recognized = true; }
             else if (GetSimilarity(word, "mirror") > 0.75f || word == "mere" || word == "near") { trigger = "Mirror"; recognized = true; }
+            else if (GetSimilarity(word, "cage") > 0.75f || word == "lock" || word == "seal") { trigger = "Cage"; recognized = true; }
             // Combo card selection — "one/two/three/four"
-            
-           
+
+
 
             if (recognized)
             {

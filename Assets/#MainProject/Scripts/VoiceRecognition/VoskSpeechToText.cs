@@ -203,7 +203,7 @@ public class VoskSpeechToText : MonoBehaviour
         {
             "Jab", "Cross", "Hook", "Block", "Left", "Right",
             "ParryIntent", "UnbreakablePunch",
-            "Grapple", "Feint", "Clutch",
+            "Grapple", "Fake", "Clutch",
             "Uppercut", "Sweep", "Focus", "Taunt",
             "Overclock", "Reverse", "Trap", "Cage", "Mirror"
         } : handTriggers;
@@ -218,10 +218,10 @@ public class VoskSpeechToText : MonoBehaviour
                 case "Block":         words.Add("block"); words.Add("guard"); break;
                 case "Left":          words.Add("left"); break;
                 case "Right":         words.Add("right"); break;
-                case "ParryIntent":   words.Add("cage"); words.Add("page"); words.Add("engage"); break;
+                case "ParryIntent":   words.Add("parry"); words.Add("reflect"); break;
                 case "UnbreakablePunch": words.Add("crush"); words.Add("crash"); words.Add("crushing"); words.Add("crashing"); break;
                 case "Grapple":       words.Add("grapple"); words.Add("grab"); words.Add("wrap"); break;
-                case "Feint":         words.Add("feint"); words.Add("faint"); words.Add("paint"); break;
+                case "Fake":         words.Add("fake"); words.Add("faint"); words.Add("paint"); break;
                 case "Clutch":        words.Add("clutch"); words.Add("catch"); words.Add("crunch"); break;
                 case "Uppercut":      words.Add("uppercut"); words.Add("upper"); words.Add("cutter"); break;
                 case "Sweep":         words.Add("sweep"); words.Add("swipe"); words.Add("sweet"); break;
@@ -230,7 +230,7 @@ public class VoskSpeechToText : MonoBehaviour
                 case "Overclock":     words.Add("overclock"); words.Add("over"); words.Add("clock"); words.Add("overload"); break;
                 case "Reverse":       words.Add("reverse"); words.Add("revert"); words.Add("reflect"); break;
                 case "Trap":          words.Add("trap"); words.Add("trip"); words.Add("track"); break;
-                case "Cage":          words.Add("cage"); words.Add("page"); words.Add("engage"); break;
+                case "Cage":          words.Add("cage"); words.Add("lock"); words.Add("seal"); break;
                 case "Mirror":        words.Add("mirror"); words.Add("mere"); words.Add("near"); break;
             }
         }

@@ -255,77 +255,56 @@ public class ShopUI : MonoBehaviour
 
     private void DrawShopPanels(float startX, float startY, float panelTotalW, float panelH, PlayerInventory inv, ShopPhaseManager spm)
     {
-        float panelW = (panelTotalW - MARGIN * 2) / 3f;
+        // 8 combat cards (left) + 4 traits (right)
+        float panelW = (panelTotalW - MARGIN) / 2f;
         float x1 = startX;
         float x2 = startX + panelW + MARGIN;
-        float x3 = startX + panelW * 2 + MARGIN * 2;
 
         if (spm.CombatShopSlots != null)
-            DrawCombatShopPanel(x1, startY, panelW, panelH, "COMBAT CARDS", new Color(1f, 0.5f, 0.15f), spm.CombatShopSlots, inv);
-        if (spm.VexShopSlots != null)
-            DrawVexShopPanel(x2, startY, panelW, panelH, "VEX CARDS", new Color(0.9f, 0.3f, 1f), spm.VexShopSlots, inv);
+            DrawCombatShopPanel(x1, startY, panelW, panelH, "COMBAT CARDS (8)", new Color(1f, 0.5f, 0.15f), spm.CombatShopSlots, inv, spm);
         if (spm.TraitShopSlots != null)
-            DrawTraitShopPanel(x3, startY, panelW, panelH, "TRAIT CARDS", new Color(0.25f, 0.9f, 0.4f), spm.TraitShopSlots, inv);
+            DrawTraitShopPanel(x2, startY, panelW, panelH, "TRAITS (4)", new Color(0.9f, 0.3f, 1f), spm.TraitShopSlots, inv, spm);
     }
 
-    private void DrawCombatShopPanel(float x, float y, float w, float h, string title, Color accent, IReadOnlyList<CombatCardData> slots, PlayerInventory inv)
+    private void DrawCombatShopPanel(float x, float y, float w, float h, string title, Color accent, IReadOnlyList<CombatCardData> slots, PlayerInventory inv, ShopPhaseManager spm)
     {
         DrawPanelBorder(x, y, w, h, accent);
         DrawSectionHeader(x, y, w, title, accent);
 
         float pad = MARGIN;
         float cardW = w - pad * 2;
-        float cardH = (h - 40f - pad * 5) / 6f;
+        float cardH = (h - 40f - pad * 7) / 8f;
 
-        for (int i = 0; i < 6; i++)
+        for (int i = 0; i < 8; i++)
         {
             float cardY = y + 40f + i * (cardH + pad);
-            bool hasCard = i < slots.Count && slots[i] != null;
+            bool isPurchased = spm.IsCombatSlotPurchased(i);
+            bool hasCard = i < slots.Count && slots[i] != null && !isPurchased;
 
             if (hasCard)
-                DrawCombatCard(x + pad, cardY, cardW, cardH, slots[i], inv, i);
+                DrawCombatCard(x + pad, cardY, cardW, cardH, slots[i], inv, i, spm);
             else
                 DrawEmptySlot(x + pad, cardY, cardW, cardH);
         }
     }
 
-    private void DrawVexShopPanel(float x, float y, float w, float h, string title, Color accent, IReadOnlyList<VexCardData> slots, PlayerInventory inv)
+    private void DrawTraitShopPanel(float x, float y, float w, float h, string title, Color accent, IReadOnlyList<VexCardData> slots, PlayerInventory inv, ShopPhaseManager spm)
     {
         DrawPanelBorder(x, y, w, h, accent);
         DrawSectionHeader(x, y, w, title, accent);
 
         float pad = MARGIN;
         float cardW = w - pad * 2;
-        float cardH = (h - 40f - pad * 2) / 3f;
+        float cardH = (h - 40f - pad * 3) / 4f;
 
-        for (int i = 0; i < 3; i++)
+        for (int i = 0; i < 4; i++)
         {
             float cardY = y + 40f + i * (cardH + pad);
-            bool hasCard = i < slots.Count && slots[i] != null;
+            bool isPurchased = spm.IsTraitSlotPurchased(i);
+            bool hasCard = i < slots.Count && slots[i] != null && !isPurchased;
 
             if (hasCard)
-                DrawVexCard(x + pad, cardY, cardW, cardH, slots[i], inv, i);
-            else
-                DrawEmptySlot(x + pad, cardY, cardW, cardH);
-        }
-    }
-
-    private void DrawTraitShopPanel(float x, float y, float w, float h, string title, Color accent, IReadOnlyList<TraitCardData> slots, PlayerInventory inv)
-    {
-        DrawPanelBorder(x, y, w, h, accent);
-        DrawSectionHeader(x, y, w, title, accent);
-
-        float pad = MARGIN;
-        float cardW = w - pad * 2;
-        float cardH = (h - 40f - pad * 2) / 3f;
-
-        for (int i = 0; i < 3; i++)
-        {
-            float cardY = y + 40f + i * (cardH + pad);
-            bool hasCard = i < slots.Count && slots[i] != null;
-
-            if (hasCard)
-                DrawTraitCard(x + pad, cardY, cardW, cardH, slots[i], inv, i);
+                DrawVexCard(x + pad, cardY, cardW, cardH, slots[i], inv, i, spm);
             else
                 DrawEmptySlot(x + pad, cardY, cardW, cardH);
         }
@@ -342,7 +321,7 @@ public class ShopUI : MonoBehaviour
         _descStyle.alignment = TextAnchor.MiddleLeft;
     }
 
-    private void DrawCombatCard(float x, float y, float w, float h, CombatCardData card, PlayerInventory inv, int slotIndex)
+    private void DrawCombatCard(float x, float y, float w, float h, CombatCardData card, PlayerInventory inv, int slotIndex, ShopPhaseManager spm)
     {
         Rect fullCardRect = new Rect(x, y, w, h);
         bool isHovered = fullCardRect.Contains(Event.current.mousePosition);
@@ -392,6 +371,7 @@ public class ShopUI : MonoBehaviour
         {
             var localPc = GameManager.localPlayer?.GetComponent<PlayerCombat>();
             if (localPc != null) localPc.CmdBuyCombatCard(slotIndex);
+            spm.MarkCombatSlotPurchased(slotIndex);
         }
         GUI.color = Color.white;
 
@@ -405,7 +385,7 @@ public class ShopUI : MonoBehaviour
         }
     }
 
-    private void DrawVexCard(float x, float y, float w, float h, VexCardData card, PlayerInventory inv, int slotIndex)
+    private void DrawVexCard(float x, float y, float w, float h, VexCardData card, PlayerInventory inv, int slotIndex, ShopPhaseManager spm)
     {
         Rect fullCardRect = new Rect(x, y, w, h);
         bool isHovered = fullCardRect.Contains(Event.current.mousePosition);
@@ -452,72 +432,13 @@ public class ShopUI : MonoBehaviour
         {
             var localPc = GameManager.localPlayer?.GetComponent<PlayerCombat>();
             if (localPc != null) localPc.CmdBuyVexCard(slotIndex);
+            spm.MarkTraitSlotPurchased(slotIndex);
         }
         GUI.color = Color.white;
 
         if (isHovered)
         {
             _hoveredCardId = card.cardId;
-            _tooltipPos = Event.current.mousePosition;
-            _tooltipTitle = card.displayName;
-            _tooltipText = $"{card.effect}\n{card.description}";
-            _hasTooltip = true;
-        }
-    }
-
-    private void DrawTraitCard(float x, float y, float w, float h, TraitCardData card, PlayerInventory inv, int slotIndex)
-    {
-        Rect fullCardRect = new Rect(x, y, w, h);
-        bool isHovered = fullCardRect.Contains(Event.current.mousePosition);
-
-        // Background
-        GUI.color = isHovered ? new Color(0.05f, 0.15f, 0.08f) : new Color(0.05f, 0.06f, 0.12f);
-        GUI.DrawTexture(fullCardRect, _whiteTex);
-
-        // Enhanced glow border on hover
-        if (isHovered)
-        {
-            GUI.color = new Color(0.25f, 1f, 0.4f, 0.8f); // Green glow
-            GUI.DrawTexture(new Rect(x - 2, y - 2, w + 4, 4f), _whiteTex);
-            GUI.DrawTexture(new Rect(x - 2, y + h - 2, w + 4, 4f), _whiteTex);
-            GUI.DrawTexture(new Rect(x - 2, y, 4f, h), _whiteTex);
-            GUI.DrawTexture(new Rect(x + w - 2, y, 4f, h), _whiteTex);
-        }
-        else
-        {
-            GUI.color = new Color(0.25f, 0.9f, 0.4f);
-            GUI.DrawTexture(new Rect(x, y, w, 2f), _whiteTex);
-            GUI.DrawTexture(new Rect(x, y + h - 2f, w, 2f), _whiteTex);
-        }
-
-        // Card name with glow
-        GUIStyle nameStyle = new GUIStyle(_cardNameStyle);
-        Color nameColor = isHovered ? CyberpunkGUIUtils.NEON_GREEN : Color.white;
-        CyberpunkGUIUtils.DrawGlowText(new Rect(x + 8f, y + 4f, w - 70f, 18f), card.displayName.ToUpper(), nameColor, nameStyle, nameColor);
-
-        // Effect and description with better visibility
-        _descStyle.fontSize = 10;
-        string fullDesc = $"{card.effect}\n{card.description}";
-        GUI.color = isHovered ? new Color(1f, 1f, 1f, 0.95f) : new Color(0.9f, 0.9f, 0.9f, 0.85f);
-        GUI.Label(new Rect(x + 8f, y + 24f, w - 16f, h - 54f), fullDesc, _descStyle);
-
-        // Cost with glow
-        GUIStyle costStyle = new GUIStyle(_costStyle);
-        CyberpunkGUIUtils.DrawGlowText(new Rect(x + 8f, y + h - 22f, 50f, 18f), $"{card.cost} CR", CyberpunkGUIUtils.NEON_YELLOW, costStyle, CyberpunkGUIUtils.NEON_YELLOW);
-
-        // Buy button with hover effect
-        Rect btnRect = new Rect(x + w - 55f, y + h - 24f, 50f, 22f);
-        GUI.color = isHovered ? new Color(0.2f, 0.9f, 0.4f, 0.9f) : new Color(0.15f, 0.7f, 0.3f, 0.8f);
-        if (GUI.Button(btnRect, "BUY", _buttonStyle))
-        {
-            var localPc = GameManager.localPlayer?.GetComponent<PlayerCombat>();
-            if (localPc != null) localPc.CmdBuyTraitCard(slotIndex);
-        }
-        GUI.color = Color.white;
-
-        if (isHovered)
-        {
-            _hoveredCardId = card.traitId;
             _tooltipPos = Event.current.mousePosition;
             _tooltipTitle = card.displayName;
             _tooltipText = $"{card.effect}\n{card.description}";

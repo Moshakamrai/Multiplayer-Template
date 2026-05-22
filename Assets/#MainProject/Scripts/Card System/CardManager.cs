@@ -65,6 +65,10 @@ public class CardManager : NetworkBehaviour
     private Color  _slotBonusColor = Color.white;
     private float  _slotBonusFade  = 0f;
 
+    // Card selection animation
+    private string _selectedCardTrigger = "";
+    private float  _selectedCardAnimTimer = 0f;
+
     // Single-mode card sizes
     const float nWidth  = 170f;
     const float nHeight = 200f;
@@ -237,7 +241,21 @@ public class CardManager : NetworkBehaviour
     [Server]
     public void AdvanceCooldown()
     {
-        blockedTrigger  = justUsedTrigger;
+        // Echo trait: 25% chance card refreshes and doesn't get blocked
+        PlayerCombat pc = GetComponent<PlayerCombat>();
+        bool echoRefreshed = false;
+        if (pc != null && !string.IsNullOrEmpty(pc.activeTraitId) && pc.activeTraitId == "echo")
+        {
+            if (Random.value < 0.25f) // 25% chance
+            {
+                echoRefreshed = true;
+            }
+        }
+
+        if (!echoRefreshed)
+        {
+            blockedTrigger = justUsedTrigger;
+        }
         justUsedTrigger = "";
     }
 
@@ -385,6 +403,18 @@ public class CardManager : NetworkBehaviour
         UpdateAvailableCardsFromCombat();
 
         if (_myPCombat == null) _myPCombat = GetComponent<PlayerCombat>();
+
+        // Track selected card for animation
+        string currentPendingAttack = _myPCombat?.PendingAttackTrigger ?? "";
+        if (currentPendingAttack != _selectedCardTrigger)
+        {
+            _selectedCardTrigger = currentPendingAttack;
+            _selectedCardAnimTimer = 0f; // Reset animation timer on new selection
+        }
+        if (!string.IsNullOrEmpty(_selectedCardTrigger))
+        {
+            _selectedCardAnimTimer += Time.deltaTime;
+        }
 
         var  rmm         = RhythmRoundManager.Instance;
         bool isRhythm    = rmm != null && rmm.isRoundActive;
@@ -772,6 +802,32 @@ public class CardManager : NetworkBehaviour
     private void DrawCard(Rect r, CombatCard card, bool isRhythm,
                           float approachFrac, bool isShout, float pulse, float alpha, bool isBlocked = false)
     {
+        // Card selection animation (subtle scale + glow + move up)
+        bool isSelected = (card.triggerName == _selectedCardTrigger && !string.IsNullOrEmpty(_selectedCardTrigger));
+        if (isSelected)
+        {
+            float animDuration = 0.4f;
+            float t = Mathf.Clamp01(_selectedCardAnimTimer / animDuration);
+            float easeOutCubic = 1f - Mathf.Pow(1f - t, 3f); // Smooth easing
+
+            // Subtle scale up (1.0 → 1.08)
+            float scale = Mathf.Lerp(1f, 1.08f, easeOutCubic);
+
+            // Move up on Y axis (subtle lift)
+            float moveUpDistance = 12f;
+            float moveUp = moveUpDistance * easeOutCubic;
+
+            // Increase alpha for glow effect
+            alpha = Mathf.Lerp(alpha, 1f, easeOutCubic * 0.4f);
+
+            // Apply scale by adjusting rect (scale from center)
+            float centerX = r.x + r.width / 2f;
+            float centerY = r.y + r.height / 2f;
+            float newWidth = r.width * scale;
+            float newHeight = r.height * scale;
+            r = new Rect(centerX - newWidth / 2f, centerY - newHeight / 2f - moveUp, newWidth, newHeight);
+        }
+
         // Background
         Color bgBase = new Color(0.04f, 0.04f, 0.09f, 0.90f * alpha);
         if (isShout)
@@ -881,26 +937,32 @@ public class CardManager : NetworkBehaviour
             CyberpunkGUIUtils.DrawGlowText(new Rect(r.x, r.y + r.height - 30f, r.width, 24f), stateText, stateCol, _statusStyle, glowCol);
         }
 
-        // Blocked overlay — drawn last so it sits on top of everything
+        // Selection glow effect for picked cards
+        if (isSelected)
+        {
+            float glowPulse = (Mathf.Sin(Time.time * 6f) + 1f) * 0.5f;
+            float glowAlpha = Mathf.Lerp(0.3f, 0.8f, glowPulse);
+
+            // Outer glow border (cyan)
+            GUI.color = new Color(0f, 1f, 1f, glowAlpha * 0.7f);
+            GUI.DrawTexture(new Rect(r.x - 3f, r.y - 3f, r.width + 6f, 3f), _whiteTex); // top
+            GUI.DrawTexture(new Rect(r.x - 3f, r.y + r.height, r.width + 6f, 3f), _whiteTex); // bottom
+            GUI.DrawTexture(new Rect(r.x - 3f, r.y, 3f, r.height), _whiteTex); // left
+            GUI.DrawTexture(new Rect(r.x + r.width, r.y, 3f, r.height), _whiteTex); // right
+
+            // Corner spark effect (white)
+            float sparkSize = 6f;
+            GUI.color = Color.white;
+            GUI.DrawTexture(new Rect(r.x - 3f, r.y - 3f, sparkSize, sparkSize), _whiteTex);
+            GUI.DrawTexture(new Rect(r.x + r.width - sparkSize + 3f, r.y - 3f, sparkSize, sparkSize), _whiteTex);
+            GUI.DrawTexture(new Rect(r.x - 3f, r.y + r.height - sparkSize + 3f, sparkSize, sparkSize), _whiteTex);
+            GUI.DrawTexture(new Rect(r.x + r.width - sparkSize + 3f, r.y + r.height - sparkSize + 3f, sparkSize, sparkSize), _whiteTex);
+        }
+
+        // Electric block effect for locked/cooldown cards
         if (isBlocked)
         {
-            GUI.color = new Color(0f, 0f, 0f, 0.72f);
-            GUI.DrawTexture(r, _whiteTex);
-
-            // Diagonal cross lines
-            float cx = r.x + r.width  / 2f;
-            float cy = r.y + r.height / 2f;
-            float lineLen = Mathf.Min(r.width, r.height) * 0.38f;
-            float thick   = 3f;
-            GUI.color = new Color(0.9f, 0.15f, 0.15f, 0.85f);
-            GUI.DrawTexture(new Rect(cx - lineLen, cy - thick / 2f, lineLen * 2f, thick), _whiteTex);
-            GUI.DrawTexture(new Rect(cx - thick / 2f, cy - lineLen, thick, lineLen * 2f), _whiteTex);
-
-            GUIStyle coolStyle = new GUIStyle(GUI.skin.label)
-                { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 13 };
-            coolStyle.normal.textColor = new Color(1f, 0.25f, 0.25f, 0.95f);
-            GUI.color = Color.white;
-            GUI.Label(new Rect(r.x, r.y + r.height - 38f, r.width, 22f), "COOLDOWN", coolStyle);
+            CyberpunkGUIUtils.DrawElectricBlockEffect(r);
         }
     }
 
@@ -925,8 +987,8 @@ public class CardManager : NetworkBehaviour
         float pipGap = 7f;
         float panelW = 400f;
         float panelH = 76f;
-        float px = Screen.width - panelW - 20f;
-        float py = 88f;
+        float px = Screen.width - 420f;
+        float py = 100f;
 
         GUI.color = new Color(0f, 0f, 0f, 0.72f);
         GUI.DrawTexture(new Rect(px, py, panelW, panelH), _whiteTex);

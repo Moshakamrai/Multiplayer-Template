@@ -54,7 +54,7 @@ public class BotController : NetworkBehaviour
         var hasCard = new System.Collections.Generic.Dictionary<string, bool>();
         foreach (var c in new[] { "Jab","Cross","Hook","Block","Left","Right",
                                    "UnbreakablePunch","ParryIntent",
-                                   "Grapple","Feint","Clutch",
+                                   "Grapple","Fake","Clutch",
                                    "Uppercut","Sweep","Focus","Taunt",
                                    "Overclock","Reverse","Trap","Cage","Mirror" })
             hasCard[c] = avail.Contains(c);

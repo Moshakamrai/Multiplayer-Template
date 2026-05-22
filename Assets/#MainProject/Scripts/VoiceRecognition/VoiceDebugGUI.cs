@@ -30,7 +30,7 @@ public class VoiceDebugGUI : MonoBehaviour
         if (Similarity(word, "cage")  > 0.70f || word == "page" || word == "engage") return "→ PARRY / CAGE";
         if (word == "crush" || word == "crash" || word == "crushing" || word == "crashing" || Similarity(word, "crush") > 0.75f) return "→ BOOM";
         if (Similarity(word, "grapple") > 0.75f || word == "grab" || word == "wrap") return "→ GRAPPLE";
-        if (Similarity(word, "feint") > 0.70f || word == "faint" || word == "paint") return "→ FEINT";
+        if (Similarity(word, "fake") > 0.70f || word == "faint" || word == "paint") return "→ FEINT";
         if (Similarity(word, "clutch") > 0.75f || word == "catch" || word == "crunch") return "→ CLUTCH";
 
         // ── ADVANCED CARDS (4) ──

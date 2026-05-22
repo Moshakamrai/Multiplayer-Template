@@ -28,7 +28,7 @@ public class VoiceDebugger : MonoBehaviour
         // Basic cards
         "punch", "jab", "flank", "frank", "blank", "hook", "block", "guard",
         "cage", "page", "engage", "crush", "crash", "crushing", "crashing",
-        "left", "right", "grapple", "grab", "wrap", "feint", "faint", "paint",
+        "left", "right", "grapple", "grab", "wrap", "fake", "faint", "paint",
         "clutch", "catch", "crunch",
         // Advanced cards
         "uppercut", "upper", "cutter", "sweep", "swipe", "sweet",

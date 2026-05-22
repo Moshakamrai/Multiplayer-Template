@@ -60,7 +60,8 @@ public class PlayerInventory : MonoBehaviour
         equippedCombatCards.Clear();
         foreach (var id in cardIds)
         {
-            if (ownedCombatCards.Contains(id) && equippedCombatCards.Count < 10)
+            // Include both owned combat cards and vex cards (player explicitly selected them)
+            if ((ownedCombatCards.Contains(id) || ownedVexCards.Contains(id)) && equippedCombatCards.Count < 8)
                 equippedCombatCards.Add(id);
         }
     }

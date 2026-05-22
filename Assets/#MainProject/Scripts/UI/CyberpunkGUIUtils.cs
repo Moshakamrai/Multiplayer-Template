@@ -93,6 +93,60 @@ public static class CyberpunkGUIUtils
     }
 
     /// <summary>
+    /// Draw electric glitch effect overlay on a card (for blocked/cooldown state).
+    /// </summary>
+    public static void DrawElectricBlockEffect(Rect r)
+    {
+        EnsureWhiteTexture();
+
+        // Dark semi-transparent overlay
+        GUI.color = new Color(0f, 0.1f, 0.15f, 0.65f);
+        GUI.DrawTexture(r, _whiteTex);
+
+        // Animated electric glitch lines
+        float glitchPhase = Time.time * 8f;
+        int lineCount = 5;
+        for (int i = 0; i < lineCount; i++)
+        {
+            float yOffset = Mathf.Sin(glitchPhase + i * 0.5f) * 8f;
+            float randomX = Mathf.PerlinNoise(glitchPhase + i, 0) * 20f - 10f;
+            float lineY = r.y + (r.height / lineCount) * i + yOffset;
+            float lineX = r.x + randomX;
+            float lineWidth = r.width - Mathf.Abs(randomX) * 2f;
+
+            // Electric cyan/white color with flickering
+            float flicker = Mathf.Abs(Mathf.Sin(glitchPhase * 3f + i));
+            GUI.color = Color.Lerp(
+                new Color(0f, 1f, 1f, 0.4f),
+                new Color(1f, 1f, 1f, 0.8f),
+                flicker
+            );
+            GUI.DrawTexture(new Rect(lineX, lineY, lineWidth, 2f), _whiteTex);
+        }
+
+        // Corner spark effects
+        GUI.color = new Color(0f, 1f, 1f, 0.6f);
+        float sparkSize = 4f;
+        float sparkFlash = (Mathf.Sin(Time.time * 12f) + 1f) * 0.5f;
+        GUI.color = Color.Lerp(new Color(0f, 0.8f, 1f, 0.3f), new Color(0f, 1f, 1f, 0.8f), sparkFlash);
+        GUI.DrawTexture(new Rect(r.x + 4f, r.y + 4f, sparkSize, sparkSize), _whiteTex);
+        GUI.DrawTexture(new Rect(r.x + r.width - sparkSize - 4f, r.y + 4f, sparkSize, sparkSize), _whiteTex);
+        GUI.DrawTexture(new Rect(r.x + 4f, r.y + r.height - sparkSize - 4f, sparkSize, sparkSize), _whiteTex);
+        GUI.DrawTexture(new Rect(r.x + r.width - sparkSize - 4f, r.y + r.height - sparkSize - 4f, sparkSize, sparkSize), _whiteTex);
+
+        // LOCKED text
+        GUIStyle lockedStyle = new GUIStyle(GUI.skin.label)
+            { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 13 };
+        lockedStyle.normal.textColor = Color.Lerp(
+            new Color(0f, 1f, 1f, 0.6f),
+            new Color(1f, 1f, 1f, 0.9f),
+            sparkFlash
+        );
+        GUI.color = Color.white;
+        GUI.Label(new Rect(r.x, r.y + r.height - 38f, r.width, 22f), "⚡ LOCKED ⚡", lockedStyle);
+    }
+
+    /// <summary>
     /// Create a standard cyberpunk label style with bold font.
     /// </summary>
     public static GUIStyle CreateCyberpunkStyle(TextAnchor alignment = TextAnchor.MiddleCenter, int fontSize = 14)

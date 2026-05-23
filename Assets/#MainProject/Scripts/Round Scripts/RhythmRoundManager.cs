@@ -55,7 +55,8 @@ public class RhythmRoundManager : NetworkBehaviour
         public string p2Move;
         public int p2State;
         public int p2Damage;
-        public float timeAdded; // NEW: Tracks when this log was created
+        public string reason;
+        public float timeAdded;
     }
     private List<CombatLogEntry> combatLogs = new List<CombatLogEntry>();
 
@@ -1024,7 +1025,7 @@ public class RhythmRoundManager : NetworkBehaviour
                 PlayHitParticle(p2.transform.position);
                 p2.TakeDamage(dmgFrom1, (p2.transform.position - p1.transform.position).normalized);
                 RpcLogCombatTrade(pc1.PlayerName, FormatMove(m1), 1, 0,
-                                  pc2.PlayerName, FormatMove(m2), -1, dmgFrom1);
+                                  pc2.PlayerName, FormatMove(m2), -1, dmgFrom1, "Better timing wins");
             }
             else if (p2Off < p1Off && dmgFrom2 > 0)
             {
@@ -1034,13 +1035,13 @@ public class RhythmRoundManager : NetworkBehaviour
                 PlayHitParticle(p1.transform.position);
                 p1.TakeDamage(dmgFrom2, (p1.transform.position - p2.transform.position).normalized);
                 RpcLogCombatTrade(pc1.PlayerName, FormatMove(m1), -1, dmgFrom2,
-                                  pc2.PlayerName, FormatMove(m2), 1, 0);
+                                  pc2.PlayerName, FormatMove(m2), 1, 0, "Better timing wins");
             }
             else
             {
                 // Tie or both missed — no damage
                 RpcLogCombatTrade(pc1.PlayerName, FormatMove(m1), 0, 0,
-                                  pc2.PlayerName, FormatMove(m2), 0, 0);
+                                  pc2.PlayerName, FormatMove(m2), 0, 0, "Timing tied");
             }
             return;
         }
@@ -1063,8 +1064,8 @@ public class RhythmRoundManager : NetworkBehaviour
         bool p2Protected = IsProtected(m2.attack);
 
         // --- INTERRUPTION LOGIC (expanded RPS for all 20 cards) ---
-        bool p1Interrupted = !p1Protected && (p2WinsTie || DoesInterrupt(m2.attack, m1.attack));
-        bool p2Interrupted = !p2Protected && (p1WinsTie || DoesInterrupt(m1.attack, m2.attack));
+        bool p1Interrupted = !p1Protected && (p2WinsTie || DoesInterrupt(m2.attack, m1.attack, out _));
+        bool p2Interrupted = !p2Protected && (p1WinsTie || DoesInterrupt(m1.attack, m2.attack, out _));
 
         int p1DamageTaken = 0;
         int p2DamageTaken = 0;
@@ -1074,8 +1075,8 @@ public class RhythmRoundManager : NetworkBehaviour
         if (p2Interrupted) { p2.TakeDamage(5); p2DamageTaken += 5; }
 
         // PROCESS ACTUAL HITS
-        int p1Result = ProcessDamage(p1, m1, p2, m2, p1Interrupted, out int dmgToP2);
-        int p2Result = ProcessDamage(p2, m2, p1, m1, p2Interrupted, out int dmgToP1);
+        int p1Result = ProcessDamage(p1, m1, p2, m2, p1Interrupted, out int dmgToP2, out string p1Reason);
+        int p2Result = ProcessDamage(p2, m2, p1, m1, p2Interrupted, out int dmgToP1, out string p2Reason);
 
         p2DamageTaken += dmgToP2;
         p1DamageTaken += dmgToP1;
@@ -1087,7 +1088,8 @@ public class RhythmRoundManager : NetworkBehaviour
         int p1State = (p1Result == 1 || p1Result == -1) ? 1 : (p1DamageTaken > 0 ? -1 : 0);
         int p2State = (p2Result == 1 || p2Result == -1) ? 1 : (p2DamageTaken > 0 ? -1 : 0);
 
-        RpcLogCombatTrade(pc1.PlayerName, FormatMove(m1), p1State, p1DamageTaken, pc2.PlayerName, FormatMove(m2), p2State, p2DamageTaken);
+        string tradeReason = !string.IsNullOrEmpty(p1Reason) ? p1Reason : p2Reason;
+        RpcLogCombatTrade(pc1.PlayerName, FormatMove(m1), p1State, p1DamageTaken, pc2.PlayerName, FormatMove(m2), p2State, p2DamageTaken, tradeReason);
 
         // --- COUNTER BONUS: winning a trade gives +1 slot of the opposite type ---
         CardManager cm1 = pc1.GetComponent<CardManager>();
@@ -1115,9 +1117,10 @@ public class RhythmRoundManager : NetworkBehaviour
     }
 
     [Server]
-    private int ProcessDamage(PlayerCombat attacker, PlayerCombat.RhythmAction move, PlayerCombat defender, PlayerCombat.RhythmAction defMove, bool isInterrupted, out int damageDealt)
+    private int ProcessDamage(PlayerCombat attacker, PlayerCombat.RhythmAction move, PlayerCombat defender, PlayerCombat.RhythmAction defMove, bool isInterrupted, out int damageDealt, out string tradeReason)
     {
         damageDealt = 0;
+        tradeReason = "";
         if (string.IsNullOrEmpty(move.attack)) return 0;
         if (attacker.IsStaggered) return 0;
 
@@ -1129,7 +1132,7 @@ public class RhythmRoundManager : NetworkBehaviour
         if (!string.IsNullOrEmpty(def) && IsVexCard(def))
         {
             defender.activeVexCardId = def.ToLower();
-            defender.VexCardBeatsRemaining = 1; // lasts 1 beat, will be reset next beat
+            defender.VexCardBeatsRemaining = 1;
         }
 
         // --- HANDLE CARD EFFECTS THAT PERSIST FROM LAST TURN ---
@@ -1139,12 +1142,12 @@ public class RhythmRoundManager : NetworkBehaviour
             if (atk == "Left" || atk == "Right" || atk == "Block")
             {
                 int trapDmg = 15;
-                // Trickster doubles Trap damage
                 if (!string.IsNullOrEmpty(attacker.activeVexCardId) && attacker.activeVexCardId == "trickster")
                     trapDmg *= 2;
                 trapDmg = ApplyTraitMultiplier(trapDmg);
                 defender.TakeDamage(trapDmg, isOpponentDamage: true);
                 damageDealt = trapDmg;
+                tradeReason = "Trap sprung";
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Hurt");
                 PlayHitParticle(defender.transform.position);
                 defender.HasPendingTrap = false;
@@ -1157,12 +1160,12 @@ public class RhythmRoundManager : NetworkBehaviour
         if (defender.HasPendingCage && !defenderStaggered && !string.IsNullOrEmpty(atk))
         {
             int cageDmg = 10;
-            // Trickster doubles Cage damage
             if (!string.IsNullOrEmpty(attacker.activeVexCardId) && attacker.activeVexCardId == "trickster")
                 cageDmg *= 2;
             cageDmg = ApplyTraitMultiplier(cageDmg);
             defender.TakeDamage(cageDmg, isOpponentDamage: true);
             damageDealt = cageDmg;
+            tradeReason = "Cage punished";
             if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Hurt");
             PlayHitParticle(defender.transform.position);
             defender.HasPendingCage = false;
@@ -1175,12 +1178,10 @@ public class RhythmRoundManager : NetworkBehaviour
         {
             float fSpike = attacker.lastVocalSpikeTime;
             float offset = Mathf.Abs(GetNextBeatTime() - fSpike);
-            if (fSpike > 0 && offset <= 0.3f) // at least good timing
+            if (fSpike > 0 && offset <= 0.3f)
             {
-                // Fake succeeds — bypass all defenses
                 if (attacker.connectionToClient != null) attacker.TargetPlaySuccessSound("Attack");
                 int fakeDmg = 5;
-                // Trickster doubles Fake damage
                 if (!string.IsNullOrEmpty(attacker.activeVexCardId) && attacker.activeVexCardId == "trickster")
                     fakeDmg *= 2;
                 fakeDmg = ApplyTraitMultiplier(fakeDmg);
@@ -1189,9 +1190,10 @@ public class RhythmRoundManager : NetworkBehaviour
                 Vector3 dir = (defender.transform.position - attacker.transform.position).normalized;
                 defender.TakeDamage(fakeDmg, dir, isOpponentDamage: true);
                 damageDealt = fakeDmg;
+                tradeReason = "Fake slipped through";
                 return 1;
             }
-            return 0; // Fake fails
+            return 0;
         }
 
         // Mirror: returns damage +15% bonus
@@ -1204,15 +1206,16 @@ public class RhythmRoundManager : NetworkBehaviour
             Vector3 kbDir = (attacker.transform.position - defender.transform.position).normalized;
             attacker.TakeDamage(reflectedDmg, kbDir);
             defender.HasMirrorBuff = false;
+            tradeReason = "Mirror returned the hit";
             return -1;
         }
 
-        // ParryIntent: reflects damage with perfect timing
+        // ParryIntent: full reflect on excellent timing (≤0.30s), 50% block on good timing (≤0.45s)
         if (!defenderStaggered && def == "ParryIntent")
         {
             float pSpike = defender.lastVocalSpikeTime;
             float offset = Mathf.Abs(GetNextBeatTime() - pSpike);
-            if (pSpike > 0 && offset <= 0.15f) // perfect timing
+            if (pSpike > 0 && offset <= 0.30f)
             {
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Parry");
                 PlayHitParticle(defender.transform.position);
@@ -1220,7 +1223,21 @@ public class RhythmRoundManager : NetworkBehaviour
                 int reflectedDmg = ApplyTraitMultiplier(Mathf.RoundToInt(baseDmg * 1.1f));
                 Vector3 parryDir = (attacker.transform.position - defender.transform.position).normalized;
                 attacker.TakeDamage(reflectedDmg, parryDir);
+                tradeReason = "Reflect punished the attack";
                 return -1;
+            }
+            else if (pSpike > 0 && offset <= 0.45f)
+            {
+                // Good timing — block 50% damage, no reflect
+                if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Block");
+                PlayHitParticle(defender.transform.position);
+                int baseDmg = GetBaseDamage(atk);
+                int partialDmg = ApplyTraitMultiplier(Mathf.RoundToInt(baseDmg * 0.5f));
+                Vector3 parryDir = (attacker.transform.position - defender.transform.position).normalized;
+                defender.TakeDamage(partialDmg, parryDir, isOpponentDamage: true);
+                damageDealt = partialDmg;
+                tradeReason = "Parry deflected half";
+                return 1;
             }
         }
 
@@ -1232,26 +1249,26 @@ public class RhythmRoundManager : NetworkBehaviour
             int baseDmg = GetBaseDamage(atk);
             Vector3 revDir = (attacker.transform.position - defender.transform.position).normalized;
 
-            if (rSpike > 0 && offset <= 0.3f) // good or excellent timing
+            if (rSpike > 0 && offset <= 0.3f)
             {
-                // Success: negate and return damage
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Parry");
                 PlayHitParticle(defender.transform.position);
                 int returnDmg = ApplyTraitMultiplier(baseDmg);
                 attacker.TakeDamage(returnDmg, revDir);
+                tradeReason = "Reverse countered";
                 return -1;
             }
-            else // bad timing
+            else
             {
-                // Failure: take 50% MORE damage
                 int failedReverseDmg = ApplyTraitMultiplier(Mathf.RoundToInt(baseDmg * 1.5f));
                 defender.TakeDamage(failedReverseDmg, revDir);
                 damageDealt = failedReverseDmg;
+                tradeReason = "Reverse mistimed — took extra damage";
                 return 1;
             }
         }
 
-        // Clutch: HIGH RISK — nullify heavy attack on perfect timing ±120% self-damage
+        // Clutch: perfect (≤0.15s) = nullify + reflect; good (≤0.30s) = full block; miss = self-damage
         if (!defenderStaggered && def == "Clutch")
         {
             float cSpike = defender.lastVocalSpikeTime;
@@ -1259,21 +1276,31 @@ public class RhythmRoundManager : NetworkBehaviour
             bool isHeavy = (atk == "UnbreakablePunch" || atk == "Hook" || atk == "Overclock");
             if (cSpike > 0 && offset <= 0.15f && isHeavy)
             {
-                // Perfect clutch — nullify and reflect half damage
+                // Perfect clutch — nullify and reflect
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Parry");
                 PlayHitParticle(defender.transform.position);
                 int baseDmg = GetBaseDamage(atk);
                 int clutchReflect = ApplyTraitMultiplier(Mathf.RoundToInt(baseDmg * 0.5f));
                 Vector3 clutchDir = (attacker.transform.position - defender.transform.position).normalized;
                 attacker.TakeDamage(clutchReflect, clutchDir);
+                tradeReason = "CLUTCH! Perfect counter";
                 return -1;
+            }
+            else if (cSpike > 0 && offset <= 0.30f && isHeavy)
+            {
+                // Good clutch — full block, no reflect, no self-damage
+                if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Block");
+                PlayHitParticle(defender.transform.position);
+                tradeReason = "Clutch held the line";
+                return 0;
             }
             else
             {
-                // Failed clutch — self-damage 10%
+                // Failed clutch — self-damage
                 int selfDmg = ApplyTraitMultiplier(10);
                 defender.TakeDamage(selfDmg);
                 damageDealt = selfDmg;
+                tradeReason = "Clutch mistimed — self-damage";
                 return 0;
             }
         }
@@ -1402,15 +1429,23 @@ public class RhythmRoundManager : NetworkBehaviour
         bool hits = false;
         if (defenderStaggered)
         {
-            hits = true; // Staggered — all defenses down
+            hits = true;
+            tradeReason = $"{atk} hit staggered opponent";
         }
         else if (isInterrupted && !IsProtected(atk))
         {
             hits = false;
+            tradeReason = $"{atk} was interrupted";
         }
         else
         {
             hits = EvaluateHit(atk, def, moveSuccessful);
+            if (!hits)
+            {
+                if (moveSuccessful) tradeReason = "Dodge evaded the strike";
+                else if (blockMitigation > 0f) tradeReason = "Block absorbed the hit";
+                else tradeReason = $"{atk} whiffed";
+            }
         }
 
         // --- 4. APPLY DAMAGE ---
@@ -1418,6 +1453,8 @@ public class RhythmRoundManager : NetworkBehaviour
         {
             float mitigMult = defenderStaggered ? 1f : (1f - blockMitigation);
             damageDealt = Mathf.RoundToInt(finalDmg * mitigMult);
+            if (blockMitigation > 0f) tradeReason = $"{atk} chipped through Block";
+            else tradeReason = $"{atk} connected";
 
             // Glass vex card: takes 20% LESS damage (opposite of striker - high risk high reward)
             if (!string.IsNullOrEmpty(defender.activeVexCardId) && defender.activeVexCardId == "glass")
@@ -1688,60 +1725,54 @@ public class RhythmRoundManager : NetworkBehaviour
     }
 
     // Rock-paper-scissors interruption: does attacker interrupt defender?
-    private bool DoesInterrupt(string attackerMove, string defenderMove)
+    private bool DoesInterrupt(string attackerMove, string defenderMove, out string reason)
     {
+        reason = "";
         if (string.IsNullOrEmpty(attackerMove) || string.IsNullOrEmpty(defenderMove)) return false;
 
         // --- ATTACK vs ATTACK RPS ---
-        // Jab beats Cross
-        if (attackerMove == "Jab" && defenderMove == "Cross") return true;
-        // Cross beats Hook
-        if (attackerMove == "Cross" && defenderMove == "Hook") return true;
-        // Hook beats Jab
-        if (attackerMove == "Hook" && defenderMove == "Jab") return true;
-        // Boom (UnbreakablePunch) beats all attacks
-        if (attackerMove == "UnbreakablePunch" && (defenderMove == "Jab" || defenderMove == "Cross" || defenderMove == "Hook")) return true;
-
-        // --- ATTACK vs DEFENSE ---
-        // Grapple beats Block/Dodge (no interrupts, handled in EvaluateHit)
+        if (attackerMove == "Jab" && defenderMove == "Cross") { reason = "Jab outraced Cross"; return true; }
+        if (attackerMove == "Cross" && defenderMove == "Hook") { reason = "Cross outranged Hook"; return true; }
+        if (attackerMove == "Hook" && defenderMove == "Jab") { reason = "Hook overpowered Jab"; return true; }
+        if (attackerMove == "UnbreakablePunch" && (defenderMove == "Jab" || defenderMove == "Cross" || defenderMove == "Hook"))
+            { reason = "BOOM crushes everything"; return true; }
 
         // Fake beats ALL defense cards
         if (attackerMove == "Fake" && IsDefenseMove(defenderMove))
-            return true;
+            { reason = "Fake slipped through defense"; return true; }
 
         // Uppercut beats Dodge and Grapple
         if (attackerMove == "Uppercut" && (defenderMove == "Left" || defenderMove == "Right" || defenderMove == "Grapple"))
-            return true;
+            { reason = "Uppercut caught the dodge"; return true; }
 
-        // Sweep beats Block (plus loses to Dodge/Cross handled in EvaluateHit)
+        // Sweep beats Block
         if (attackerMove == "Sweep" && defenderMove == "Block")
-            return true;
+            { reason = "Sweep went under Block"; return true; }
 
-        // --- DEFENSE vs ATTACK (attacks that interrupt defenses) ---
         // Jab interrupts Grapple
         if (attackerMove == "Jab" && defenderMove == "Grapple")
-            return true;
+            { reason = "Jab stuffed the Grapple"; return true; }
 
         // Cross interrupts Grapple and Sweep
         if (attackerMove == "Cross" && (defenderMove == "Grapple" || defenderMove == "Sweep"))
-            return true;
+            { reason = "Cross interrupted"; return true; }
 
         // Hook interrupts Grapple
         if (attackerMove == "Hook" && defenderMove == "Grapple")
-            return true;
+            { reason = "Hook interrupted Grapple"; return true; }
 
         // All attacks interrupt Fake
         if (defenderMove == "Fake" && CardManager.IsAttackTrigger(attackerMove))
-            return true;
+            { reason = "Attack punished Fake"; return true; }
 
         // Boom beats Focus
         if (attackerMove == "UnbreakablePunch" && defenderMove == "Focus")
-            return true;
+            { reason = "BOOM broke Focus"; return true; }
 
         // All attacks interrupt Focus, Taunt, Trap, Cage (they're passive)
         if ((defenderMove == "Focus" || defenderMove == "Taunt" || defenderMove == "Trap" || defenderMove == "Cage")
             && (CardManager.IsAttackTrigger(attackerMove) && attackerMove != "Fake"))
-            return true;
+            { reason = $"Attack hit during {defenderMove}"; return true; }
 
         return false;
     }
@@ -1887,7 +1918,7 @@ public class RhythmRoundManager : NetworkBehaviour
     }
 
     [ClientRpc]
-    private void RpcLogCombatTrade(string p1Name, string p1Move, int p1State, int p1Dmg, string p2Name, string p2Move, int p2State, int p2Dmg)
+    private void RpcLogCombatTrade(string p1Name, string p1Move, int p1State, int p1Dmg, string p2Name, string p2Move, int p2State, int p2Dmg, string reason)
     {
         CommentaryManager.Instance?.OnTradeResolved(p1Move, p1Dmg, p2Move, p2Dmg, customIsCombo);
 
@@ -1901,6 +1932,7 @@ public class RhythmRoundManager : NetworkBehaviour
             p2Move = p2Move,
             p2State = p2State,
             p2Damage = p2Dmg,
+            reason = reason,
             timeAdded = Time.time
         });
         if (combatLogs.Count > 5) combatLogs.RemoveAt(0);
@@ -2457,11 +2489,12 @@ public class RhythmRoundManager : NetworkBehaviour
         }
 
         // --- 4. COMBAT LOG (Right Side) ---
-        // Stacked below Enemy Slots (100+76+4=180), aligned left with Enemy Slots
         if (combatLogs.Count > 0)
         {
-            GUILayout.BeginArea(new Rect(Screen.width - 420, 180, 400, 180));
+            GUILayout.BeginArea(new Rect(Screen.width - 420, 180, 400, 220));
             GUIStyle logStyle = new GUIStyle(GUI.skin.label) { fontSize = 16, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+            GUIStyle reasonStyle = new GUIStyle(GUI.skin.label) { fontSize = 11, alignment = TextAnchor.MiddleCenter };
+            reasonStyle.normal.textColor = new Color(1f, 0.85f, 0.2f, 0.85f);
             GUIStyle boxStyle = new GUIStyle(GUI.skin.box);
             GUILayout.Label("COMBAT LOG", logStyle); GUILayout.Space(5);
 
@@ -2480,7 +2513,14 @@ public class RhythmRoundManager : NetworkBehaviour
 
                 logStyle.normal.textColor = GetStateColor(log.p2State);
                 GUILayout.Label($"{log.p2Name}: {log.p2Move}{p2DmgStr}", logStyle, GUILayout.Width(230));
-                GUILayout.EndHorizontal(); GUILayout.Space(2);
+                GUILayout.EndHorizontal();
+
+                if (!string.IsNullOrEmpty(log.reason))
+                {
+                    GUILayout.Label(log.reason, reasonStyle);
+                    GUILayout.Space(1);
+                }
+                else GUILayout.Space(2);
             }
             GUILayout.EndArea();
             GUI.color = Color.white;

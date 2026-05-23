@@ -565,29 +565,219 @@ public class ShopUI : MonoBehaviour
     {
         if (string.IsNullOrEmpty(_tooltipTitle)) return;
 
-        float tooltipW = 350f;
-        float tooltipH = 220f;
-        float tooltipX = _tooltipPos.x + 20f;
-        float tooltipY = _tooltipPos.y + 20f;
+        string counters = GetCountersText(_hoveredCardId);
+        bool hasCounters = !string.IsNullOrEmpty(counters);
+        int pipeIdx = counters.IndexOf("  |  ");
+        bool hasTwoParts = pipeIdx >= 0;
 
-        if (tooltipX + tooltipW > Screen.width) tooltipX = Screen.width - tooltipW - 10f;
+        var botInv = GetBotInventory();
+        string[] oppHits = GetOpponentCounterHint(_hoveredCardId, botInv);
+        bool hasOppHint = oppHits.Length > 0;
+
+        Color typeColor = GetCardTypeColor(_hoveredCardId);
+        string typeBadge = GetCardTypeBadge(_hoveredCardId);
+
+        float tooltipW  = 420f;
+        float headerH   = 38f;
+        float descH     = 100f;
+        float matchupH  = hasCounters ? (hasTwoParts ? 48f : 28f) : 0f;
+        float oppH      = hasOppHint  ? 42f : 0f;
+        float sepCount  = (hasCounters ? 1 : 0) + (hasOppHint ? 1 : 0);
+        float tooltipH  = headerH + descH + sepCount * 6f + matchupH + oppH + 12f;
+
+        float tooltipX = _tooltipPos.x + 22f;
+        float tooltipY = _tooltipPos.y + 22f;
+        if (tooltipX + tooltipW > Screen.width)  tooltipX = Screen.width  - tooltipW - 10f;
         if (tooltipY + tooltipH > Screen.height) tooltipY = Screen.height - tooltipH - 10f;
 
-        GUI.color = new Color(0f, 0.2f, 0.3f, 0.95f);
-        GUI.DrawTexture(new Rect(tooltipX - 2, tooltipY - 2, tooltipW + 4, tooltipH + 4), _whiteTex);
+        // ── Background ────────────────────────────────────────────────────────
+        GUI.color = new Color(0.03f, 0.04f, 0.11f, 0.97f);
+        GUI.DrawTexture(new Rect(tooltipX, tooltipY, tooltipW, tooltipH), _whiteTex);
 
-        GUI.color = new Color(0f, 1f, 0.8f);
+        // Left rarity bar
+        GUI.color = typeColor;
+        GUI.DrawTexture(new Rect(tooltipX, tooltipY, 4f, tooltipH), _whiteTex);
+
+        // Top + bottom border glow
+        GUI.color = new Color(typeColor.r * 0.8f, typeColor.g * 0.8f, typeColor.b * 0.8f, 0.9f);
         GUI.DrawTexture(new Rect(tooltipX, tooltipY, tooltipW, 2f), _whiteTex);
         GUI.DrawTexture(new Rect(tooltipX, tooltipY + tooltipH - 2f, tooltipW, 2f), _whiteTex);
 
-        GUI.color = Color.white;
-        _cardNameStyle.fontSize = 16;
-        GUI.Label(new Rect(tooltipX + 10f, tooltipY + 8f, tooltipW - 20f, 26f), _tooltipTitle.ToUpper(), _cardNameStyle);
-        _cardNameStyle.fontSize = 14;
+        // Header tint
+        GUI.color = new Color(typeColor.r * 0.12f, typeColor.g * 0.12f, typeColor.b * 0.12f, 1f);
+        GUI.DrawTexture(new Rect(tooltipX + 4f, tooltipY + 2f, tooltipW - 4f, headerH - 2f), _whiteTex);
 
-        _descStyle.fontSize = 12;
-        GUI.Label(new Rect(tooltipX + 10f, tooltipY + 36f, tooltipW - 20f, tooltipH - 50f), _tooltipText, _descStyle);
+        float cx = tooltipX + 14f;
+        float cw = tooltipW - 28f;
+        float cy = tooltipY + 8f;
+
+        // ── Header: name + type badge ─────────────────────────────────────────
+        GUI.color = Color.white;
+        GUIStyle titleSt = new GUIStyle(GUI.skin.label) { fontSize = 20, fontStyle = FontStyle.Bold };
+        titleSt.normal.textColor = typeColor;
+        GUI.Label(new Rect(cx, cy, cw - 46f, 26f), _tooltipTitle.ToUpper(), titleSt);
+
+        // Type badge box
+        GUI.color = new Color(typeColor.r * 0.25f, typeColor.g * 0.25f, typeColor.b * 0.25f, 0.9f);
+        GUI.DrawTexture(new Rect(tooltipX + tooltipW - 52f, cy - 1f, 44f, 22f), _whiteTex);
+        GUI.color = typeColor;
+        GUI.DrawTexture(new Rect(tooltipX + tooltipW - 52f, cy - 1f, 44f, 1.5f), _whiteTex);
+        GUI.DrawTexture(new Rect(tooltipX + tooltipW - 52f, cy + 20.5f, 44f, 1.5f), _whiteTex);
+        GUIStyle badgeSt = new GUIStyle(GUI.skin.label) { fontSize = 11, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+        badgeSt.normal.textColor = typeColor;
+        GUI.color = Color.white;
+        GUI.Label(new Rect(tooltipX + tooltipW - 52f, cy - 1f, 44f, 22f), typeBadge, badgeSt);
+
+        // ── Description ───────────────────────────────────────────────────────
+        cy = tooltipY + headerH + 6f;
+        GUIStyle descSt = new GUIStyle(GUI.skin.label) { fontSize = 13, wordWrap = true };
+        descSt.normal.textColor = new Color(0.92f, 0.92f, 0.92f);
+        GUI.Label(new Rect(cx, cy, cw, descH), _tooltipText, descSt);
+        cy += descH + 2f;
+
+        // ── Matchup section ───────────────────────────────────────────────────
+        if (hasCounters)
+        {
+            GUI.color = new Color(0.3f, 0.3f, 0.45f, 0.55f);
+            GUI.DrawTexture(new Rect(tooltipX + 4f, cy, tooltipW - 4f, 1f), _whiteTex);
+            cy += 5f; GUI.color = Color.white;
+
+            if (hasTwoParts)
+            {
+                string countersLine = counters.Substring(0, pipeIdx);
+                string beatenLine   = counters.Substring(pipeIdx + 5);
+
+                GUIStyle cSt = new GUIStyle(GUI.skin.label) { fontSize = 12, fontStyle = FontStyle.Bold, wordWrap = true };
+                cSt.normal.textColor = new Color(0.25f, 1f, 0.45f);
+                GUI.Label(new Rect(cx, cy, cw, 22f), countersLine, cSt);
+
+                GUIStyle bSt = new GUIStyle(GUI.skin.label) { fontSize = 12, fontStyle = FontStyle.Bold, wordWrap = true };
+                bSt.normal.textColor = new Color(1f, 0.42f, 0.18f);
+                GUI.Label(new Rect(cx, cy + 22f, cw, 22f), beatenLine, bSt);
+            }
+            else
+            {
+                GUIStyle infoSt = new GUIStyle(GUI.skin.label) { fontSize = 12, wordWrap = true };
+                infoSt.normal.textColor = new Color(1f, 0.85f, 0.2f);
+                GUI.Label(new Rect(cx, cy, cw, matchupH), counters, infoSt);
+            }
+            cy += matchupH;
+        }
+
+        // ── Opponent counter banner ───────────────────────────────────────────
+        if (hasOppHint)
+        {
+            GUI.color = new Color(0.3f, 0.3f, 0.45f, 0.55f);
+            GUI.DrawTexture(new Rect(tooltipX + 4f, cy, tooltipW - 4f, 1f), _whiteTex);
+            cy += 5f;
+
+            GUI.color = new Color(0f, 0.85f, 0.35f, 0.13f);
+            GUI.DrawTexture(new Rect(tooltipX + 4f, cy, tooltipW - 4f, 36f), _whiteTex);
+            GUI.color = new Color(0f, 1f, 0.4f);
+            GUI.DrawTexture(new Rect(tooltipX + 4f, cy, 3f, 36f), _whiteTex);
+
+            GUI.color = Color.white;
+            GUIStyle labelSt = new GUIStyle(GUI.skin.label) { fontSize = 10, fontStyle = FontStyle.Bold };
+            labelSt.normal.textColor = new Color(0.5f, 1f, 0.65f);
+            GUI.Label(new Rect(cx + 4f, cy + 2f, cw, 15f), "⚡ PUNISHES OPPONENT'S DECK:", labelSt);
+
+            GUIStyle cardsSt = new GUIStyle(GUI.skin.label) { fontSize = 14, fontStyle = FontStyle.Bold };
+            cardsSt.normal.textColor = new Color(0.15f, 1f, 0.5f);
+            GUI.Label(new Rect(cx + 4f, cy + 17f, cw, 20f), string.Join(",  ", oppHits), cardsSt);
+        }
+
+        GUI.color = Color.white;
     }
+
+    private Color GetCardTypeColor(string cardId)
+    {
+        var combat = CardDatabase.BasicCards.Concat(CardDatabase.AdvancedCards).Concat(CardDatabase.LegendaryCards)
+            .FirstOrDefault(c => c.cardId == cardId);
+        if (combat != null)
+        {
+            if (combat.rarity == CardRarity.Legendary) return new Color(1f, 0.75f, 0.1f);
+            if (combat.rarity == CardRarity.Advanced)  return new Color(0.3f, 0.6f, 1f);
+            return combat.type == CardType.Attack ? new Color(1f, 0.4f, 0.15f) : new Color(0f, 0.9f, 0.9f);
+        }
+        if (CardDatabase.VexCards.Any(c => c.cardId == cardId)) return new Color(0.9f, 0.3f, 1f);
+        return new Color(0.25f, 0.9f, 0.4f);
+    }
+
+    private string GetCardTypeBadge(string cardId)
+    {
+        var combat = CardDatabase.BasicCards.Concat(CardDatabase.AdvancedCards).Concat(CardDatabase.LegendaryCards)
+            .FirstOrDefault(c => c.cardId == cardId);
+        if (combat != null) return combat.type == CardType.Attack ? "ATK" : "DEF";
+        if (CardDatabase.VexCards.Any(c => c.cardId == cardId)) return "VEX";
+        return "TRAIT";
+    }
+
+    private string[] GetOpponentCounterHint(string hoveredCardId, PlayerInventory opponentInv)
+    {
+        if (opponentInv == null || opponentInv.ownedCombatCards.Count == 0) return new string[0];
+        string[] countered = GetCounteredCardIds(hoveredCardId);
+        if (countered.Length == 0) return new string[0];
+
+        var hits = new List<string>();
+        foreach (var opCardId in opponentInv.ownedCombatCards)
+        {
+            if (System.Array.IndexOf(countered, opCardId) >= 0)
+            {
+                var card = CardDatabase.BasicCards.Concat(CardDatabase.AdvancedCards).Concat(CardDatabase.LegendaryCards)
+                    .FirstOrDefault(c => c.cardId == opCardId);
+                if (card != null && !hits.Contains(card.displayName))
+                    hits.Add(card.displayName);
+            }
+        }
+        return hits.ToArray();
+    }
+
+    private string[] GetCounteredCardIds(string cardId) => cardId switch
+    {
+        "jab"         => new[]{"dodge_left", "dodge_right"},
+        "cross"       => new[]{"jab", "dodge_left", "dodge_right", "sweep"},
+        "hook"        => new[]{"cross", "jab"},
+        "boom"        => new[]{"dodge_left", "dodge_right", "jab", "cross", "hook", "focus"},
+        "grapple"     => new[]{"block", "dodge_left", "dodge_right"},
+        "fake"        => new[]{"block", "reflect", "dodge_left", "dodge_right", "clutch", "focus", "taunt", "trap", "cage", "mirror", "reverse"},
+        "reflect"     => new[]{"jab", "cross", "hook", "boom", "grapple", "uppercut", "sweep", "overclock"},
+        "block"       => new[]{"jab", "cross", "overclock"},
+        "dodge_left"  => new[]{"jab", "cross"},
+        "dodge_right" => new[]{"jab", "cross"},
+        "clutch"      => new[]{"boom", "hook", "overclock"},
+        "uppercut"    => new[]{"dodge_left", "dodge_right", "grapple"},
+        "sweep"       => new[]{"block"},
+        "reverse"     => new[]{"jab", "cross", "hook", "boom", "overclock"},
+        "trap"        => new[]{"dodge_left", "dodge_right", "block"},
+        "cage"        => new[]{"block", "dodge_left", "dodge_right"},
+        "mirror"      => new[]{"jab", "cross", "hook", "grapple", "uppercut", "sweep"},
+        _             => new string[0]
+    };
+
+    private string GetCountersText(string cardId) => cardId switch
+    {
+        "jab"         => "COUNTERS: Dodge  |  BEATEN BY: Cross, Hook, Block",
+        "cross"       => "COUNTERS: Jab, Dodge  |  BEATEN BY: Hook, Block, Clutch",
+        "hook"        => "COUNTERS: Cross, Jab  |  BEATEN BY: Clutch, Block",
+        "boom"        => "COUNTERS: Dodge (wide arc)  |  BEATEN BY: Clutch, Block",
+        "grapple"     => "COUNTERS: Block, Dodge  |  BEATEN BY: Fake, Uppercut",
+        "fake"        => "COUNTERS: Grapple, all defense  |  BEATEN BY: any attack",
+        "reflect"     => "COUNTERS: any attack  |  BEATEN BY: Grapple, Boom",
+        "block"       => "COUNTERS: Jab, Cross  |  BEATEN BY: Grapple, Sweep",
+        "dodge_left"  => "COUNTERS: Jab, Cross  |  BEATEN BY: Hook, Sweep, Grapple",
+        "dodge_right" => "COUNTERS: Jab, Cross  |  BEATEN BY: Hook, Sweep, Grapple",
+        "clutch"      => "COUNTERS: Boom, Hook  |  BEATEN BY: Jab, Cross, Grapple",
+        "uppercut"    => "COUNTERS: Dodge, Grapple  |  BEATEN BY: Block, Cross",
+        "sweep"       => "COUNTERS: Block  |  BEATEN BY: Dodge, Cross",
+        "focus"       => "Passive setup — no matchup. Buff consumed on next attack.",
+        "taunt"       => "Forces opponent into attack-only next beat. Risk: you eat whatever they throw.",
+        "overclock"   => "COUNTERS: anything — amplifies next hit  |  Risk: +10% self-damage",
+        "reverse"     => "COUNTERS: heavy attacks  |  BEATEN BY: Fake, bad timing",
+        "trap"        => "COUNTERS: Dodge, Block  |  BEATEN BY: attacks (bypasses trap)",
+        "cage"        => "COUNTERS: Block, Dodge  |  BEATEN BY: fast counter before it fires",
+        "mirror"      => "COUNTERS: attack-heavy players  |  BEATEN BY: Fake",
+        _             => ""
+    };
 
     private void DrawPanelBorder(float x, float y, float w, float h, Color accent)
     {

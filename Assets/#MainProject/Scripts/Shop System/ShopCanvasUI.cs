@@ -280,7 +280,7 @@ public class ShopCanvasUI : MonoBehaviour
         if (inv == null) return;
 
         // Combat cards
-        foreach (var id in inv.ownedCombatCards)
+        foreach (var id in inv.ownedCombatCards.Keys)
             AddInventoryRow(content, id, "Combat", isLocal);
 
         // Trait

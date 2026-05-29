@@ -341,13 +341,13 @@ public class RhythmRoundManager : NetworkBehaviour
                 foreach (var cardName in selection)
                 {
                     string cardId = TriggerToCardId(cardName);
-                    if (!string.IsNullOrEmpty(cardId) && !inv.ownedCombatCards.Contains(cardId))
-                        inv.ownedCombatCards.Add(cardId);
+                    if (!string.IsNullOrEmpty(cardId) && !inv.ownedCombatCards.ContainsKey(cardId))
+                        inv.ownedCombatCards[cardId] = 0; // Start at tier 0
                 }
                 // Equip all owned cards for the round
-                var equipList = new System.Collections.Generic.List<string>(inv.ownedCombatCards);
+                var equipList = new System.Collections.Generic.List<string>(inv.ownedCombatCards.Keys);
                 inv.EquipCombatCards(equipList);
-                Debug.Log($"<color=green>STARTER CARDS:</color> {players[i].PlayerName} now owns: {string.Join(",", inv.ownedCombatCards)}");
+                Debug.Log($"<color=green>STARTER CARDS:</color> {players[i].PlayerName} now owns: {string.Join(",", inv.ownedCombatCards.Keys)}");
             }
         }
 
@@ -777,7 +777,7 @@ public class RhythmRoundManager : NetworkBehaviour
             var inv = player.GetComponent<PlayerInventory>();
             if (inv != null)
             {
-                var equipList = new System.Collections.Generic.List<string>(inv.ownedCombatCards);
+                var equipList = new System.Collections.Generic.List<string>(inv.ownedCombatCards.Keys);
                 inv.EquipCombatCards(equipList);
             }
 

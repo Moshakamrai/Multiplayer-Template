@@ -132,7 +132,7 @@ public class ShopUI : MonoBehaviour
                 CyberpunkGUIUtils.DrawGlowText(new Rect(x + MARGIN, cardY, cardW, 22), capacityLabel, headerColor, combatHeaderStyle, headerColor);
                 cardY += 24f;
 
-                foreach (var cardId in inv.ownedCombatCards)
+                foreach (var cardId in inv.ownedCombatCards.Keys)
                 {
                     if (cardY + cardH > y + h - 10) break;
                     DrawInventoryCard(x + MARGIN, cardY, cardW, cardH, cardId, "Combat", true);
@@ -532,7 +532,7 @@ public class ShopUI : MonoBehaviour
                 GUI.Label(new Rect(x + MARGIN, cardY, cardW, 22), $"COMBAT ({botInv.ownedCombatCards.Count}/8)", _descStyle);
                 cardY += 24f;
 
-                foreach (var cardId in botInv.ownedCombatCards)
+                foreach (var cardId in botInv.ownedCombatCards.Keys)
                 {
                     if (cardY + cardH > y + h - 10) break;
                     DrawOpponentCard(x + MARGIN, cardY, cardW, cardH, cardId, "Combat");
@@ -807,7 +807,7 @@ public class ShopUI : MonoBehaviour
         if (countered.Length == 0) return new string[0];
 
         var hits = new List<string>();
-        foreach (var opCardId in opponentInv.ownedCombatCards)
+        foreach (var opCardId in opponentInv.ownedCombatCards.Keys)
         {
             if (System.Array.IndexOf(countered, opCardId) >= 0)
             {

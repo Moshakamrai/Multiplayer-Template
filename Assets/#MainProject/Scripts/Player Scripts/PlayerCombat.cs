@@ -107,7 +107,7 @@ public class PlayerCombat : NetworkBehaviour
         if (inv != null && inv.credits >= 1)
         {
             // Remove from appropriate list
-            if (inv.ownedCombatCards.Contains(cardId))
+            if (inv.ownedCombatCards.ContainsKey(cardId))
                 inv.ownedCombatCards.Remove(cardId);
             else if (inv.equippedTraitId == cardId)
                 inv.equippedTraitId = "";

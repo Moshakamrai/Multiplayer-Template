@@ -1694,7 +1694,7 @@ public class RhythmRoundManager : NetworkBehaviour
         return attack == "UnbreakablePunch" || attack == "Overclock" || attack == "Reverse";
     }
 
-    // Rock-paper-scissors interruption: does attacker interrupt defender?
+    // 3-LAYER INTERRUPTION: Attack blocks are based on layer matching
     private bool DoesInterrupt(string attackerMove, string defenderMove, out string reason)
     {
         reason = "";

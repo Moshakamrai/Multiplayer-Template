@@ -34,16 +34,34 @@ public class CardManager : NetworkBehaviour
     private int _cfgAttack  = 3;
     private int _cfgDefense = 2;
 
-    // ── Classification ─────────────────────────────────────────────────────
-    private static readonly HashSet<string> _atkSet = new HashSet<string>
-        { "Jab", "Cross", "Hook", "UnbreakablePunch", "Grapple", "Fake", "Uppercut", "Sweep", "Overclock", "Reverse" };
-    private static readonly HashSet<string> _defSet = new HashSet<string>
-        { "Block", "ParryIntent", "Left", "Right", "Clutch", "Focus", "Taunt", "Trap", "Cage", "Mirror", "Striker", "Tank", "Speedster", "Grappler", "Trickster", "Vampire", "Glass", "Momentum" };
+    // ── Classification (3-Layer System) ────────────────────────────────────
+    public static AttackLayer? GetAttackLayerForTrigger(string trigger)
+    {
+        // Match trigger to attack layer
+        foreach (var card in CardDatabase.LowAttacks)
+            if (card.triggerName == trigger) return AttackLayer.Low;
+        foreach (var card in CardDatabase.MidAttacks)
+            if (card.triggerName == trigger) return AttackLayer.Mid;
+        foreach (var card in CardDatabase.HighAttacks)
+            if (card.triggerName == trigger) return AttackLayer.High;
+        return null;
+    }
 
-    public static bool IsAttackTrigger(string t)  => _atkSet.Contains(t);
-    public static bool IsDefenseTrigger(string t) => _defSet.Contains(t);
-    private static bool IsComboAttack(CombatCard c) =>
-        c.comboAttacks.Length > 0 && _atkSet.Contains(c.comboAttacks[0]);
+    public static DefenseLayer? GetDefenseLayerForTrigger(string trigger)
+    {
+        // Match trigger to defense layer
+        foreach (var card in CardDatabase.LowDefenses)
+            if (card.triggerName == trigger) return DefenseLayer.Low;
+        foreach (var card in CardDatabase.MidDefenses)
+            if (card.triggerName == trigger) return DefenseLayer.Mid;
+        foreach (var card in CardDatabase.HighDefenses)
+            if (card.triggerName == trigger) return DefenseLayer.High;
+        return null;
+    }
+
+    public static bool IsAttackTrigger(string t) => GetAttackLayerForTrigger(t) != null;
+    public static bool IsDefenseTrigger(string t) => GetDefenseLayerForTrigger(t) != null;
+    private static bool IsComboAttack(CombatCard c) => GetAttackLayerForTrigger(c.comboAttacks.Length > 0 ? c.comboAttacks[0] : "") != null;
 
     // ── Animation state ────────────────────────────────────────────────────
     private struct DiscardAnim { public int libIndex; public float startX; public float startTime; }
@@ -152,14 +170,14 @@ public class CardManager : NetworkBehaviour
                 cardLibrary.Add(nc);
     }
 
-    // ── Slot API ───────────────────────────────────────────────────────────
+    // ── Card Availability API ──────────────────────────────────────────────
 
-    public bool HasSlot(string trigger)
+    public bool HasCardAvailable(string trigger)
     {
         bool isRhythm = RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive;
         if (!isRhythm) return IsAttackTrigger(trigger) || IsDefenseTrigger(trigger);
 
-        // Block the last-used card for one full input window
+        // Block the last-used card for one full input window (cooldown)
         if (trigger == blockedTrigger) return false;
 
         // Taunt effect: opponent can only use attack cards next turn
@@ -167,17 +185,21 @@ public class CardManager : NetworkBehaviour
         if (pc != null && pc.IsTauntedNextTurn && IsDefenseTrigger(trigger))
             return false; // Prevent all defense cards
 
-        if (trigger.StartsWith("Combo"))
+        // Layer cooldown: can't use same layer twice in a row
+        var atkLayer = GetAttackLayerForTrigger(trigger);
+        if (atkLayer.HasValue && pc != null)
         {
-            CombatCard card = GetCardInHand(trigger);
-            if (card == null) return false;
-            // Slot system disabled — all non-blocked cards are always available
-            return true;
+            var lastLayer = GetAttackLayerForTrigger(pc.lastUsedAttackTrigger);
+            if (lastLayer.HasValue && atkLayer.Value == lastLayer.Value)
+                return false; // Can't use same attack layer twice in a row
         }
-        if (IsAttackTrigger(trigger))  return true;
-        if (IsDefenseTrigger(trigger)) return true;
-        return false;
+
+        // All non-blocked cards are available
+        return IsAttackTrigger(trigger) || IsDefenseTrigger(trigger);
     }
+
+    // Legacy compatibility
+    public bool HasSlot(string trigger) => HasCardAvailable(trigger);
 
     private bool IsOpponentStaggered()
     {

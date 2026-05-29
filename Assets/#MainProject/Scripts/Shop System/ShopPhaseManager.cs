@@ -329,6 +329,12 @@ public class ShopPhaseManager : MonoBehaviour
         }
 
         inv.EquipCombatCards(cardIds);
+
+        // Refresh voice recognition grammar
+        var combat = inv.GetComponent<PlayerCombat>();
+        if (combat != null)
+            combat.RefreshAvailableCards();
+
         int idx = GetPlayerIndex(inv);
         if (idx == 0) _p1Locked = true;
         else if (idx == 1) _p2Locked = true;
@@ -343,6 +349,11 @@ public class ShopPhaseManager : MonoBehaviour
         Debug.Log($"<color=yellow>SHOP LOCK-IN:</color> Player has {inv.ownedCombatCards.Count} combat cards, equipping: {string.Join(",", equipList)}");
         inv.EquipCombatCards(equipList);
         Debug.Log($"<color=yellow>SHOP LOCK-IN:</color> Equipped {inv.equippedCombatCards.Count} cards: {string.Join(",", inv.equippedCombatCards)}");
+
+        // Refresh voice recognition grammar
+        var combat = inv.GetComponent<PlayerCombat>();
+        if (combat != null)
+            combat.RefreshAvailableCards();
 
         int idx = GetPlayerIndex(inv);
         if (idx == 0) _p1Locked = true;

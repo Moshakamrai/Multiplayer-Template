@@ -114,7 +114,29 @@ public class PlayerCombat : NetworkBehaviour
 
             // Deduct 1 credit
             inv.credits = Mathf.Max(0, inv.credits - 1);
+
+            // Refresh voice grammar
+            RefreshAvailableCards();
         }
+    }
+
+    public void RefreshAvailableCards()
+    {
+        var inv = GetComponent<PlayerInventory>();
+        if (inv == null) return;
+
+        var triggers = new List<string>();
+        var allCards = CardDatabase.BasicCards;
+
+        foreach (var cardId in inv.equippedCombatCards)
+        {
+            var card = System.Array.Find(allCards, c => c != null && c.cardId == cardId);
+            if (card != null)
+                triggers.Add(card.triggerName);
+        }
+
+        availableCardsString = string.Join("|", triggers);
+        Debug.Log($"<color=cyan>VOICE:</color> Available cards: {availableCardsString}");
     }
 
     [Header("VFX Settings")]

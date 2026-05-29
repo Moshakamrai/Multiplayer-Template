@@ -1367,6 +1367,14 @@ public class RhythmRoundManager : NetworkBehaviour
         // --- 2. CALCULATE ATTACK DAMAGE ---
         int finalDmg = GetBaseDamage(atk);
 
+        // --- CARD UPGRADE MULTIPLIER ---
+        var atkInventory = attacker.GetComponent<PlayerInventory>();
+        if (atkInventory != null)
+        {
+            float upgradeMultiplier = atkInventory.GetUpgradeMultiplier(atk);
+            finalDmg = Mathf.RoundToInt(finalDmg * upgradeMultiplier);
+        }
+
         // Timing multiplier: EXCELLENT +25%, GOOD base, BAD −50%
         finalDmg = Mathf.RoundToInt(finalDmg * GetTimingMultiplier(attacker));
 

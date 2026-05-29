@@ -230,8 +230,8 @@ public class CardDatabase : MonoBehaviour
         },
     };
 
-    // ── LEGACY COMPATIBILITY: Combined array for backward-compat searches ────
-    public static List<CombatCardData> BasicCards
+    // ── LEGACY COMPATIBILITY: Combined arrays for backward-compat searches ────
+    public static CombatCardData[] BasicCards
     {
         get
         {
@@ -242,12 +242,12 @@ public class CardDatabase : MonoBehaviour
             list.AddRange(LowDefenses);
             list.AddRange(MidDefenses);
             list.AddRange(HighDefenses);
-            return list;
+            return list.ToArray();
         }
     }
 
-    public static List<CombatCardData> AdvancedCards => new List<CombatCardData>();
-    public static List<CombatCardData> LegendaryCards => new List<CombatCardData>();
+    public static CombatCardData[] AdvancedCards => new CombatCardData[0];
+    public static CombatCardData[] LegendaryCards => new CombatCardData[0];
 
     // ── RARITY PROGRESSION ─────────────────────────────────────────────────────
     public static void GetRarityChances(int roundNumber, out float basicChance, out float advancedChance, out float legendaryChance)

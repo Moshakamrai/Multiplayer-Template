@@ -126,11 +126,11 @@ public class PlayerCombat : NetworkBehaviour
         if (inv == null) return;
 
         var triggers = new List<string>();
-        var allCards = CardDatabase.BasicCards;
+        var allCards = CardDatabase.BasicCards.ToArray();
 
         foreach (var cardId in inv.equippedCombatCards)
         {
-            var card = System.Array.Find(allCards, c => c != null && c.cardId == cardId);
+            var card = System.Array.Find<CombatCardData>(allCards, c => c != null && c.cardId == cardId);
             if (card != null)
                 triggers.Add(card.triggerName);
         }

@@ -315,26 +315,26 @@ public class CardManager : NetworkBehaviour
         var inv = GetComponent<PlayerInventory>();
         if (inv != null && inv.equippedCombatCards.Count > 0)
         {
-            // Map trigger names to card IDs
+            // Map trigger names to card IDs (use simple names matching inventory)
             string cardId = trigger switch
             {
-                "Jab" => "jab_low",
+                "Jab" => "jab",
                 "Sweep" => "sweep",
                 "Cross" => "cross",
-                "Hook" => "hook_fast",
+                "Hook" => "hook",
                 "Overhead" => "overhead",
-                "Slap" => "slap_high",
-                "Spin" => "spinning_slash",
-                "UnbreakablePunch" => "smash_high",
-                "Block" => "block_low",
-                "Clutch" => "counter_low",
-                "Left" => "dodge_low",
-                "Guard" => "guard_mid",
-                "ParryIntent" => "parry_mid",
-                "Fake" => "sway_mid",
-                "Right" => "guard_high",
-                "Uppercut" => "intercept_high",
-                "Reverse" => "redirect_high",
+                "Slap" => "slap",
+                "Spin" => "spin",
+                "UnbreakablePunch" => "unbreakablepunch",
+                "Block" => "block",
+                "Clutch" => "clutch",
+                "Left" => "left",
+                "Guard" => "guard",
+                "ParryIntent" => "parryintent",
+                "Fake" => "fake",
+                "Right" => "right",
+                "Uppercut" => "uppercut",
+                "Reverse" => "reverse",
                 _ => trigger.ToLower()
             };
             if (!inv.equippedCombatCards.Contains(cardId)) return false;

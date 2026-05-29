@@ -365,7 +365,7 @@ public class ShopPhaseManager : MonoBehaviour
             isInitialShop = false;
             isShopPhase = false;
             Debug.Log("<color=cyan>INITIAL SHOP COMPLETE - Starting game!</color>");
-            RhythmRoundManager.Instance?.StartRound(1);
+            RhythmRoundManager.Instance?.ShowRoundPicker();
         }
         else
         {

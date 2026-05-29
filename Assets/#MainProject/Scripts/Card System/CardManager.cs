@@ -70,9 +70,9 @@ public class CardManager : NetworkBehaviour
     private float  _selectedCardAnimTimer = 0f;
 
     // Single-mode card sizes
-    const float nWidth  = 170f;
-    const float nHeight = 200f;
-    const float nSpace  = 14f;
+    const float nWidth  = 240f;
+    const float nHeight = 380f;
+    const float nSpace  = 10f;
 
     // Combo HUD dimensions
     private const float COMBO_W = 420f;
@@ -171,11 +171,11 @@ public class CardManager : NetworkBehaviour
         {
             CombatCard card = GetCardInHand(trigger);
             if (card == null) return false;
-            if (IsComboAttack(card)) return IsOpponentStaggered() || attackSlotsRemaining > 0;
-            return defenseSlotsRemaining > 0;
+            // Slot system disabled — all non-blocked cards are always available
+            return true;
         }
-        if (IsAttackTrigger(trigger))  return IsOpponentStaggered() || attackSlotsRemaining > 0;
-        if (IsDefenseTrigger(trigger)) return defenseSlotsRemaining > 0;
+        if (IsAttackTrigger(trigger))  return true;
+        if (IsDefenseTrigger(trigger)) return true;
         return false;
     }
 
@@ -202,15 +202,16 @@ public class CardManager : NetworkBehaviour
         }
         else isAttack = IsAttackTrigger(trigger);
 
-        if (isAttack)
-        {
-            if (IsOpponentStaggered()) return;
-            attackSlotsRemaining = Mathf.Max(0, attackSlotsRemaining - 1);
-        }
-        else
-        {
-            defenseSlotsRemaining = Mathf.Max(0, defenseSlotsRemaining - 1);
-        }
+        // Slot counters disabled — no decrement
+        // if (isAttack)
+        // {
+        //     if (IsOpponentStaggered()) return;
+        //     attackSlotsRemaining = Mathf.Max(0, attackSlotsRemaining - 1);
+        // }
+        // else
+        // {
+        //     defenseSlotsRemaining = Mathf.Max(0, defenseSlotsRemaining - 1);
+        // }
 
         // Record for next-window cooldown — only during active single-move rhythm rounds
         var rmm = RhythmRoundManager.Instance;
@@ -221,11 +222,12 @@ public class CardManager : NetworkBehaviour
     [Server]
     public void TryRefillSlots()
     {
-        if (attackSlotsRemaining == 0 && defenseSlotsRemaining == 0)
-        {
-            attackSlotsRemaining  = attackSlotsTotal;
-            defenseSlotsRemaining = defenseSlotTotal;
-        }
+        // Slot system disabled
+        // if (attackSlotsRemaining == 0 && defenseSlotsRemaining == 0)
+        // {
+        //     attackSlotsRemaining  = attackSlotsTotal;
+        //     defenseSlotsRemaining = defenseSlotTotal;
+        // }
     }
 
     [Server]
@@ -396,6 +398,7 @@ public class CardManager : NetworkBehaviour
         if (!isLocalPlayer) return;
         if (cardLibrary == null || cardLibrary.Count == 0) return;
         if (RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isShopPhase) return;
+        if (ShopPhaseManager.Instance != null && ShopPhaseManager.Instance.isShopPhase) return;
 
         if (_whiteTex == null) { _whiteTex = new Texture2D(1, 1); _whiteTex.SetPixel(0, 0, Color.white); _whiteTex.Apply(); }
         EnsureStyles();
@@ -457,8 +460,8 @@ public class CardManager : NetworkBehaviour
         else
         {
             // ── SINGLE MODE: original defense LEFT / attack RIGHT ───────────
-            float baseY     = Screen.height - nHeight - 60f + hoverY;
-            float gap       = 120f;
+            float baseY     = Screen.height - nHeight - 20f + hoverY;
+            float gap       = 50f;
 
             var allDefCards = new[] { "Block", "ParryIntent", "Left", "Right", "Clutch", "Focus", "Taunt", "Trap", "Cage", "Mirror", "Striker", "Tank", "Speedster", "Grappler", "Trickster", "Vampire", "Glass", "Momentum" };
             var allAtkCards = new[] { "Jab", "Cross", "Hook", "UnbreakablePunch", "Grapple", "Fake", "Uppercut", "Sweep", "Overclock", "Reverse" };
@@ -476,14 +479,15 @@ public class CardManager : NetworkBehaviour
             float defStartX = Screen.width / 2f - totalW / 2f;
             float atkStartX = defStartX + defGroupW + gap;
 
+
             for (int i = 0; i < defCards.Length; i++)
             {
                 int libIdx = cardLibrary.FindIndex(c => c.triggerName == defCards[i] && !c.isCombo);
                 if (libIdx < 0) continue;
                 bool isBlocked = (defCards[i] == blockedTrigger);
-                float alpha = isBlocked ? 0.18f : ((defenseSlotsRemaining > 0 && !inputLocked) ? 1f : 0.30f);
+                float alpha = isBlocked ? 0.18f : (!inputLocked ? 1f : 0.30f);
                 Rect r = new Rect(defStartX + i * (nWidth + nSpace), baseY, nWidth, nHeight);
-                DrawCard(r, cardLibrary[libIdx], isRhythm, approachFrac, isShout, pulse, alpha, isBlocked);
+                DrawCard(r, cardLibrary[libIdx], isRhythm, approachFrac, isShout, pulse, alpha, isBlocked, isDefense: true);
             }
 
             for (int i = 0; i < atkCards.Length; i++)
@@ -491,19 +495,13 @@ public class CardManager : NetworkBehaviour
                 int libIdx = cardLibrary.FindIndex(c => c.triggerName == atkCards[i] && !c.isCombo);
                 if (libIdx < 0) continue;
                 bool isBlocked = (atkCards[i] == blockedTrigger);
-                float alpha = isBlocked ? 0.18f : ((attackSlotsRemaining > 0 && !inputLocked) ? 1f : 0.30f);
+                float alpha = isBlocked ? 0.18f : (!inputLocked ? 1f : 0.30f);
                 Rect r = new Rect(atkStartX + i * (nWidth + nSpace), baseY, nWidth, nHeight);
-                DrawCard(r, cardLibrary[libIdx], isRhythm, approachFrac, isShout, pulse, alpha, isBlocked);
+                DrawCard(r, cardLibrary[libIdx], isRhythm, approachFrac, isShout, pulse, alpha, isBlocked, isDefense: false);
             }
 
-            float pipY = Screen.height - nHeight - 60f + hoverY - 36f;
-            DrawSlotPips(defStartX, pipY, defenseSlotsRemaining, defenseSlotTotal, false);
-            DrawSlotPips(atkStartX, pipY, attackSlotsRemaining,  attackSlotsTotal,  true);
-
-            if (!isRhythm) DrawSlotConfigUI();
-
-            // Opponent slot display (single mode only)
-            if (isRhythm) DrawOpponentSlots();
+            // Beat indicator panel on left side of screen
+            if (isRhythm) DrawRhythmPanel(approachFrac, isShout, pulse);
         }
 
         // ── Slot bonus popup ──
@@ -533,7 +531,7 @@ public class CardManager : NetworkBehaviour
         {
             float t = (Time.time - _activeCardFlashes[i].startTime) / 0.12f;
             if (t > 1f) { _activeCardFlashes.RemoveAt(i); continue; }
-            Rect r = new Rect(_activeCardFlashes[i].startX, _activeCardFlashes[i].baseY, nWidth, nHeight);
+            Rect r = new Rect(_activeCardFlashes[i].startX, Screen.height - nHeight - 20f, nWidth, nHeight);
             GUI.color = new Color(1f, 1f, 1f, (1f - t) * 0.85f);
             GUI.DrawTexture(r, _whiteTex);
         }
@@ -678,6 +676,96 @@ public class CardManager : NetworkBehaviour
         GUI.color = Color.white;
     }
 
+    // ── Left-side rhythm beat indicator ───────────────────────────────────────
+
+    private void DrawRhythmPanel(float approachFrac, bool isShout, float pulse)
+    {
+        const float panelW = 160f;
+        const float panelH = 118f;
+        float px = 24f;
+        float py = Screen.height / 2f - panelH / 2f;
+
+        // Background
+        Color bg = isShout
+            ? Color.Lerp(new Color(0.05f, 0.10f, 0.18f, 0.95f), new Color(0.10f, 0.16f, 0.26f, 0.98f), pulse * 0.5f)
+            : new Color(0.04f, 0.04f, 0.10f, 0.92f);
+        GUI.color = bg;
+        GUI.DrawTexture(new Rect(px, py, panelW, panelH), _whiteTex);
+
+        // Left accent bar
+        Color accent = isShout
+            ? Color.Lerp(new Color(0.2f, 1f, 0.5f, 0.9f), Color.white, pulse * 0.3f)
+            : new Color(0f, 0.85f, 1f, 0.7f);
+        GUI.color = accent;
+        GUI.DrawTexture(new Rect(px, py, 3f, panelH), _whiteTex);
+
+        // Beat square indicator
+        const float sqSize = 56f;
+        const float border = 3f;
+        float sqX = px + panelW / 2f - sqSize / 2f;
+        float sqY = py + 10f;
+
+        GUI.color = new Color(0.10f, 0.10f, 0.10f, 0.92f);
+        GUI.DrawTexture(new Rect(sqX, sqY, sqSize, sqSize), _whiteTex);
+
+        float innerSize = sqSize - border * 2f;
+        float fillW = innerSize * approachFrac;
+        float fillX = sqX + border + (innerSize - fillW) / 2f;
+        float fillY = sqY + border + (innerSize - fillW) / 2f;
+
+        Color fillCol;
+        if (isShout)
+            fillCol = Color.Lerp(new Color(0.1f, 1f, 0.45f, 0.98f), Color.white, pulse * 0.40f);
+        else if (approachFrac > 0.72f)
+            fillCol = Color.Lerp(new Color(1f, 0.80f, 0f, 0.90f),
+                                 new Color(0.1f, 1f, 0.4f, 0.95f),
+                                 (approachFrac - 0.72f) / 0.28f);
+        else
+            fillCol = new Color(0f, 0.85f, 1f, 0.80f);
+
+        GUI.color = fillCol;
+        if (fillW > 0f) GUI.DrawTexture(new Rect(fillX, fillY, fillW, fillW), _whiteTex);
+
+        // Border outline
+        Color outlineCol = isShout ? new Color(0.2f, 1f, 0.5f, 0.98f) : new Color(0.2f, 0.9f, 1f, 0.98f);
+        GUI.color = outlineCol;
+        GUI.DrawTexture(new Rect(sqX, sqY,                  sqSize, border), _whiteTex);
+        GUI.DrawTexture(new Rect(sqX, sqY + sqSize - border, sqSize, border), _whiteTex);
+        GUI.DrawTexture(new Rect(sqX, sqY,                  border, sqSize), _whiteTex);
+        GUI.DrawTexture(new Rect(sqX + sqSize - border, sqY, border, sqSize), _whiteTex);
+
+        // Status label
+        string stateText;
+        Color  stateCol;
+        if (isShout)
+        {
+            stateText = "SHOUT!";
+            stateCol  = Color.Lerp(new Color(0.2f, 1f, 0.5f), Color.white, pulse * 0.35f);
+            stateCol.a = 0.78f + pulse * 0.22f;
+        }
+        else if (approachFrac > 0.68f)
+        {
+            stateText = "GET READY";
+            stateCol  = new Color(1f, Mathf.Lerp(0.65f, 0.9f, (approachFrac - 0.68f) / 0.32f), 0.1f, 0.9f);
+        }
+        else
+        {
+            stateText = "BEAT";
+            stateCol  = new Color(0.45f, 0.80f, 1f, 0.55f);
+        }
+
+        GUIStyle st = new GUIStyle(GUI.skin.label) { fontSize = 12, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+        st.normal.textColor = stateCol;
+        GUI.color = Color.white;
+        GUI.Label(new Rect(px, sqY + sqSize + 4f, panelW, 24f), stateText, st);
+
+        // Corner brackets
+        GUI.color = new Color(accent.r, accent.g, accent.b, 0.55f);
+        DrawBrackets(px, py, panelW, panelH, 14f, 2f);
+
+        GUI.color = Color.white;
+    }
+
     private void DrawBrackets(float x, float y, float w, float h, float len, float thick)
     {
         GUI.DrawTexture(new Rect(x,             y,             len,   thick), _whiteTex);
@@ -800,7 +888,7 @@ public class CardManager : NetworkBehaviour
     }
 
     private void DrawCard(Rect r, CombatCard card, bool isRhythm,
-                          float approachFrac, bool isShout, float pulse, float alpha, bool isBlocked = false)
+                          float approachFrac, bool isShout, float pulse, float alpha, bool isBlocked = false, bool isDefense = false)
     {
         // Card selection animation (subtle scale + glow + move up)
         bool isSelected = (card.triggerName == _selectedCardTrigger && !string.IsNullOrEmpty(_selectedCardTrigger));
@@ -828,136 +916,15 @@ public class CardManager : NetworkBehaviour
             r = new Rect(centerX - newWidth / 2f, centerY - newHeight / 2f - moveUp, newWidth, newHeight);
         }
 
-        // Background
-        Color bgBase = new Color(0.04f, 0.04f, 0.09f, 0.90f * alpha);
-        if (isShout)
-            bgBase = Color.Lerp(bgBase, new Color(0.03f, 0.12f, 0.15f, 0.90f * alpha), pulse * 0.7f);
-        GUI.color = bgBase;
-        GUI.DrawTexture(r, _whiteTex);
-
-        // Top charge strip
-        if (isRhythm)
+        // Card art only
+        var artTex = CardArtLibrary.Instance?.GetTextureForTrigger(card.triggerName);
+        if (artTex != null)
         {
-            float chargeAlpha = Mathf.Lerp(0.15f, 0.95f, approachFrac) * alpha;
-            Color chargeCol = isShout
-                ? Color.Lerp(new Color(0.1f, 1f, 0.45f), Color.white, pulse * 0.45f)
-                : new Color(0f, 0.85f, 1f);
-            GUI.color = new Color(chargeCol.r, chargeCol.g, chargeCol.b, chargeAlpha);
-            GUI.DrawTexture(new Rect(r.x, r.y, r.width * approachFrac, 5f), _whiteTex);
+            GUI.color = new Color(1f, 1f, 1f, alpha);
+            GUI.DrawTexture(r, artTex, ScaleMode.ScaleAndCrop);
         }
 
-        // Circular progress indicator (centered, above status text) - always bright
-        if (isRhythm)
-        {
-            float circleX = r.x + r.width / 2f - 30f;
-            float circleY = r.y + 105f;
-            float circleW = 60f;
-            const float borderThick = 4f;
-            float indicatorAlpha = Mathf.Max(0.85f, alpha); // Always keep indicator bright, even on dim cards
 
-            // Outer circle background (dark)
-            GUI.color = new Color(0.15f, 0.15f, 0.15f, 0.9f * indicatorAlpha);
-            GUI.DrawTexture(new Rect(circleX, circleY, circleW, circleW), _whiteTex);
-
-            // Inner circle fill (scales with approachFrac from 0 to 1)
-            float fillW = (circleW - borderThick * 2f) * approachFrac;
-            Color fillCol;
-            if (isShout)
-                fillCol = Color.Lerp(new Color(0.1f, 1f, 0.45f, 0.98f * indicatorAlpha), Color.white, pulse * 0.40f);
-            else if (approachFrac > 0.72f)
-                fillCol = Color.Lerp(new Color(1f, 0.8f, 0f, 0.90f * indicatorAlpha),
-                                     new Color(0.1f, 1f, 0.4f, 0.95f * indicatorAlpha),
-                                     (approachFrac - 0.72f) / 0.28f);
-            else
-                fillCol = new Color(0f, 0.85f, 1f, 0.80f * indicatorAlpha);
-
-            // Draw fill centered (inside the border)
-            float fillX = circleX + borderThick + ((circleW - borderThick * 2f) - fillW) / 2f;
-            float fillY = circleY + borderThick + ((circleW - borderThick * 2f) - fillW) / 2f;
-            GUI.color = fillCol;
-            GUI.DrawTexture(new Rect(fillX, fillY, fillW, fillW), _whiteTex);
-
-            // Thick circle border (bright outline - always visible)
-            GUI.color = new Color(0.2f, 0.9f, 1f, 0.98f * indicatorAlpha);
-            GUI.DrawTexture(new Rect(circleX, circleY, circleW, borderThick), _whiteTex); // top
-            GUI.DrawTexture(new Rect(circleX, circleY + circleW - borderThick, circleW, borderThick), _whiteTex); // bottom
-            GUI.DrawTexture(new Rect(circleX, circleY, borderThick, circleW), _whiteTex); // left
-            GUI.DrawTexture(new Rect(circleX + circleW - borderThick, circleY, borderThick, circleW), _whiteTex); // right
-        }
-
-        // Corner brackets
-        float glowT  = isRhythm ? approachFrac : 0f;
-        float bLen   = isShout ? Mathf.Lerp(20f, 26f, pulse) : 18f;
-        float bThick = isShout ? Mathf.Lerp(2f,  3f,  pulse) : 2f;
-        Color bracketBase = new Color(0.85f, 0f, 1f, alpha);
-        Color bracketHot  = new Color(0.6f,  0f, 1f, alpha);
-        if (isShout) bracketBase = Color.Lerp(bracketBase, Color.white, pulse * 0.45f);
-        Color bCol2 = Color.Lerp(bracketBase, bracketHot, glowT);
-        GUI.color = new Color(bCol2.r, bCol2.g, bCol2.b, bCol2.a * (0.55f + glowT * 0.45f));
-        DrawBrackets(r.x, r.y, r.width, r.height, bLen, bThick);
-
-        // Text
-        GUI.color = Color.white;
-
-        // Card name with cyan glow
-        Color cardNameColor = new Color(0f, 1f, 1f, alpha);
-        CyberpunkGUIUtils.DrawGlowText(new Rect(r.x, r.y + 8f, r.width, 34f), card.cardName, cardNameColor, _titleStyle, new Color(0f, 1f, 1f, alpha * 0.3f));
-
-        // Description with light cyan glow
-        Color descColor = new Color(0.72f, 0.88f, 1f, 0.82f * alpha);
-        CyberpunkGUIUtils.DrawGlowText(new Rect(r.x + 5f, r.y + 46f, r.width - 10f, 54f), card.description, descColor, _descStyle, new Color(0.3f, 0.8f, 1f, descColor.a * 0.25f));
-
-        _statusStyle.normal.textColor = Color.white;
-
-        if (isRhythm && !isBlocked)
-        {
-            string stateText;
-            Color  stateCol;
-            Color  glowCol;
-            if (isShout)
-            {
-                stateText = "!! SHOUT !!";
-                stateCol  = new Color(0.2f, 1f, 0.5f, (0.78f + pulse * 0.22f) * alpha);
-                glowCol   = new Color(0.2f, 1f, 0.5f, 0.4f * alpha);
-            }
-            else if (approachFrac > 0.68f)
-            {
-                float ramp = (approachFrac - 0.68f) / 0.32f;
-                stateText  = "GET READY";
-                stateCol   = new Color(1f, Mathf.Lerp(0.65f, 0.9f, ramp), 0.1f,
-                                       Mathf.Lerp(0.5f, 0.9f, ramp) * alpha);
-                glowCol    = new Color(1f, 1f, 0.3f, 0.3f * alpha);
-            }
-            else
-            {
-                stateText = "Command your\nattack now";
-                stateCol  = new Color(1f, 1f, 1f, 0.25f * alpha);
-                glowCol   = new Color(0.2f, 0.8f, 1f, 0.15f * alpha);
-            }
-            CyberpunkGUIUtils.DrawGlowText(new Rect(r.x, r.y + r.height - 30f, r.width, 24f), stateText, stateCol, _statusStyle, glowCol);
-        }
-
-        // Selection glow effect for picked cards
-        if (isSelected)
-        {
-            float glowPulse = (Mathf.Sin(Time.time * 6f) + 1f) * 0.5f;
-            float glowAlpha = Mathf.Lerp(0.3f, 0.8f, glowPulse);
-
-            // Outer glow border (cyan)
-            GUI.color = new Color(0f, 1f, 1f, glowAlpha * 0.7f);
-            GUI.DrawTexture(new Rect(r.x - 3f, r.y - 3f, r.width + 6f, 3f), _whiteTex); // top
-            GUI.DrawTexture(new Rect(r.x - 3f, r.y + r.height, r.width + 6f, 3f), _whiteTex); // bottom
-            GUI.DrawTexture(new Rect(r.x - 3f, r.y, 3f, r.height), _whiteTex); // left
-            GUI.DrawTexture(new Rect(r.x + r.width, r.y, 3f, r.height), _whiteTex); // right
-
-            // Corner spark effect (white)
-            float sparkSize = 6f;
-            GUI.color = Color.white;
-            GUI.DrawTexture(new Rect(r.x - 3f, r.y - 3f, sparkSize, sparkSize), _whiteTex);
-            GUI.DrawTexture(new Rect(r.x + r.width - sparkSize + 3f, r.y - 3f, sparkSize, sparkSize), _whiteTex);
-            GUI.DrawTexture(new Rect(r.x - 3f, r.y + r.height - sparkSize + 3f, sparkSize, sparkSize), _whiteTex);
-            GUI.DrawTexture(new Rect(r.x + r.width - sparkSize + 3f, r.y + r.height - sparkSize + 3f, sparkSize, sparkSize), _whiteTex);
-        }
 
         // Electric block effect for locked/cooldown cards
         if (isBlocked)

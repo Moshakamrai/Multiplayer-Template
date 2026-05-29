@@ -120,13 +120,16 @@ public class ShopUI : MonoBehaviour
         float cardH = 50f;
         float pad = 8f;
 
-        if (inv != null && (inv.ownedCombatCards.Count > 0 || inv.ownedVexCards.Count > 0 || !string.IsNullOrEmpty(inv.equippedTraitId)))
+        if (inv != null && (inv.ownedCombatCards.Count > 0 || !string.IsNullOrEmpty(inv.equippedTraitId)))
         {
-            // Combat cards
+            // Combat cards with capacity indicator
             if (inv.ownedCombatCards.Count > 0)
             {
+                bool atMax = inv.ownedCombatCards.Count >= PlayerInventory.MaxCombatCards;
+                Color headerColor = atMax ? new Color(1f, 0.4f, 0.2f) : CyberpunkGUIUtils.NEON_ORANGE;
                 GUIStyle combatHeaderStyle = new GUIStyle(_descStyle);
-                CyberpunkGUIUtils.DrawGlowText(new Rect(x + MARGIN, cardY, cardW, 22), $"COMBAT ({inv.ownedCombatCards.Count})", CyberpunkGUIUtils.NEON_ORANGE, combatHeaderStyle, CyberpunkGUIUtils.NEON_ORANGE);
+                string capacityLabel = atMax ? $"COMBAT ({inv.ownedCombatCards.Count}/8) — FULL" : $"COMBAT ({inv.ownedCombatCards.Count}/8)";
+                CyberpunkGUIUtils.DrawGlowText(new Rect(x + MARGIN, cardY, cardW, 22), capacityLabel, headerColor, combatHeaderStyle, headerColor);
                 cardY += 24f;
 
                 foreach (var cardId in inv.ownedCombatCards)
@@ -137,26 +140,11 @@ public class ShopUI : MonoBehaviour
                 }
             }
 
-            // Vex cards
-            if (inv.ownedVexCards.Count > 0)
-            {
-                GUIStyle vexHeaderStyle = new GUIStyle(_descStyle);
-                CyberpunkGUIUtils.DrawGlowText(new Rect(x + MARGIN, cardY, cardW, 22), $"VEX ({inv.ownedVexCards.Count})", CyberpunkGUIUtils.NEON_MAGENTA, vexHeaderStyle, CyberpunkGUIUtils.NEON_MAGENTA);
-                cardY += 24f;
-
-                foreach (var cardId in inv.ownedVexCards)
-                {
-                    if (cardY + cardH > y + h - 10) break;
-                    DrawInventoryCard(x + MARGIN, cardY, cardW, cardH, cardId, "Vex", false);
-                    cardY += cardH + pad;
-                }
-            }
-
-            // Trait
+            // Active trait
             if (!string.IsNullOrEmpty(inv.equippedTraitId))
             {
                 GUIStyle traitHeaderStyle = new GUIStyle(_descStyle);
-                CyberpunkGUIUtils.DrawGlowText(new Rect(x + MARGIN, cardY, cardW, 22), "TRAIT", CyberpunkGUIUtils.NEON_GREEN, traitHeaderStyle, CyberpunkGUIUtils.NEON_GREEN);
+                CyberpunkGUIUtils.DrawGlowText(new Rect(x + MARGIN, cardY, cardW, 22), "TRAIT (PASSIVE)", CyberpunkGUIUtils.NEON_GREEN, traitHeaderStyle, CyberpunkGUIUtils.NEON_GREEN);
                 cardY += 24f;
                 DrawInventoryCard(x + MARGIN, cardY, cardW, cardH, inv.equippedTraitId, "Trait", false);
             }
@@ -188,17 +176,6 @@ public class ShopUI : MonoBehaviour
                 rarityColor = card.rarity == CardRarity.Basic ? new Color(0.6f, 0.6f, 0.6f) :
                              card.rarity == CardRarity.Advanced ? new Color(0.2f, 0.5f, 1f) :
                              new Color(1f, 0.75f, 0.1f);
-            }
-        }
-        else if (category == "Vex")
-        {
-            var card = CardDatabase.VexCards.FirstOrDefault(c => c.cardId == cardId);
-            if (card != null)
-            {
-                displayName = card.displayName;
-                description = card.description;
-                cost = card.cost;
-                rarityColor = new Color(0.9f, 0.3f, 1f);
             }
         }
         else if (category == "Trait")
@@ -263,7 +240,7 @@ public class ShopUI : MonoBehaviour
         if (spm.CombatShopSlots != null)
             DrawCombatShopPanel(x1, startY, panelW, panelH, "COMBAT CARDS (8)", new Color(1f, 0.5f, 0.15f), spm.CombatShopSlots, inv, spm);
         if (spm.TraitShopSlots != null)
-            DrawTraitShopPanel(x2, startY, panelW, panelH, "TRAITS (4)", new Color(0.9f, 0.3f, 1f), spm.TraitShopSlots, inv, spm);
+            DrawTraitShopPanel(x2, startY, panelW, panelH, "TRAITS (4)", new Color(0.25f, 0.9f, 0.4f), spm.TraitShopSlots, inv, spm);
     }
 
     private void DrawCombatShopPanel(float x, float y, float w, float h, string title, Color accent, IReadOnlyList<CombatCardData> slots, PlayerInventory inv, ShopPhaseManager spm)
@@ -288,7 +265,7 @@ public class ShopUI : MonoBehaviour
         }
     }
 
-    private void DrawTraitShopPanel(float x, float y, float w, float h, string title, Color accent, IReadOnlyList<VexCardData> slots, PlayerInventory inv, ShopPhaseManager spm)
+    private void DrawTraitShopPanel(float x, float y, float w, float h, string title, Color accent, IReadOnlyList<TraitCardData> slots, PlayerInventory inv, ShopPhaseManager spm)
     {
         DrawPanelBorder(x, y, w, h, accent);
         DrawSectionHeader(x, y, w, title, accent);
@@ -304,7 +281,7 @@ public class ShopUI : MonoBehaviour
             bool hasCard = i < slots.Count && slots[i] != null && !isPurchased;
 
             if (hasCard)
-                DrawVexCard(x + pad, cardY, cardW, cardH, slots[i], inv, i, spm);
+                DrawTraitCard(x + pad, cardY, cardW, cardH, slots[i], inv, i, spm);
             else
                 DrawEmptySlot(x + pad, cardY, cardW, cardH);
         }
@@ -364,16 +341,33 @@ public class ShopUI : MonoBehaviour
         GUIStyle costStyle = new GUIStyle(_costStyle);
         CyberpunkGUIUtils.DrawGlowText(new Rect(x + 8f, y + h - 22f, 50f, 18f), $"{card.cost} CR", CyberpunkGUIUtils.NEON_YELLOW, costStyle, CyberpunkGUIUtils.NEON_YELLOW);
 
-        // Buy button with hover effect
-        Rect btnRect = new Rect(x + w - 55f, y + h - 24f, 50f, 22f);
-        GUI.color = isHovered ? new Color(0.2f, 0.9f, 0.4f, 0.9f) : new Color(0.15f, 0.7f, 0.3f, 0.8f);
-        if (GUI.Button(btnRect, "BUY", _buttonStyle))
+        // Buy button — disabled when inventory is full
+        bool inventoryFull = inv != null && inv.ownedCombatCards.Count >= PlayerInventory.MaxCombatCards;
+        Rect btnRect = new Rect(x + w - 75f, y + h - 24f, 70f, 22f);
+        if (inventoryFull)
         {
-            var localPc = GameManager.localPlayer?.GetComponent<PlayerCombat>();
-            if (localPc != null) localPc.CmdBuyCombatCard(slotIndex);
-            spm.MarkCombatSlotPurchased(slotIndex);
+            GUI.color = new Color(0.5f, 0.5f, 0.5f, 0.5f);
+            GUI.Button(btnRect, "FULL", _buttonStyle);
+        }
+        else
+        {
+            GUI.color = isHovered ? new Color(0.2f, 0.9f, 0.4f, 0.9f) : new Color(0.15f, 0.7f, 0.3f, 0.8f);
+            if (GUI.Button(btnRect, "BUY", _buttonStyle))
+            {
+                var localPc = GameManager.localPlayer?.GetComponent<PlayerCombat>();
+                if (localPc != null) localPc.CmdBuyCombatCard(slotIndex);
+                spm.MarkCombatSlotPurchased(slotIndex);
+            }
         }
         GUI.color = Color.white;
+
+        // "DECK FULL" overlay hint when hovering and full
+        if (inventoryFull && isHovered)
+        {
+            GUIStyle fullHint = new GUIStyle(GUI.skin.label) { fontSize = 10, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+            fullHint.normal.textColor = new Color(1f, 0.5f, 0.2f);
+            GUI.Label(new Rect(x, y + h - 38f, w, 16f), "REMOVE A CARD FIRST", fullHint);
+        }
 
         if (isHovered)
         {
@@ -385,19 +379,20 @@ public class ShopUI : MonoBehaviour
         }
     }
 
-    private void DrawVexCard(float x, float y, float w, float h, VexCardData card, PlayerInventory inv, int slotIndex, ShopPhaseManager spm)
+    private void DrawTraitCard(float x, float y, float w, float h, TraitCardData card, PlayerInventory inv, int slotIndex, ShopPhaseManager spm)
     {
         Rect fullCardRect = new Rect(x, y, w, h);
         bool isHovered = fullCardRect.Contains(Event.current.mousePosition);
+        bool alreadyEquipped = inv != null && inv.equippedTraitId == card.traitId;
 
         // Background
-        GUI.color = isHovered ? new Color(0.12f, 0.05f, 0.15f) : new Color(0.05f, 0.06f, 0.12f);
+        GUI.color = isHovered ? new Color(0.04f, 0.14f, 0.08f) : new Color(0.03f, 0.08f, 0.05f);
         GUI.DrawTexture(fullCardRect, _whiteTex);
 
-        // Enhanced glow border on hover
+        // Border — green glow for traits
         if (isHovered)
         {
-            GUI.color = new Color(1f, 0.2f, 0.8f, 0.8f); // Magenta glow
+            GUI.color = new Color(0.25f, 1f, 0.5f, 0.8f);
             GUI.DrawTexture(new Rect(x - 2, y - 2, w + 4, 4f), _whiteTex);
             GUI.DrawTexture(new Rect(x - 2, y + h - 2, w + 4, 4f), _whiteTex);
             GUI.DrawTexture(new Rect(x - 2, y, 4f, h), _whiteTex);
@@ -405,43 +400,58 @@ public class ShopUI : MonoBehaviour
         }
         else
         {
-            GUI.color = new Color(0.9f, 0.3f, 1f);
+            GUI.color = alreadyEquipped ? new Color(1f, 0.8f, 0.1f) : new Color(0.25f, 0.9f, 0.4f);
             GUI.DrawTexture(new Rect(x, y, w, 2f), _whiteTex);
             GUI.DrawTexture(new Rect(x, y + h - 2f, w, 2f), _whiteTex);
         }
 
-        // Card name with glow
+        // PASSIVE badge
+        GUI.color = new Color(0.1f, 0.4f, 0.2f, 0.8f);
+        GUI.DrawTexture(new Rect(x + w - 68f, y + 4f, 60f, 16f), _whiteTex);
+        GUIStyle badgeStyle = new GUIStyle(GUI.skin.label) { fontSize = 9, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+        badgeStyle.normal.textColor = new Color(0.3f, 1f, 0.5f);
+        GUI.color = Color.white;
+        GUI.Label(new Rect(x + w - 68f, y + 4f, 60f, 16f), "PASSIVE", badgeStyle);
+
+        // Card name
         GUIStyle nameStyle = new GUIStyle(_cardNameStyle);
-        Color nameColor = isHovered ? CyberpunkGUIUtils.NEON_MAGENTA : Color.white;
-        CyberpunkGUIUtils.DrawGlowText(new Rect(x + 8f, y + 4f, w - 70f, 18f), card.displayName.ToUpper(), nameColor, nameStyle, nameColor);
+        Color nameColor = isHovered ? new Color(0.4f, 1f, 0.6f) : Color.white;
+        CyberpunkGUIUtils.DrawGlowText(new Rect(x + 8f, y + 4f, w - 76f, 18f), card.displayName.ToUpper(), nameColor, nameStyle, nameColor);
 
-        // Effect and description with better visibility
+        // Effect text
         _descStyle.fontSize = 10;
-        string fullDesc = $"{card.effect}\n{card.description}";
-        GUI.color = isHovered ? new Color(1f, 1f, 1f, 0.95f) : new Color(0.9f, 0.9f, 0.9f, 0.85f);
-        GUI.Label(new Rect(x + 8f, y + 24f, w - 16f, h - 54f), fullDesc, _descStyle);
+        GUI.color = isHovered ? new Color(1f, 1f, 1f, 0.95f) : new Color(0.88f, 0.95f, 0.88f, 0.85f);
+        GUI.Label(new Rect(x + 8f, y + 24f, w - 16f, h - 54f), card.effect, _descStyle);
 
-        // Cost with glow
+        // Cost
         GUIStyle costStyle = new GUIStyle(_costStyle);
-        CyberpunkGUIUtils.DrawGlowText(new Rect(x + 8f, y + h - 22f, 50f, 18f), $"{card.cost} CR", CyberpunkGUIUtils.NEON_YELLOW, costStyle, CyberpunkGUIUtils.NEON_YELLOW);
+        CyberpunkGUIUtils.DrawGlowText(new Rect(x + 8f, y + h - 22f, 60f, 18f), $"{card.cost} CR", CyberpunkGUIUtils.NEON_YELLOW, costStyle, CyberpunkGUIUtils.NEON_YELLOW);
 
-        // Buy button with hover effect
-        Rect btnRect = new Rect(x + w - 55f, y + h - 24f, 50f, 22f);
-        GUI.color = isHovered ? new Color(0.2f, 0.9f, 0.4f, 0.9f) : new Color(0.15f, 0.7f, 0.3f, 0.8f);
-        if (GUI.Button(btnRect, "BUY", _buttonStyle))
+        // Buy / Equipped state
+        Rect btnRect = new Rect(x + w - 75f, y + h - 24f, 70f, 22f);
+        if (alreadyEquipped)
         {
-            var localPc = GameManager.localPlayer?.GetComponent<PlayerCombat>();
-            if (localPc != null) localPc.CmdBuyVexCard(slotIndex);
-            spm.MarkTraitSlotPurchased(slotIndex);
+            GUI.color = new Color(1f, 0.8f, 0.1f, 0.7f);
+            GUI.Button(btnRect, "EQUIPPED", _buttonStyle);
+        }
+        else
+        {
+            GUI.color = isHovered ? new Color(0.3f, 1f, 0.5f, 0.9f) : new Color(0.2f, 0.75f, 0.35f, 0.8f);
+            if (GUI.Button(btnRect, "BUY", _buttonStyle))
+            {
+                var localPc = GameManager.localPlayer?.GetComponent<PlayerCombat>();
+                if (localPc != null) localPc.CmdBuyTraitCard(slotIndex);
+                spm.MarkTraitSlotPurchased(slotIndex);
+            }
         }
         GUI.color = Color.white;
 
         if (isHovered)
         {
-            _hoveredCardId = card.cardId;
+            _hoveredCardId = card.traitId;
             _tooltipPos = Event.current.mousePosition;
             _tooltipTitle = card.displayName;
-            _tooltipText = $"{card.effect}\n{card.description}";
+            _tooltipText = $"{card.effect}\n\n{card.description}";
             _hasTooltip = true;
         }
     }
@@ -456,12 +466,12 @@ public class ShopUI : MonoBehaviour
         float cardH = 50f;
         float pad = 8f;
 
-        if (botInv != null && (botInv.ownedCombatCards.Count > 0 || botInv.ownedVexCards.Count > 0 || !string.IsNullOrEmpty(botInv.equippedTraitId)))
+        if (botInv != null && (botInv.ownedCombatCards.Count > 0 || !string.IsNullOrEmpty(botInv.equippedTraitId)))
         {
             if (botInv.ownedCombatCards.Count > 0)
             {
                 GUI.color = new Color(0.3f, 0.3f, 0.4f);
-                GUI.Label(new Rect(x + MARGIN, cardY, cardW, 22), $"COMBAT ({botInv.ownedCombatCards.Count})", _descStyle);
+                GUI.Label(new Rect(x + MARGIN, cardY, cardW, 22), $"COMBAT ({botInv.ownedCombatCards.Count}/8)", _descStyle);
                 cardY += 24f;
 
                 foreach (var cardId in botInv.ownedCombatCards)
@@ -472,24 +482,10 @@ public class ShopUI : MonoBehaviour
                 }
             }
 
-            if (botInv.ownedVexCards.Count > 0)
-            {
-                GUI.color = new Color(0.3f, 0.3f, 0.4f);
-                GUI.Label(new Rect(x + MARGIN, cardY, cardW, 22), $"VEX ({botInv.ownedVexCards.Count})", _descStyle);
-                cardY += 24f;
-
-                foreach (var cardId in botInv.ownedVexCards)
-                {
-                    if (cardY + cardH > y + h - 10) break;
-                    DrawOpponentCard(x + MARGIN, cardY, cardW, cardH, cardId, "Vex");
-                    cardY += cardH + pad;
-                }
-            }
-
             if (!string.IsNullOrEmpty(botInv.equippedTraitId))
             {
                 GUI.color = new Color(0.3f, 0.3f, 0.4f);
-                GUI.Label(new Rect(x + MARGIN, cardY, cardW, 22), "TRAIT", _descStyle);
+                GUI.Label(new Rect(x + MARGIN, cardY, cardW, 22), "TRAIT (PASSIVE)", _descStyle);
                 cardY += 24f;
                 DrawOpponentCard(x + MARGIN, cardY, cardW, cardH, botInv.equippedTraitId, "Trait");
             }
@@ -518,16 +514,6 @@ public class ShopUI : MonoBehaviour
                 rarityColor = card.rarity == CardRarity.Basic ? new Color(0.6f, 0.6f, 0.6f) :
                              card.rarity == CardRarity.Advanced ? new Color(0.2f, 0.5f, 1f) :
                              new Color(1f, 0.75f, 0.1f);
-            }
-        }
-        else if (category == "Vex")
-        {
-            var card = CardDatabase.VexCards.FirstOrDefault(c => c.cardId == cardId);
-            if (card != null)
-            {
-                displayName = card.displayName;
-                description = card.description;
-                rarityColor = new Color(0.9f, 0.3f, 1f);
             }
         }
         else if (category == "Trait")
@@ -577,7 +563,9 @@ public class ShopUI : MonoBehaviour
         Color typeColor = GetCardTypeColor(_hoveredCardId);
         string typeBadge = GetCardTypeBadge(_hoveredCardId);
 
-        float tooltipW  = 420f;
+        Texture2D cardArt = GetCardTexture(_hoveredCardId);
+        float artW = cardArt != null ? 100f : 0f;
+        float tooltipW  = 420f + artW;
         float headerH   = 38f;
         float descH     = 100f;
         float matchupH  = hasCounters ? (hasTwoParts ? 48f : 28f) : 0f;
@@ -594,6 +582,36 @@ public class ShopUI : MonoBehaviour
         GUI.color = new Color(0.03f, 0.04f, 0.11f, 0.97f);
         GUI.DrawTexture(new Rect(tooltipX, tooltipY, tooltipW, tooltipH), _whiteTex);
 
+        // Card art panel (left side if available)
+        float artX = tooltipX;
+        float textX = tooltipX;
+        if (cardArt != null && artW > 0)
+        {
+            GUI.color = new Color(0.08f, 0.08f, 0.16f);
+            GUI.DrawTexture(new Rect(artX, tooltipY, artW, tooltipH), _whiteTex);
+
+            // Draw card art with proper aspect ratio
+            float artAspect = (float)cardArt.width / cardArt.height;
+            float artDisplayW = artW - 8f;
+            float artDisplayH = tooltipH - 8f;
+            float artScaledW = artDisplayW;
+            float artScaledH = artScaledW / artAspect;
+            if (artScaledH > artDisplayH)
+            {
+                artScaledH = artDisplayH;
+                artScaledW = artScaledH * artAspect;
+            }
+            float artCenterX = artX + (artW - artScaledW) / 2f;
+            float artCenterY = tooltipY + (tooltipH - artScaledH) / 2f;
+
+            GUI.color = Color.white;
+            GUI.DrawTexture(new Rect(artCenterX, artCenterY, artScaledW, artScaledH), cardArt);
+
+            textX = artX + artW + 4f;
+            GUI.color = typeColor;
+            GUI.DrawTexture(new Rect(textX - 2f, tooltipY, 2f, tooltipH), _whiteTex);
+        }
+
         // Left rarity bar
         GUI.color = typeColor;
         GUI.DrawTexture(new Rect(tooltipX, tooltipY, 4f, tooltipH), _whiteTex);
@@ -605,28 +623,31 @@ public class ShopUI : MonoBehaviour
 
         // Header tint
         GUI.color = new Color(typeColor.r * 0.12f, typeColor.g * 0.12f, typeColor.b * 0.12f, 1f);
-        GUI.DrawTexture(new Rect(tooltipX + 4f, tooltipY + 2f, tooltipW - 4f, headerH - 2f), _whiteTex);
+        float headerX = cardArt != null ? textX : tooltipX + 4f;
+        float headerW = cardArt != null ? tooltipW - artW - 8f : tooltipW - 4f;
+        GUI.DrawTexture(new Rect(headerX, tooltipY + 2f, headerW, headerH - 2f), _whiteTex);
 
-        float cx = tooltipX + 14f;
-        float cw = tooltipW - 28f;
+        float cx = headerX + 10f;
+        float cw = headerW - 20f;
         float cy = tooltipY + 8f;
 
         // ── Header: name + type badge ─────────────────────────────────────────
         GUI.color = Color.white;
         GUIStyle titleSt = new GUIStyle(GUI.skin.label) { fontSize = 20, fontStyle = FontStyle.Bold };
         titleSt.normal.textColor = typeColor;
-        GUI.Label(new Rect(cx, cy, cw - 46f, 26f), _tooltipTitle.ToUpper(), titleSt);
+        GUI.Label(new Rect(cx, cy, cw - 56f, 26f), _tooltipTitle.ToUpper(), titleSt);
 
         // Type badge box
+        float badgeX = tooltipX + tooltipW - 52f;
         GUI.color = new Color(typeColor.r * 0.25f, typeColor.g * 0.25f, typeColor.b * 0.25f, 0.9f);
-        GUI.DrawTexture(new Rect(tooltipX + tooltipW - 52f, cy - 1f, 44f, 22f), _whiteTex);
+        GUI.DrawTexture(new Rect(badgeX, cy - 1f, 44f, 22f), _whiteTex);
         GUI.color = typeColor;
-        GUI.DrawTexture(new Rect(tooltipX + tooltipW - 52f, cy - 1f, 44f, 1.5f), _whiteTex);
-        GUI.DrawTexture(new Rect(tooltipX + tooltipW - 52f, cy + 20.5f, 44f, 1.5f), _whiteTex);
+        GUI.DrawTexture(new Rect(badgeX, cy - 1f, 44f, 1.5f), _whiteTex);
+        GUI.DrawTexture(new Rect(badgeX, cy + 20.5f, 44f, 1.5f), _whiteTex);
         GUIStyle badgeSt = new GUIStyle(GUI.skin.label) { fontSize = 11, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
         badgeSt.normal.textColor = typeColor;
         GUI.color = Color.white;
-        GUI.Label(new Rect(tooltipX + tooltipW - 52f, cy - 1f, 44f, 22f), typeBadge, badgeSt);
+        GUI.Label(new Rect(badgeX, cy - 1f, 44f, 22f), typeBadge, badgeSt);
 
         // ── Description ───────────────────────────────────────────────────────
         cy = tooltipY + headerH + 6f;
@@ -689,6 +710,17 @@ public class ShopUI : MonoBehaviour
         GUI.color = Color.white;
     }
 
+    private Texture2D GetCardTexture(string cardId)
+    {
+        if (string.IsNullOrEmpty(cardId)) return null;
+
+        var artLib = FindObjectOfType<CardArtLibrary>();
+        if (artLib == null) return null;
+
+        // Try to get the texture using the card ID
+        return artLib.GetTextureForTrigger(cardId);
+    }
+
     private Color GetCardTypeColor(string cardId)
     {
         var combat = CardDatabase.BasicCards.Concat(CardDatabase.AdvancedCards).Concat(CardDatabase.LegendaryCards)
@@ -699,7 +731,6 @@ public class ShopUI : MonoBehaviour
             if (combat.rarity == CardRarity.Advanced)  return new Color(0.3f, 0.6f, 1f);
             return combat.type == CardType.Attack ? new Color(1f, 0.4f, 0.15f) : new Color(0f, 0.9f, 0.9f);
         }
-        if (CardDatabase.VexCards.Any(c => c.cardId == cardId)) return new Color(0.9f, 0.3f, 1f);
         return new Color(0.25f, 0.9f, 0.4f);
     }
 
@@ -708,7 +739,6 @@ public class ShopUI : MonoBehaviour
         var combat = CardDatabase.BasicCards.Concat(CardDatabase.AdvancedCards).Concat(CardDatabase.LegendaryCards)
             .FirstOrDefault(c => c.cardId == cardId);
         if (combat != null) return combat.type == CardType.Attack ? "ATK" : "DEF";
-        if (CardDatabase.VexCards.Any(c => c.cardId == cardId)) return "VEX";
         return "TRAIT";
     }
 

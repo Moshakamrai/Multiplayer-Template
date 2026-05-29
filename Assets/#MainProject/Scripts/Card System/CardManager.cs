@@ -315,29 +315,33 @@ public class CardManager : NetworkBehaviour
         var inv = GetComponent<PlayerInventory>();
         if (inv != null && inv.equippedCombatCards.Count > 0)
         {
-            // Map trigger names to card IDs
+            // Map 3-layer trigger names to card IDs
             string cardId = trigger switch
             {
-                "Jab" => "jab",
-                "Cross" => "cross",
-                "Hook" => "hook",
-                "Block" => "block",
-                "Left" => "dodge_left",
-                "Right" => "dodge_right",
-                "ParryIntent" => "reflect",
-                "UnbreakablePunch" => "boom",
-                "Grapple" => "grapple",
-                "Fake" => "fake",
-                "Clutch" => "clutch",
-                "Uppercut" => "uppercut",
+                // LOW ATTACKS
+                "JabLow" => "jab_low",
                 "Sweep" => "sweep",
-                "Focus" => "focus",
-                "Taunt" => "taunt",
-                "Overclock" => "overclock",
-                "Reverse" => "reverse",
-                "Trap" => "trap",
-                "Cage" => "cage",
-                "Mirror" => "mirror",
+                "DriveLow" => "drive_low",
+                // MID ATTACKS
+                "Cross" => "cross",
+                "HookFast" => "hook_fast",
+                "Overhead" => "overhead",
+                // HIGH ATTACKS
+                "SlapHigh" => "slap_high",
+                "SpinningSlash" => "spinning_slash",
+                "SmashHigh" => "smash_high",
+                // LOW BLOCKS
+                "BlockLow" => "block_low",
+                "CounterLow" => "counter_low",
+                "DodgeLow" => "dodge_low",
+                // MID BLOCKS
+                "GuardMid" => "guard_mid",
+                "ParryMid" => "parry_mid",
+                "SwayMid" => "sway_mid",
+                // HIGH BLOCKS
+                "GuardHigh" => "guard_high",
+                "InterceptHigh" => "intercept_high",
+                "RedirectHigh" => "redirect_high",
                 _ => trigger.ToLower()
             };
             if (!inv.equippedCombatCards.Contains(cardId)) return false;

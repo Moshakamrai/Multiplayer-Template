@@ -128,9 +128,9 @@ public class ShopPhaseManager : MonoBehaviour
             attempts++;
             float roll = Random.value;
             CombatCardData[] pool;
-            if (roll < basicChance) pool = CardDatabase.BasicCards.ToArray();
-            else if (roll < basicChance + advancedChance) pool = CardDatabase.AdvancedCards.ToArray();
-            else pool = CardDatabase.LegendaryCards.ToArray();
+            if (roll < basicChance) pool = CardDatabase.BasicCards;
+            else if (roll < basicChance + advancedChance) pool = CardDatabase.AdvancedCards;
+            else pool = CardDatabase.LegendaryCards;
 
             if (pool.Length == 0) continue;
             var card = pool[Random.Range(0, pool.Length)];

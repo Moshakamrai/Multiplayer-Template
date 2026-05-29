@@ -184,7 +184,7 @@ public class VoiceCommandManager : NetworkBehaviour
             string trigger = "";
             Vector3 dashDir = Vector3.zero;
 
-            // 1. RECOGNITION MAPPING
+            // 1. RECOGNITION MAPPING (3-LAYER SYSTEM: 9 Cards Total)
             if (word == "cancel" || word == "clear" || GetSimilarity(word, "cancel") > 0.72f)
             {
                 _myCombat.CancelLastInput();
@@ -192,29 +192,30 @@ public class VoiceCommandManager : NetworkBehaviour
                 continue;
             }
 
-            if (GetSimilarity(word, "punch") > 0.7f ) { trigger = "Jab"; recognized = true; }
-            else if (word == "flank" || word == "blank" || word == "frank" || GetSimilarity(word, "flank") > 0.75f) { trigger = "Cross"; recognized = true; }
-            else if (GetSimilarity(word, "hook") > 0.75f) { trigger = "Hook"; recognized = true; }
-            else if (GetSimilarity(word, "block") > 0.75f || GetSimilarity(word, "guard") > 0.75f) { trigger = "Block"; recognized = true; }
-            else if (GetSimilarity(word, "parry") > 0.75f || word == "reflect") { trigger = "ParryIntent"; recognized = true; }
-            else if (word == "crush" || word == "crash" || word == "crushing" || word == "crashing" || GetSimilarity(word, "crush") > 0.75f) { trigger = "UnbreakablePunch"; recognized = true; }
-            else if (GetSimilarity(word, "left") > 0.75f) { trigger = "Left"; dashDir = Vector3.left; recognized = true; }
-            else if (GetSimilarity(word, "right") > 0.75f) { trigger = "Right"; dashDir = Vector3.right; recognized = true; }
-            // ── NEW CARDS (Basic) ──
-            else if (GetSimilarity(word, "grapple") > 0.75f || word == "grab" || word == "wrap") { trigger = "Grapple"; recognized = true; }
-            else if (GetSimilarity(word, "fake") > 0.70f || word == "faint" || word == "paint") { trigger = "Fake"; recognized = true; }
-            else if (GetSimilarity(word, "clutch") > 0.75f || word == "catch" || word == "crunch") { trigger = "Clutch"; recognized = true; }
-            // ── NEW CARDS (Advanced) ──
-            else if (GetSimilarity(word, "uppercut") > 0.75f || word == "upper" || word == "cutter") { trigger = "Uppercut"; recognized = true; }
+            // ── LOW ATTACKS (Cyan) ──
+            if (GetSimilarity(word, "punch") > 0.7f || word == "jab") { trigger = "JabLow"; recognized = true; }
             else if (GetSimilarity(word, "sweep") > 0.75f || word == "swipe" || word == "sweet") { trigger = "Sweep"; recognized = true; }
-            else if (GetSimilarity(word, "focus") > 0.75f || word == "charge" || word == "power") { trigger = "Focus"; recognized = true; }
-            else if (GetSimilarity(word, "taunt") > 0.75f || word == "taught" || word == "tall") { trigger = "Taunt"; recognized = true; }
-            // ── NEW CARDS (Legendary) ──
-            else if (GetSimilarity(word, "overclock") > 0.70f || word == "over" || word == "clock" || word == "overload") { trigger = "Overclock"; recognized = true; }
-            else if (GetSimilarity(word, "reverse") > 0.75f || word == "revert" || word == "reflect") { trigger = "Reverse"; recognized = true; }
-            else if (GetSimilarity(word, "trap") > 0.75f || word == "trip" || word == "track") { trigger = "Trap"; recognized = true; }
-            else if (GetSimilarity(word, "mirror") > 0.75f || word == "mere" || word == "near") { trigger = "Mirror"; recognized = true; }
-            else if (GetSimilarity(word, "cage") > 0.75f || word == "lock" || word == "seal") { trigger = "Cage"; recognized = true; }
+            else if (GetSimilarity(word, "drive") > 0.75f || word == "stab" || word == "thrust") { trigger = "DriveLow"; recognized = true; }
+            // ── MID ATTACKS (White) ──
+            else if (word == "cross" || word == "flank" || word == "blank" || word == "frank" || GetSimilarity(word, "cross") > 0.75f) { trigger = "Cross"; recognized = true; }
+            else if (GetSimilarity(word, "hook") > 0.75f && GetSimilarity(word, "uppercut") < 0.70f) { trigger = "HookFast"; recognized = true; }
+            else if (GetSimilarity(word, "overhead") > 0.75f || word == "chop" || word == "smash") { trigger = "Overhead"; recognized = true; }
+            // ── HIGH ATTACKS (Yellow/Gold) ──
+            else if (GetSimilarity(word, "slap") > 0.75f || word == "tap" || word == "hit") { trigger = "SlapHigh"; recognized = true; }
+            else if (GetSimilarity(word, "spin") > 0.75f || word == "spinning" || word == "slash") { trigger = "SpinningSlash"; recognized = true; }
+            else if (GetSimilarity(word, "smash") > 0.75f || GetSimilarity(word, "pound") > 0.75f) { trigger = "SmashHigh"; recognized = true; }
+            // ── LOW BLOCKS (Cyan) ──
+            else if (GetSimilarity(word, "crouch") > 0.75f || word == "duck" || GetSimilarity(word, "block") > 0.75f) { trigger = "BlockLow"; recognized = true; }
+            else if (GetSimilarity(word, "counter") > 0.75f) { trigger = "CounterLow"; recognized = true; }
+            else if (GetSimilarity(word, "dodge") > 0.75f || GetSimilarity(word, "left") > 0.75f) { trigger = "DodgeLow"; dashDir = Vector3.left; recognized = true; }
+            // ── MID BLOCKS (White) ──
+            else if (GetSimilarity(word, "guard") > 0.75f || word == "middle") { trigger = "GuardMid"; recognized = true; }
+            else if (GetSimilarity(word, "parry") > 0.75f || word == "reflect") { trigger = "ParryMid"; recognized = true; }
+            else if (GetSimilarity(word, "sway") > 0.75f) { trigger = "SwayMid"; recognized = true; }
+            // ── HIGH BLOCKS (Yellow/Gold) ──
+            else if (GetSimilarity(word, "guard_high") > 0.75f || word == "high") { trigger = "GuardHigh"; recognized = true; }
+            else if (GetSimilarity(word, "intercept") > 0.75f) { trigger = "InterceptHigh"; recognized = true; }
+            else if (GetSimilarity(word, "redirect") > 0.75f || word == "bounce") { trigger = "RedirectHigh"; dashDir = Vector3.right; recognized = true; }
             // Combo card selection — "one/two/three/four"
 
 

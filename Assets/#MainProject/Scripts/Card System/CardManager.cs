@@ -491,7 +491,7 @@ public class CardManager : NetworkBehaviour
             float baseY     = Screen.height - nHeight - 20f + hoverY;
             float gap       = 50f;
 
-            var allDefCards = new[] { "Block", "ParryIntent", "Left", "Right", "Clutch", "Focus", "Taunt", "Trap", "Cage", "Mirror", "Striker", "Tank", "Speedster", "Grappler", "Trickster", "Vampire", "Glass", "Momentum" };
+            var allDefCards = new[] { "Block", "Guard", "ParryIntent", "Left", "Right", "Clutch", "Focus", "Taunt", "Trap", "Cage", "Mirror", "Striker", "Tank", "Speedster", "Grappler", "Trickster", "Vampire", "Glass", "Momentum" };
             var allAtkCards = new[] { "Jab", "Cross", "Hook", "UnbreakablePunch", "Grapple", "Fake", "Uppercut", "Sweep", "Overclock", "Reverse" };
 
             var defCards = (availableCardsForRound.Count > 0)
@@ -952,12 +952,13 @@ public class CardManager : NetworkBehaviour
             GUI.DrawTexture(r, artTex, ScaleMode.ScaleAndCrop);
         }
 
-
-
-        // Electric block effect for locked/cooldown cards
+        // Subtle cooldown effect: desaturate card when blocked/used
         if (isBlocked)
         {
-            CyberpunkGUIUtils.DrawElectricBlockEffect(r);
+            // 50% darkening overlay (smaller than before)
+            GUI.color = new Color(0f, 0f, 0f, 0.35f);
+            GUI.DrawTexture(r, _whiteTex);
+            GUI.color = Color.white;
         }
     }
 

@@ -40,19 +40,6 @@ public class CardDatabase : MonoBehaviour
         new CombatCardData { cardId="clutch", displayName="Clutch", rarity=CardRarity.Legendary, type=CardType.Defense, cost=3, timingWindow=0.30f, damagePercent="0% or +30%", description="HIGH RISK. Perfect timing nullifies Boom/Hook and reflects +15% back. Good timing = full block, no reflect. Miss = +20% self-damage. ONCE PER ROUND. COUNTERS: Boom, Hook. BEATEN BY: Jab, Cross, Grapple.", triggerName="Clutch" },
     };
 
-    // ── VEX CARDS ──────────────────────────────────────────────────────────
-    public static readonly VexCardData[] VexCards = new VexCardData[]
-    {
-        new VexCardData { cardId="striker", displayName="Striker", type=CardType.Meta, cost=2, effect="+15% all attack damage for 2 consecutive turns", description="PLAY AS DEFENSE to activate. Boost all attack damage +15% for 2 beats. Best with Boom or Hook." },
-        new VexCardData { cardId="tank", displayName="Tank", type=CardType.Meta, cost=2, effect="-25% damage taken for 2 consecutive turns", description="PLAY AS DEFENSE to activate. Take -25% damage for 2 beats. Hard counter to burst combos." },
-        new VexCardData { cardId="speedster", displayName="Speedster", type=CardType.Meta, cost=2, effect="+20% timing window, -8% damage for 2 consecutive turns", description="PLAY AS DEFENSE to activate. Timing windows +20% for 2 beats, damage -8%. Great for risky cards." },
-        new VexCardData { cardId="grappler", displayName="Grappler", type=CardType.Meta, cost=2, effect="Grapple +30% damage, next 2 times its used", description="PLAY AS DEFENSE to activate. Your next 2 Grapples deal +30% damage. Combo with Cage to force defends." },
-        new VexCardData { cardId="trickster", displayName="Trickster", type=CardType.Meta, cost=3, effect="Fake/Taunt/Trap effects doubled for next time use only", description="PLAY AS DEFENSE to activate. Next use of Fake/Trap has doubled effect. One-time burst." },
-        new VexCardData { cardId="vampire", displayName="Vampire", type=CardType.Meta, cost=4, effect="Heal 5% on every successful hit throughout the round", description="PLAY AS DEFENSE to activate. Heal 5% HP on every successful hit this round. Snowballs with combos." },
-        new VexCardData { cardId="glass", displayName="Glass", type=CardType.Meta, cost=3, effect="40% all damage, 20% damage taken throughout the round", description="PLAY AS DEFENSE to activate. All your damage +40%, damage taken +20% for the round. High risk." },
-        new VexCardData { cardId="momentum", displayName="Momentum", type=CardType.Meta, cost=5, effect="Consecutive hits increase damage by 10% per hit", description="PLAY AS DEFENSE to activate. Each consecutive hit this round adds +10% damage. Never stop attacking." },
-    };
-
     // ── TRAIT CARDS ────────────────────────────────────────────────────────
     public static readonly TraitCardData[] TraitCards = new TraitCardData[]
     {

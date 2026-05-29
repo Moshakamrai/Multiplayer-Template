@@ -305,6 +305,15 @@ public class ShopPhaseManager : MonoBehaviour
         }
 
         inv.BuyCombatCard(card.cardId, card.cost);
+
+        // Auto-equip newly purchased cards
+        var combat = inv.GetComponent<PlayerCombat>();
+        if (combat != null)
+        {
+            inv.EquipCombatCards(new List<string>(inv.ownedCombatCards.Keys));
+            combat.RefreshAvailableCards();
+        }
+
         MarkCombatSlotPurchased(slotIndex);
     }
 

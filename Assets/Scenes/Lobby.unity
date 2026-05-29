@@ -1304,6 +1304,106 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 41f84591ce72545258ea98cb7518d8b9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+--- !u!1 &596231310
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 596231313}
+  - component: {fileID: 596231312}
+  - component: {fileID: 596231311}
+  m_Layer: 0
+  m_Name: ShopSystem
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &596231311
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 596231310}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3ca908719a053944f8124587a48ea0ff, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+--- !u!114 &596231312
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 596231310}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ae87af3a9783fe14b85c322d0fa44b4b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  combatCardArt:
+  - cardId: jab
+    art: {fileID: 2800000, guid: 78897a71d22200f49ae7fe62717db8cf, type: 3}
+  - cardId: cross
+    art: {fileID: 2800000, guid: cda45901baa0b804282e6b1604dc1e1b, type: 3}
+  - cardId: hook
+    art: {fileID: 2800000, guid: aec5bdba930a4ba4aa96edd4f275002e, type: 3}
+  - cardId: block
+    art: {fileID: 0}
+  - cardId: dodge_left
+    art: {fileID: 2800000, guid: 3c797558ee052a74c871e2788bd14920, type: 3}
+  - cardId: dodge_right
+    art: {fileID: 2800000, guid: daa2f0f779c9e934d9c25b4d3bfc2dbe, type: 3}
+  - cardId: reflect
+    art: {fileID: 2800000, guid: d6873d979fc12bd4f849468bffb8cbb3, type: 3}
+  - cardId: boom
+    art: {fileID: 2800000, guid: 0af755d5c8e3b5c4f9a02f34a2c8762c, type: 3}
+  - cardId: grapple
+    art: {fileID: 2800000, guid: ca029fce788ffa64f9a88fa226951a3f, type: 3}
+  - cardId: fake
+    art: {fileID: 2800000, guid: 6a30900c6331a244294222b171b6421c, type: 3}
+  - cardId: uppercut
+    art: {fileID: 2800000, guid: e7eb51e45c14fa042b9d44be85126b73, type: 3}
+  - cardId: sweep
+    art: {fileID: 2800000, guid: eacfb6773e586d94f97e77fb11480454, type: 3}
+  - cardId: focus
+    art: {fileID: 2800000, guid: a43dca71d37584443b8dbdf068b35d8c, type: 3}
+  - cardId: taunt
+    art: {fileID: 2800000, guid: 0e981e7adcdb448418f102c73203c4ba, type: 3}
+  - cardId: overclock
+    art: {fileID: 2800000, guid: bc3735f0c4ab69c47b551644f3312256, type: 3}
+  - cardId: reverse
+    art: {fileID: 2800000, guid: 1cd3f53f6f0a01749bf0e6a4fe8f9b47, type: 3}
+  - cardId: trap
+    art: {fileID: 2800000, guid: 803dbe2e724345f49885e7065dceffe7, type: 3}
+  - cardId: cage
+    art: {fileID: 2800000, guid: 76e3edaecc6eb064abd8cea5d4a56b42, type: 3}
+  - cardId: mirror
+    art: {fileID: 2800000, guid: 8ce634985ca3b8c4e8e3f02a467a6691, type: 3}
+  - cardId: clutch
+    art: {fileID: 2800000, guid: 148d70100099cf948bb6cc14e8c4f32b, type: 3}
+  traitCardArt: []
+  fallbackTexture: {fileID: 2800000, guid: 50fc88f413277844ca28fa743eb1702c, type: 3}
+--- !u!4 &596231313
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 596231310}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -0.20286213, y: 3.1242454, z: 3.527559}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &647447566
 GameObject:
   m_ObjectHideFlags: 0
@@ -1556,7 +1656,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 1, z: -10.86}
-  m_LocalScale: {x: 0.6, y: 1, z: 1}
+  m_LocalScale: {x: 0.65, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 804212061}
@@ -31725,3 +31825,4 @@ SceneRoots:
   - {fileID: 1743533282}
   - {fileID: 1232298908}
   - {fileID: 2315504885925399625}
+  - {fileID: 596231313}

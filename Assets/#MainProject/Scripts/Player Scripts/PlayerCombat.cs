@@ -31,11 +31,9 @@ public class PlayerCombat : NetworkBehaviour
     [SyncVar] public bool IsTauntedNextTurn = false;
     [SyncVar] public int TauntTurnsRemaining = 0;
 
-    // ── Trait & Vex Card Effects ──────────────────────────────────────────────
+    // ── Trait Effects ─────────────────────────────────────────────────────────
     [SyncVar] public string activeTraitId = "";
-    [SyncVar] public string activeVexCardId = "";
-    [SyncVar] public int VexCardBeatsRemaining = 0;
-    [SyncVar] public int ConsecutiveHitsChain = 0; // For Chain trait and Momentum vex card
+    [SyncVar] public int ConsecutiveHitsChain = 0; // For Bloodlust / Momentum traits
     [SyncVar] public bool HasStalwartBuff = false; // Stalwart trait: +10% next attack after block
 
     private Queue<string> _attackQueue = new Queue<string>();
@@ -95,17 +93,10 @@ public class PlayerCombat : NetworkBehaviour
     }
 
     [Command]
-    public void CmdBuyVexCard(int slotIndex)
-    {
-        var inv = GetComponent<PlayerInventory>();
-        if (inv != null) ShopPhaseManager.Instance?.TryBuyVexCard(inv, slotIndex);
-    }
-
-    [Command]
     public void CmdBuyTraitCard(int slotIndex)
     {
         var inv = GetComponent<PlayerInventory>();
-        if (inv != null) ShopPhaseManager.Instance?.TryBuyVexCard(inv, slotIndex);
+        if (inv != null) ShopPhaseManager.Instance?.TryBuyTraitCard(inv, slotIndex);
     }
 
     [Command]
@@ -117,8 +108,6 @@ public class PlayerCombat : NetworkBehaviour
             // Remove from appropriate list
             if (inv.ownedCombatCards.Contains(cardId))
                 inv.ownedCombatCards.Remove(cardId);
-            else if (inv.ownedVexCards.Contains(cardId))
-                inv.ownedVexCards.Remove(cardId);
             else if (inv.equippedTraitId == cardId)
                 inv.equippedTraitId = "";
 
@@ -208,8 +197,6 @@ public class PlayerCombat : NetworkBehaviour
         IsTauntedNextTurn = false;
         TauntTurnsRemaining = 0;
         activeTraitId = "";
-        activeVexCardId = "";
-        VexCardBeatsRemaining = 0;
         ConsecutiveHitsChain = 0;
     }
 
@@ -311,8 +298,8 @@ public class PlayerCombat : NetworkBehaviour
         if (!string.IsNullOrEmpty(activeTraitId) && activeTraitId == "heavy")
             timingWindowMult *= 1.10f; // 0.05s / 0.5s = 10% increase
 
-        // Speedster vex card: +20% window (easier for this player)
-        if (!string.IsNullOrEmpty(activeVexCardId) && activeVexCardId == "speedster")
+        // Quicktrigger trait: +0.1s timing window
+        if (activeTraitId == "quicktrigger")
             timingWindowMult *= 1.20f;
 
         // Check opponent's Stunning trait (makes our window harder)
@@ -681,7 +668,11 @@ public class PlayerCombat : NetworkBehaviour
     public void TakeDamage(int damage, Vector3 knockbackDir = default, bool isOpponentDamage = false)
     {
         StartCoroutine(FlashEffectRoutine());
+        float oldPct = CurrentPercentage;
         CurrentPercentage += damage;
+        // Stagger at every 50% damage threshold crossed (50, 100, 150, ...)
+        if (isServer && Mathf.FloorToInt(CurrentPercentage / 50f) > Mathf.FloorToInt(oldPct / 50f))
+            TriggerStagger(2);
         RpcTriggerHurt("Hurt " + Random.Range(1, 5), 0f, damage);
         RpcShowDamageNumber(damage, isOpponentDamage);
         if (knockbackDir != default) RpcNudgeBack(knockbackDir);
@@ -780,6 +771,7 @@ public class PlayerCombat : NetworkBehaviour
         if (!isLocalPlayer) return;
         if (TiebreakerManager.Instance != null && TiebreakerManager.Instance.IsTiebreakerActive) return;
         if (RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isShopPhase) return;
+        if (ShopPhaseManager.Instance != null && ShopPhaseManager.Instance.isShopPhase) return;
 
         // --- INITIALIZE TEXTURE ---
         if (_whiteTexture == null)
@@ -1123,40 +1115,28 @@ public class PlayerCombat : NetworkBehaviour
             GUILayout.EndArea();
         }
 
-        // --- 5. ACTIVE VEX CARD DISPLAY (Circular UI) ---
-        if (!string.IsNullOrEmpty(activeVexCardId) && isLocalPlayer)
+        // --- 5. ACTIVE TRAIT DISPLAY ---
+        if (!string.IsNullOrEmpty(activeTraitId) && isLocalPlayer)
         {
-            float circleX = Screen.width - 100f;
-            float circleY = Screen.height - 120f;
-            float circleRadius = 45f;
-
-            // Background circle
-            GUI.color = new Color(0.2f, 0.2f, 0.3f, 0.9f);
-            for (int i = 0; i < 60; i++)
+            var trait = System.Array.Find(CardDatabase.TraitCards, t => t.traitId == activeTraitId);
+            if (trait != null)
             {
-                float angle = (i / 60f) * Mathf.PI * 2f;
-                float x = circleX + Mathf.Cos(angle) * circleRadius;
-                float y = circleY + Mathf.Sin(angle) * circleRadius;
-                if (_whiteTexture != null)
-                    GUI.DrawTexture(new Rect(x - 2, y - 2, 4, 4), _whiteTexture);
+                float tx = Screen.width - 180f;
+                float ty = Screen.height - 80f;
+                GUI.color = new Color(0.05f, 0.12f, 0.08f, 0.88f);
+                if (_whiteTexture != null) GUI.DrawTexture(new Rect(tx - 4, ty - 4, 172, 44), _whiteTexture);
+                GUI.color = new Color(0.25f, 1f, 0.5f, 0.9f);
+                if (_whiteTexture != null) GUI.DrawTexture(new Rect(tx - 4, ty - 4, 3f, 44), _whiteTexture);
+                GUI.color = Color.white;
+                GUIStyle traitNameStyle = new GUIStyle(GUI.skin.label)
+                { alignment = TextAnchor.UpperLeft, fontStyle = FontStyle.Bold, fontSize = 12 };
+                traitNameStyle.normal.textColor = new Color(0.25f, 1f, 0.5f);
+                GUI.Label(new Rect(tx + 4, ty, 160, 18), "TRAIT: " + trait.displayName.ToUpper(), traitNameStyle);
+                GUIStyle traitEffectStyle = new GUIStyle(GUI.skin.label)
+                { alignment = TextAnchor.UpperLeft, fontSize = 9, wordWrap = true };
+                traitEffectStyle.normal.textColor = new Color(0.8f, 0.9f, 0.8f, 0.85f);
+                GUI.Label(new Rect(tx + 4, ty + 18, 160, 22), trait.effect, traitEffectStyle);
             }
-
-            // Border glow
-            GUI.color = new Color(0.3f, 1f, 0.7f, 0.8f);
-            for (int i = 0; i < 60; i++)
-            {
-                float angle = (i / 60f) * Mathf.PI * 2f;
-                float x = circleX + Mathf.Cos(angle) * (circleRadius + 3);
-                float y = circleY + Mathf.Sin(angle) * (circleRadius + 3);
-                if (_whiteTexture != null)
-                    GUI.DrawTexture(new Rect(x - 1, y - 1, 2, 2), _whiteTexture);
-            }
-
-            // Vex card name and icon
-            GUI.color = Color.white;
-            GUIStyle vexStyle = new GUIStyle(GUI.skin.label)
-            { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 14 };
-            GUI.Label(new Rect(circleX - 40, circleY - 20, 80, 40), activeVexCardId.ToUpper(), vexStyle);
         }
 
         // --- 6. TIMING FEEDBACK FLOATER (Center Screen) ---

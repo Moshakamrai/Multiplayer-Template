@@ -2,7 +2,7 @@ using UnityEngine;
 
 public enum CardRarity { Basic, Advanced, Legendary }
 public enum CardType { Attack, Defense, Meta }
-public enum ShopCategory { CombatCard, VexCard, TraitCard }
+public enum ShopCategory { CombatCard, TraitCard }
 
 [System.Serializable]
 public class CombatCardData
@@ -16,17 +16,6 @@ public class CombatCardData
     public string damagePercent;
     public string description;
     public string triggerName;
-}
-
-[System.Serializable]
-public class VexCardData
-{
-    public string cardId;
-    public string displayName;
-    public CardType type;
-    public int cost;
-    public string effect;
-    public string description;
 }
 
 [System.Serializable]

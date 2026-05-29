@@ -40,37 +40,29 @@ public class CardDatabase : MonoBehaviour
         new CombatCardData { cardId="clutch", displayName="Clutch", rarity=CardRarity.Legendary, type=CardType.Defense, cost=3, timingWindow=0.30f, damagePercent="0% or +30%", description="HIGH RISK. Perfect timing nullifies Boom/Hook and reflects +15% back. Good timing = full block, no reflect. Miss = +20% self-damage. ONCE PER ROUND. COUNTERS: Boom, Hook. BEATEN BY: Jab, Cross, Grapple.", triggerName="Clutch" },
     };
 
-    // ── VEX CARDS ──────────────────────────────────────────────────────────
-    public static readonly VexCardData[] VexCards = new VexCardData[]
-    {
-        new VexCardData { cardId="striker", displayName="Striker", type=CardType.Meta, cost=2, effect="+15% all attack damage for 2 consecutive turns", description="PLAY AS DEFENSE to activate. Boost all attack damage +15% for 2 beats. Best with Boom or Hook." },
-        new VexCardData { cardId="tank", displayName="Tank", type=CardType.Meta, cost=2, effect="-25% damage taken for 2 consecutive turns", description="PLAY AS DEFENSE to activate. Take -25% damage for 2 beats. Hard counter to burst combos." },
-        new VexCardData { cardId="speedster", displayName="Speedster", type=CardType.Meta, cost=2, effect="+20% timing window, -8% damage for 2 consecutive turns", description="PLAY AS DEFENSE to activate. Timing windows +20% for 2 beats, damage -8%. Great for risky cards." },
-        new VexCardData { cardId="grappler", displayName="Grappler", type=CardType.Meta, cost=2, effect="Grapple +30% damage, next 2 times its used", description="PLAY AS DEFENSE to activate. Your next 2 Grapples deal +30% damage. Combo with Cage to force defends." },
-        new VexCardData { cardId="trickster", displayName="Trickster", type=CardType.Meta, cost=3, effect="Fake/Taunt/Trap effects doubled for next time use only", description="PLAY AS DEFENSE to activate. Next use of Fake/Trap has doubled effect. One-time burst." },
-        new VexCardData { cardId="vampire", displayName="Vampire", type=CardType.Meta, cost=4, effect="Heal 5% on every successful hit throughout the round", description="PLAY AS DEFENSE to activate. Heal 5% HP on every successful hit this round. Snowballs with combos." },
-        new VexCardData { cardId="glass", displayName="Glass", type=CardType.Meta, cost=3, effect="40% all damage, 20% damage taken throughout the round", description="PLAY AS DEFENSE to activate. All your damage +40%, damage taken +20% for the round. High risk." },
-        new VexCardData { cardId="momentum", displayName="Momentum", type=CardType.Meta, cost=5, effect="Consecutive hits increase damage by 10% per hit", description="PLAY AS DEFENSE to activate. Each consecutive hit this round adds +10% damage. Never stop attacking." },
-    };
-
-    // ── TRAIT CARDS ────────────────────────────────────────────────────────
+    // ── TRAIT CARDS (passive effects for the entire round) ────────────────
     public static readonly TraitCardData[] TraitCards = new TraitCardData[]
     {
         // Offense Traits
-        new TraitCardData { traitId="piercing", displayName="Piercing", cost=3, effect="Ignore 25% of opponent's Block defense", description="Defense becomes less effective. Chip damage through blocks becomes real damage." },
-        new TraitCardData { traitId="bloodlust", displayName="Bloodlust", cost=3, effect="Each consecutive hit gains +6% damage (stacks, resets on miss)", description="Rewards accuracy. Build up momentum with each successful hit." },
-        new TraitCardData { traitId="executioner", displayName="Executioner", cost=3, effect="+35% damage when opponent above 65% health", description="Finish them fast before they recover. Press the advantage early." },
-        new TraitCardData { traitId="momentum", displayName="Momentum", cost=4, effect="Consecutive hits increase damage by 10% each (max +40%)", description="Combo snowball trait. Each hit makes the next hit deadlier." },
+        new TraitCardData { traitId="piercing",    displayName="Piercing",    cost=3, effect="Ignore 25% of opponent's Block defense",                     description="Defense becomes less effective. Chip damage through blocks becomes real damage." },
+        new TraitCardData { traitId="bloodlust",   displayName="Bloodlust",   cost=3, effect="Each consecutive hit gains +6% damage (stacks, resets on miss)", description="Rewards accuracy. Build up momentum with each successful hit." },
+        new TraitCardData { traitId="executioner", displayName="Executioner", cost=3, effect="+35% damage when opponent is above 65% health",               description="Finish them fast before they recover. Press the advantage early." },
+        new TraitCardData { traitId="momentum",    displayName="Momentum",    cost=4, effect="Consecutive hits increase damage by 10% each (max +40%)",     description="Combo snowball trait. Each hit makes the next hit deadlier." },
+        new TraitCardData { traitId="fury",        displayName="Fury",        cost=3, effect="+15% all attack damage for the entire round",                 description="Pure aggression. Every hit you land this round deals extra damage." },
+        new TraitCardData { traitId="glass",       displayName="Glass Cannon",cost=4, effect="+40% attack damage, +20% damage taken for the round",         description="All-in offense. You hit harder but you break easier. High risk, high reward." },
+        new TraitCardData { traitId="vampire",     displayName="Vampire",     cost=4, effect="Heal 5% HP on every successful hit this round",               description="Sustain through offense. Land hits to stay healthy." },
+        new TraitCardData { traitId="grappler",    displayName="Grappler",    cost=3, effect="Grapple deals +30% extra damage this round",                  description="Specialise in the clinch. Grapple becomes a serious threat." },
 
         // Defense Traits
-        new TraitCardData { traitId="anchored", displayName="Anchored", cost=4, effect="Reduce stagger buildup by 40%", description="Stay in the fight longer. Takes more hits to knock you down." },
-        new TraitCardData { traitId="fortress", displayName="Fortress", cost=4, effect="Reduce damage taken by 18%", description="Tank trait. You're harder to hurt. Sustain builds or grinds." },
-        new TraitCardData { traitId="stalwart", displayName="Stalwart", cost=4, effect="Each successful block increases next attack by 10% (max 50%)", description="Defensive counter. Turn defense into offense." },
-        new TraitCardData { traitId="regenerate", displayName="Regenerate", cost=3, effect="Heal 4% health every beat during round", description="Sustain trait. Passive healing keeps you in the fight." },
+        new TraitCardData { traitId="anchored",    displayName="Anchored",    cost=4, effect="Reduce stagger buildup by 40%",                              description="Stay in the fight longer. Takes more hits to knock you down." },
+        new TraitCardData { traitId="fortress",    displayName="Fortress",    cost=4, effect="Reduce all damage taken by 18% for the round",               description="Tank trait. You're harder to hurt. Great for sustain builds." },
+        new TraitCardData { traitId="stalwart",    displayName="Stalwart",    cost=4, effect="Each successful block increases your next attack by 10% (max +50%)", description="Defensive counter. Turn blocks into bigger hits." },
+        new TraitCardData { traitId="regenerate",  displayName="Regenerate",  cost=3, effect="Heal 4% health every beat during the round",                 description="Passive healing. Survive long enough and outlast your opponent." },
 
         // Utility Traits
-        new TraitCardData { traitId="quicktrigger", displayName="Quicktrigger", cost=3, effect="Timing window +0.1s for all cards", description="Easier execution. More time to hit the sweet spot." },
-        new TraitCardData { traitId="echo", displayName="Echo", cost=5, effect="25% chance cards refresh and can be used again next turn", description="Card duplication. Sometimes your moves come back for free." },
+        new TraitCardData { traitId="quicktrigger",displayName="Quicktrigger",cost=3, effect="Timing window +0.1s for all cards this round",               description="Easier execution. More time to hit the sweet spot on every card." },
+        new TraitCardData { traitId="echo",        displayName="Echo",        cost=5, effect="25% chance any used card refreshes and can be used again",   description="Card duplication. Sometimes your moves come back for free." },
+        new TraitCardData { traitId="trickster",   displayName="Trickster",   cost=3, effect="Fake, Taunt, and Trap effects are doubled this round",        description="Mind-game specialist. Your deceptive cards hit twice as hard." },
     };
 
     // ── TFT RARITY PROGRESSION ─────────────────────────────────────────────

@@ -58,6 +58,14 @@ public class VoiceCommandManager : NetworkBehaviour
             }
         }
 
+        // Show clipping warning in the input UI when voice is too loud
+        VoiceProcessor vp = VoskInstance != null ? VoskInstance.VoiceProcessor : null;
+        bool isClipping = vp != null && vp.IsClipping;
+        if (InputText != null)
+            InputText.color = isClipping ? new Color(1f, 0.3f, 0.3f) : Color.white;
+        if (isClipping && InputText != null && string.IsNullOrEmpty(VoskInstance.LastPartial))
+            InputText.text = "TOO LOUD - STEP BACK";
+
         if (string.IsNullOrEmpty(_pendingRetryWord)) return;
         bool consumed = ProcessWords(_pendingRetryWord);
         if (consumed)

@@ -1128,13 +1128,6 @@ public class RhythmRoundManager : NetworkBehaviour
         string atk = move.attack;
         string def = defMove.attack;
 
-        // --- ACTIVATE VEX CARDS WHEN PLAYED AS DEFENSE ---
-        if (!string.IsNullOrEmpty(def) && IsVexCard(def))
-        {
-            defender.activeVexCardId = def.ToLower();
-            defender.VexCardBeatsRemaining = 1;
-        }
-
         // --- HANDLE CARD EFFECTS THAT PERSIST FROM LAST TURN ---
         // Trap: trigger if opponent moves or blocks
         if (defender.HasPendingTrap && !defenderStaggered)
@@ -1142,7 +1135,7 @@ public class RhythmRoundManager : NetworkBehaviour
             if (atk == "Left" || atk == "Right" || atk == "Block")
             {
                 int trapDmg = 15;
-                if (!string.IsNullOrEmpty(attacker.activeVexCardId) && attacker.activeVexCardId == "trickster")
+                if (attacker.activeTraitId == "trickster")
                     trapDmg *= 2;
                 trapDmg = ApplyTraitMultiplier(trapDmg);
                 defender.TakeDamage(trapDmg, isOpponentDamage: true);
@@ -1160,7 +1153,7 @@ public class RhythmRoundManager : NetworkBehaviour
         if (defender.HasPendingCage && !defenderStaggered && !string.IsNullOrEmpty(atk))
         {
             int cageDmg = 10;
-            if (!string.IsNullOrEmpty(attacker.activeVexCardId) && attacker.activeVexCardId == "trickster")
+            if (attacker.activeTraitId == "trickster")
                 cageDmg *= 2;
             cageDmg = ApplyTraitMultiplier(cageDmg);
             defender.TakeDamage(cageDmg, isOpponentDamage: true);
@@ -1182,7 +1175,7 @@ public class RhythmRoundManager : NetworkBehaviour
             {
                 if (attacker.connectionToClient != null) attacker.TargetPlaySuccessSound("Attack");
                 int fakeDmg = 5;
-                if (!string.IsNullOrEmpty(attacker.activeVexCardId) && attacker.activeVexCardId == "trickster")
+                if (attacker.activeTraitId == "trickster")
                     fakeDmg *= 2;
                 fakeDmg = ApplyTraitMultiplier(fakeDmg);
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Hurt");
@@ -1402,15 +1395,15 @@ public class RhythmRoundManager : NetworkBehaviour
             finalDmg += chainBonus;
         }
 
-        // Momentum vex card: +10% per consecutive hit
-        if (!string.IsNullOrEmpty(attacker.activeVexCardId) && attacker.activeVexCardId == "momentum")
+        // Momentum trait: +10% per consecutive hit (max +40%)
+        if (attacker.activeTraitId == "momentum")
         {
-            int momentumBonus = Mathf.RoundToInt(finalDmg * 0.10f * attacker.ConsecutiveHitsChain);
+            int momentumBonus = Mathf.RoundToInt(finalDmg * Mathf.Min(0.10f * attacker.ConsecutiveHitsChain, 0.40f));
             finalDmg += momentumBonus;
         }
 
-        // Grappler vex card: +30% damage on Grapple for next 2 uses
-        if (atk == "Grapple" && !string.IsNullOrEmpty(attacker.activeVexCardId) && attacker.activeVexCardId == "grappler")
+        // Grappler trait: +30% damage on Grapple for the whole round
+        if (atk == "Grapple" && attacker.activeTraitId == "grappler")
         {
             finalDmg = Mathf.RoundToInt(finalDmg * 1.30f);
         }
@@ -1456,16 +1449,10 @@ public class RhythmRoundManager : NetworkBehaviour
             if (blockMitigation > 0f) tradeReason = $"{atk} chipped through Block";
             else tradeReason = $"{atk} connected";
 
-            // Glass vex card: takes 20% LESS damage (opposite of striker - high risk high reward)
-            if (!string.IsNullOrEmpty(defender.activeVexCardId) && defender.activeVexCardId == "glass")
+            // Glass trait: +20% MORE damage taken (high risk for the +40% attack boost)
+            if (defender.activeTraitId == "glass")
             {
-                damageDealt = Mathf.RoundToInt(damageDealt * 0.80f);
-            }
-
-            // Tank vex card: takes 25% LESS damage
-            if (!string.IsNullOrEmpty(defender.activeVexCardId) && defender.activeVexCardId == "tank")
-            {
-                damageDealt = Mathf.RoundToInt(damageDealt * 0.75f);
+                damageDealt = Mathf.RoundToInt(damageDealt * 1.20f);
             }
 
             // Fortress trait: reduce damage taken by 18%
@@ -1488,7 +1475,7 @@ public class RhythmRoundManager : NetworkBehaviour
             if (atk == "Taunt")
             {
                 // Trickster doubles Taunt duration (2 turns instead of 1)
-                int tauntDuration = (!string.IsNullOrEmpty(attacker.activeVexCardId) && attacker.activeVexCardId == "trickster") ? 2 : 1;
+                int tauntDuration = (attacker.activeTraitId == "trickster") ? 2 : 1;
                 defender.TauntTurnsRemaining = tauntDuration;
                 defender.IsTauntedNextTurn = true;
             }
@@ -1510,8 +1497,8 @@ public class RhythmRoundManager : NetworkBehaviour
                     attacker.CurrentPercentage -= healAmount; // Reduce percentage (healing)
                 }
 
-                // Vampire vex card: heal 5% on every successful hit
-                if (!string.IsNullOrEmpty(attacker.activeVexCardId) && attacker.activeVexCardId == "vampire")
+                // Vampire trait: heal 5% on every successful hit
+                if (attacker.activeTraitId == "vampire")
                 {
                     int vampireHeal = Mathf.Max(1, Mathf.RoundToInt(damageDealt * 0.05f));
                     attacker.CurrentPercentage -= vampireHeal; // Reduce percentage (healing)
@@ -1603,12 +1590,6 @@ public class RhythmRoundManager : NetworkBehaviour
             }
         }
 
-        // Vex card effects
-        if (!string.IsNullOrEmpty(player.activeVexCardId))
-        {
-            multiplier *= GetVexCardDamageMultiplier(player.activeVexCardId);
-        }
-
         return Mathf.RoundToInt(baseDmg * multiplier);
     }
 
@@ -1617,44 +1598,33 @@ public class RhythmRoundManager : NetworkBehaviour
         return traitId switch
         {
             // Offense traits
-            "bloodlust" => 1.0f, // Handled via ConsecutiveHitsChain - bonus per consecutive hit
-            "executioner" => 1.0f, // Handled in ApplyDamage based on opponent health
-            "momentum" => 1.0f, // Handled in ApplyDamage based on consecutive hits
-            "piercing" => 1.0f, // Piercing doesn't modify raw damage, ignores block defense instead
+            "fury"         => 1.15f, // +15% all attack damage
+            "glass"        => 1.40f, // +40% attack damage (but takes +20% incoming — handled in ApplyDamage)
+            "bloodlust"    => 1.0f,  // Handled via ConsecutiveHitsChain bonus per hit
+            "executioner"  => 1.0f,  // Handled in ApplyDamage based on opponent health
+            "momentum"     => 1.0f,  // Handled in ApplyDamage based on consecutive hits
+            "piercing"     => 1.0f,  // Ignores block defense, not raw damage
+            "grappler"     => 1.0f,  // Per-card bonus handled in ApplyDamage
+            "trickster"    => 1.0f,  // Effect multipliers handled in ApplyDamage
 
             // Defense traits
-            "fortress" => 1.0f, // Damage reduction handled in ApplyDamage (incoming damage)
-            "anchored" => 1.0f, // Stagger reduction handled in stagger calculation
-            "stalwart" => 1.0f, // Block bonus handled separately in card effect
+            "fortress"     => 1.0f,  // Damage reduction on incoming, handled in ApplyDamage
+            "anchored"     => 1.0f,  // Stagger reduction handled in stagger calculation
+            "stalwart"     => 1.0f,  // Block bonus handled separately
 
             // Utility traits
-            "quicktrigger" => 1.0f, // Timing window handled in VoiceCommandManager
-            "regenerate" => 1.0f, // Healing handled per beat
-            "echo" => 1.0f, // Card refresh handled in card consumption logic
+            "quicktrigger" => 1.0f,  // Timing window handled in VoiceProcessor
+            "regenerate"   => 1.0f,  // Per-beat healing handled in beat loop
+            "echo"         => 1.0f,  // Card refresh handled in card consumption logic
+            "vampire"      => 1.0f,  // Lifesteal handled in ApplyDamage on hit
 
-            // Legacy (kept for compatibility)
-            "heavy" => 1.10f,
-            "volatile" => 1.10f,
-            "draining" => 1.0f,
-            "chain" => 1.0f,
-            "defensive" => 1.0f,
-            "stunning" => 1.0f,
-            _ => 1.0f
-        };
-    }
-
-    private float GetVexCardDamageMultiplier(string vexId)
-    {
-        return vexId switch
-        {
-            "striker" => 1.15f, // +15% all attack damage
-            "speedster" => 0.92f, // -8% damage
-            "glass" => 1.40f, // +40% damage dealt
-            "vampire" => 1.0f, // Vampire heals instead of modifying damage
-            "tank" => 1.0f, // Tank reduces damage taken
-            "grappler" => 1.0f, // Grappler modifies specific card
-            "trickster" => 1.0f, // Trickster extends effects
-            "momentum" => 1.0f, // Momentum handled per consecutive hit
+            // Legacy
+            "heavy"        => 1.10f,
+            "volatile"     => 1.10f,
+            "draining"     => 1.0f,
+            "chain"        => 1.0f,
+            "defensive"    => 1.0f,
+            "stunning"     => 1.0f,
             _ => 1.0f
         };
     }
@@ -1785,13 +1755,6 @@ public class RhythmRoundManager : NetworkBehaviour
             || move == "Cage" || move == "Mirror" || move == "Reverse";
     }
 
-    private bool IsVexCard(string cardName)
-    {
-        if (string.IsNullOrEmpty(cardName)) return false;
-        string lower = cardName.ToLower();
-        return lower == "striker" || lower == "tank" || lower == "speedster" || lower == "grappler"
-            || lower == "trickster" || lower == "vampire" || lower == "glass" || lower == "momentum";
-    }
 
     // [Server]
     // private int ProcessDamage(PlayerCombat attacker, PlayerCombat.RhythmAction move, PlayerCombat defender, PlayerCombat.RhythmAction defMove, bool isInterrupted, out int damageDealt)
@@ -1949,20 +1912,20 @@ public class RhythmRoundManager : NetworkBehaviour
             {
                 PlayerCombat pc = player.GetComponent<PlayerCombat>();
 
-                // 2. Idle recharge: no input this window → +1 to both slot pools
-                if (isServer)
-                {
-                    CardManager cm = player.GetComponent<CardManager>();
-                    if (cm != null)
-                    {
-                        var move = pc.PeekNextMove();
-                        if (string.IsNullOrEmpty(move.attack) && move.dash == Vector3.zero)
-                        {
-                            cm.attackSlotsRemaining  = Mathf.Min(cm.attackSlotsTotal,  cm.attackSlotsRemaining  + 1);
-                            cm.defenseSlotsRemaining = Mathf.Min(cm.defenseSlotTotal,  cm.defenseSlotsRemaining + 1);
-                        }
-                    }
-                }
+                // Slot idle recharge disabled (slot system removed)
+                // if (isServer)
+                // {
+                //     CardManager cm = player.GetComponent<CardManager>();
+                //     if (cm != null)
+                //     {
+                //         var move = pc.PeekNextMove();
+                //         if (string.IsNullOrEmpty(move.attack) && move.dash == Vector3.zero)
+                //         {
+                //             cm.attackSlotsRemaining  = Mathf.Min(cm.attackSlotsTotal,  cm.attackSlotsRemaining  + 1);
+                //             cm.defenseSlotsRemaining = Mathf.Min(cm.defenseSlotTotal,  cm.defenseSlotsRemaining + 1);
+                //         }
+                //     }
+                // }
 
                 pc.ConsumeNextMove();
 
@@ -1994,10 +1957,11 @@ public class RhythmRoundManager : NetworkBehaviour
                                 cm.ResetSlots();
                             }
                         }
-                        else if (cm.attackSlotsRemaining == 0 && cm.defenseSlotsRemaining == 0)
-                        {
-                            pc.TriggerStagger(3);
-                        }
+                        // Slot-exhaustion stagger disabled (slot system removed)
+                        // else if (cm.attackSlotsRemaining == 0 && cm.defenseSlotsRemaining == 0)
+                        // {
+                        //     pc.TriggerStagger(3);
+                        // }
 
                         // Decay persistent card effects each beat
                         if (pc.HasFocusBuff) pc.FocusBuffBeatsRemaining--;
@@ -2014,16 +1978,6 @@ public class RhythmRoundManager : NetworkBehaviour
                         else
                         {
                             pc.IsTauntedNextTurn = false;
-                        }
-
-                        // Vex card countdown (lasts 2 turns)
-                        if (!string.IsNullOrEmpty(pc.activeVexCardId))
-                        {
-                            pc.VexCardBeatsRemaining--;
-                            if (pc.VexCardBeatsRemaining <= 0)
-                            {
-                                pc.activeVexCardId = "";
-                            }
                         }
 
                         // Regenerate trait: heal 4% health every beat
@@ -2055,22 +2009,23 @@ public class RhythmRoundManager : NetworkBehaviour
     // usedAttack=true → winner attacked → gains DEF slot
     // usedAttack=false → winner defended → gains ATK slot
     [Server]
-    private void GrantCounterBonus(CardManager cm, PlayerCombat pc, bool usedAttack)
+    private void GrantCounterBonus(CardManager cm, PlayerCombat pc, bool _usedAttack)
     {
         if (cm == null || pc == null) return;
         pc.roundCounterCount++;
-        if (usedAttack) // attacked successfully → gain DEF slot
-        {
-            if (cm.defenseSlotsRemaining >= cm.defenseSlotTotal) return;
-            cm.defenseSlotsRemaining = Mathf.Min(cm.defenseSlotTotal, cm.defenseSlotsRemaining + 1);
-            if (pc.connectionToClient != null) cm.TargetShowSlotBonus(pc.connectionToClient, false);
-        }
-        else // defended successfully → gain ATK slot
-        {
-            if (cm.attackSlotsRemaining >= cm.attackSlotsTotal) return;
-            cm.attackSlotsRemaining = Mathf.Min(cm.attackSlotsTotal, cm.attackSlotsRemaining + 1);
-            if (pc.connectionToClient != null) cm.TargetShowSlotBonus(pc.connectionToClient, true);
-        }
+        // Slot bonus grants disabled (slot system removed)
+        // if (usedAttack)
+        // {
+        //     if (cm.defenseSlotsRemaining >= cm.defenseSlotTotal) return;
+        //     cm.defenseSlotsRemaining = Mathf.Min(cm.defenseSlotTotal, cm.defenseSlotsRemaining + 1);
+        //     if (pc.connectionToClient != null) cm.TargetShowSlotBonus(pc.connectionToClient, false);
+        // }
+        // else
+        // {
+        //     if (cm.attackSlotsRemaining >= cm.attackSlotsTotal) return;
+        //     cm.attackSlotsRemaining = Mathf.Min(cm.attackSlotsTotal, cm.attackSlotsRemaining + 1);
+        //     if (pc.connectionToClient != null) cm.TargetShowSlotBonus(pc.connectionToClient, true);
+        // }
     }
 
     [Server]

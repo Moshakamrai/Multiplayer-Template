@@ -22,7 +22,8 @@ public class VoiceProcessor : MonoBehaviour
 
     public List<string> Devices { get; private set; }
     public int CurrentDeviceIndex { get; private set; }
-    public float CurrentRawVolume { get; private set; } 
+    public float CurrentRawVolume { get; private set; }
+    public bool IsClipping { get; private set; }
 
     public string CurrentDeviceName
     {
@@ -129,12 +130,14 @@ public class VoiceProcessor : MonoBehaviour
 
             int samplesAvailable = curClipPos - startReadPos;
 
-            // Fast volume peek: read a tiny slice every frame so CurrentRawVolume
+            // Fast volume peek: read the NEWEST samples every frame so CurrentRawVolume
             // is never stale by more than ~16ms, regardless of Vosk frame size.
             if (samplesAvailable > 0)
             {
                 int peekLen = Mathf.Min(PEEK_SIZE, samplesAvailable);
-                _audioClip.GetData(_peekBuffer, startReadPos % _audioClip.samples);
+                // Read from the END of the available buffer — the most recent audio.
+                int peekStart = (startReadPos + samplesAvailable - peekLen) % _audioClip.samples;
+                _audioClip.GetData(_peekBuffer, peekStart);
                 float peekMax = 0f;
                 for (int i = 0; i < peekLen; i++)
                 {
@@ -142,6 +145,7 @@ public class VoiceProcessor : MonoBehaviour
                     if (a > peekMax) peekMax = a;
                 }
                 CurrentRawVolume = peekMax;
+                IsClipping = peekMax >= 0.92f;
             }
 
             if (samplesAvailable < FrameLength) { yield return null; continue; }
@@ -172,7 +176,11 @@ public class VoiceProcessor : MonoBehaviour
                 if (absVal > maxVolume) maxVolume = absVal;
             }
             // Keep CurrentRawVolume as the freshest value (peek may be more recent than full frame)
-            if (maxVolume > CurrentRawVolume) CurrentRawVolume = maxVolume;
+            if (maxVolume > CurrentRawVolume)
+            {
+                CurrentRawVolume = maxVolume;
+                IsClipping = maxVolume >= 0.92f;
+            }
 
             // --- VAD: Schmitt-trigger to prevent word-onset clipping ---
             // _voiceStartThreshold  (low)  — triggers transmission; catches plosive onsets (p-, b-, t-)
@@ -207,7 +215,14 @@ public class VoiceProcessor : MonoBehaviour
             {
                 _didDetect = true;
                 short[] pcmBuffer = new short[sampleBuffer.Length];
-                for (int i = 0; i < FrameLength; i++) pcmBuffer[i] = (short)Math.Floor(sampleBuffer[i] * short.MaxValue);
+                for (int i = 0; i < FrameLength; i++)
+                {
+                    // Soft-knee limiter via tanh: quiet speech passes nearly linearly,
+                    // loud/clipped input gets compressed instead of hard-clipped.
+                    // Drive of 1.3 keeps ±0.5 essentially linear while taming peaks above 0.7.
+                    float limited = (float)Math.Tanh(sampleBuffer[i] * 1.3);
+                    pcmBuffer[i] = (short)(limited * short.MaxValue);
+                }
                 if (OnFrameCaptured != null && _transmit) OnFrameCaptured.Invoke(pcmBuffer);
             }
             else if (_didDetect) { if (OnRecordingStop != null) OnRecordingStop.Invoke(); _didDetect = false; }

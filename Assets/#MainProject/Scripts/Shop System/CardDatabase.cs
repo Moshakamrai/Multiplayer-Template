@@ -17,7 +17,7 @@ public class CardDatabase : MonoBehaviour
             cardId = "jab_low", displayName = "Fast Jab", rarity = CardRarity.Basic, type = CardType.Attack,
             cost = 1, baseDamage = 8, timingWindow = 0.5f, timingWindowBonus = 0.2f,
             damagePercent = "+8%", description = "Fastest low attack. Each consecutive hit +5% damage.",
-            triggerName = "JabLow", attackLayer = AttackLayer.Low
+            triggerName = "Jab", attackLayer = AttackLayer.Low
         },
         new CombatCardData
         {
@@ -50,7 +50,7 @@ public class CardDatabase : MonoBehaviour
             cardId = "hook_fast", displayName = "Fast Hook", rarity = CardRarity.Basic, type = CardType.Attack,
             cost = 1, baseDamage = 10, timingWindow = 0.5f, timingWindowBonus = 0.2f,
             damagePercent = "+10%", description = "Quick mid attack, great for combos.",
-            triggerName = "HookFast", attackLayer = AttackLayer.Mid
+            triggerName = "Hook", attackLayer = AttackLayer.Mid
         },
         new CombatCardData
         {
@@ -69,21 +69,21 @@ public class CardDatabase : MonoBehaviour
             cardId = "slap_high", displayName = "Quick Slap", rarity = CardRarity.Basic, type = CardType.Attack,
             cost = 1, baseDamage = 8, timingWindow = 0.5f, timingWindowBonus = 0.2f,
             damagePercent = "+8%", description = "Fastest high attack. Quick and punishing.",
-            triggerName = "SlapHigh", attackLayer = AttackLayer.High
+            triggerName = "Slap", attackLayer = AttackLayer.High
         },
         new CombatCardData
         {
             cardId = "spinning_slash", displayName = "Spinning Slash", rarity = CardRarity.Basic, type = CardType.Attack,
             cost = 1, baseDamage = 14, timingWindow = 0.6f, timingWindowBonus = 0.3f,
             damagePercent = "+14%", description = "Balanced high attack. Mid-range speed and damage.",
-            triggerName = "SpinningSlash", attackLayer = AttackLayer.High
+            triggerName = "Spin", attackLayer = AttackLayer.High
         },
         new CombatCardData
         {
             cardId = "smash_high", displayName = "Overhead Smash", rarity = CardRarity.Advanced, type = CardType.Attack,
             cost = 2, baseDamage = 18, timingWindow = 0.4f, timingWindowBonus = -0.1f,
             damagePercent = "+18%", description = "Highest damage in game. Very tight timing window.",
-            triggerName = "SmashHigh", attackLayer = AttackLayer.High
+            triggerName = "UnbreakablePunch", attackLayer = AttackLayer.High
         },
     };
 
@@ -99,21 +99,21 @@ public class CardDatabase : MonoBehaviour
             cardId = "block_low", displayName = "Crouch Block", rarity = CardRarity.Basic, type = CardType.Defense,
             cost = 1, timingWindow = 0.6f, baseBlockMitigation = 100, defenseType = DefenseType.Passive,
             damagePercent = "100% block", description = "Pure low defense. Safest, most passive.",
-            triggerName = "BlockLow", defenseLayer = DefenseLayer.Low
+            triggerName = "Block", defenseLayer = DefenseLayer.Low
         },
         new CombatCardData
         {
             cardId = "counter_low", displayName = "Counter Sweep", rarity = CardRarity.Basic, type = CardType.Defense,
             cost = 1, timingWindow = 0.6f, baseBlockMitigation = 100, defenseType = DefenseType.Counter,
             damagePercent = "100% block + 5% reflect", description = "Block and punish. Reflect 5% damage on successful block.",
-            triggerName = "CounterLow", defenseLayer = DefenseLayer.Low
+            triggerName = "Clutch", defenseLayer = DefenseLayer.Low
         },
         new CombatCardData
         {
             cardId = "dodge_low", displayName = "Quick Dodge Low", rarity = CardRarity.Basic, type = CardType.Defense,
             cost = 1, timingWindow = 0.45f, baseBlockMitigation = 100, defenseType = DefenseType.Evasive,
             damagePercent = "100% evasion", description = "Evasive low defense. Perfect timing grants invulnerability frame.",
-            triggerName = "DodgeLow", defenseLayer = DefenseLayer.Low
+            triggerName = "Left", defenseLayer = DefenseLayer.Low
         },
     };
 
@@ -125,21 +125,21 @@ public class CardDatabase : MonoBehaviour
             cardId = "guard_mid", displayName = "Middle Guard", rarity = CardRarity.Basic, type = CardType.Defense,
             cost = 1, timingWindow = 0.6f, baseBlockMitigation = 100, defenseType = DefenseType.Passive,
             damagePercent = "100% block", description = "Balanced mid defense. Most straightforward block.",
-            triggerName = "GuardMid", defenseLayer = DefenseLayer.Mid
+            triggerName = "Guard", defenseLayer = DefenseLayer.Mid
         },
         new CombatCardData
         {
             cardId = "parry_mid", displayName = "Parry Mid", rarity = CardRarity.Basic, type = CardType.Defense,
             cost = 1, timingWindow = 0.6f, baseBlockMitigation = 100, defenseType = DefenseType.Counter,
             damagePercent = "100% block + 60% reflect", description = "Risky parry. Good timing reflects 60% damage back.",
-            triggerName = "ParryMid", defenseLayer = DefenseLayer.Mid
+            triggerName = "ParryIntent", defenseLayer = DefenseLayer.Mid
         },
         new CombatCardData
         {
             cardId = "sway_mid", displayName = "Sway Mid", rarity = CardRarity.Basic, type = CardType.Defense,
             cost = 1, timingWindow = 0.45f, baseBlockMitigation = 100, defenseType = DefenseType.Evasive,
             damagePercent = "100% evasion", description = "Evasive mid defense. Perfect timing grants invulnerability.",
-            triggerName = "SwayMid", defenseLayer = DefenseLayer.Mid
+            triggerName = "Fake", defenseLayer = DefenseLayer.Mid
         },
     };
 
@@ -151,21 +151,21 @@ public class CardDatabase : MonoBehaviour
             cardId = "guard_high", displayName = "High Guard", rarity = CardRarity.Basic, type = CardType.Defense,
             cost = 1, timingWindow = 0.6f, baseBlockMitigation = 100, defenseType = DefenseType.Passive,
             damagePercent = "100% block", description = "Pure high defense. Protects head and body.",
-            triggerName = "GuardHigh", defenseLayer = DefenseLayer.High
+            triggerName = "Right", defenseLayer = DefenseLayer.High
         },
         new CombatCardData
         {
             cardId = "intercept_high", displayName = "Intercept High", rarity = CardRarity.Advanced, type = CardType.Defense,
             cost = 2, timingWindow = 0.6f, baseBlockMitigation = 100, defenseType = DefenseType.Counter,
             damagePercent = "100% block + disarm", description = "Punish prediction. Forces opponent off high layer next turn.",
-            triggerName = "InterceptHigh", defenseLayer = DefenseLayer.High
+            triggerName = "Uppercut", defenseLayer = DefenseLayer.High
         },
         new CombatCardData
         {
             cardId = "redirect_high", displayName = "Redirect High", rarity = CardRarity.Advanced, type = CardType.Defense,
             cost = 2, timingWindow = 0.45f, baseBlockMitigation = 100, defenseType = DefenseType.Evasive,
             damagePercent = "100% evasion + push", description = "Evasive counter. Perfect timing pushes opponent back.",
-            triggerName = "RedirectHigh", defenseLayer = DefenseLayer.High
+            triggerName = "Reverse", defenseLayer = DefenseLayer.High
         },
     };
 
@@ -230,8 +230,8 @@ public class CardDatabase : MonoBehaviour
         },
     };
 
-    // ── LEGACY COMPATIBILITY: Combined arrays for backward-compat searches ────
-    public static CombatCardData[] BasicCards
+    // ── LEGACY COMPATIBILITY: Combined array for backward-compat searches ────
+    public static List<CombatCardData> BasicCards
     {
         get
         {
@@ -242,12 +242,12 @@ public class CardDatabase : MonoBehaviour
             list.AddRange(LowDefenses);
             list.AddRange(MidDefenses);
             list.AddRange(HighDefenses);
-            return list.ToArray();
+            return list;
         }
     }
 
-    public static CombatCardData[] AdvancedCards => new CombatCardData[0];
-    public static CombatCardData[] LegendaryCards => new CombatCardData[0];
+    public static List<CombatCardData> AdvancedCards => new List<CombatCardData>();
+    public static List<CombatCardData> LegendaryCards => new List<CombatCardData>();
 
     // ── RARITY PROGRESSION ─────────────────────────────────────────────────────
     public static void GetRarityChances(int roundNumber, out float basicChance, out float advancedChance, out float legendaryChance)

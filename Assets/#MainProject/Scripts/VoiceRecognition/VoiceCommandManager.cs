@@ -193,29 +193,29 @@ public class VoiceCommandManager : NetworkBehaviour
             }
 
             // ── LOW ATTACKS (Cyan) ──
-            if (GetSimilarity(word, "punch") > 0.7f || word == "jab") { trigger = "JabLow"; recognized = true; }
+            if (GetSimilarity(word, "punch") > 0.7f || word == "jab") { trigger = "Jab"; recognized = true; }
             else if (GetSimilarity(word, "sweep") > 0.75f || word == "swipe" || word == "sweet") { trigger = "Sweep"; recognized = true; }
             else if (GetSimilarity(word, "drive") > 0.75f || word == "stab" || word == "thrust") { trigger = "DriveLow"; recognized = true; }
             // ── MID ATTACKS (White) ──
             else if (word == "cross" || word == "flank" || word == "blank" || word == "frank" || GetSimilarity(word, "cross") > 0.75f) { trigger = "Cross"; recognized = true; }
-            else if (GetSimilarity(word, "hook") > 0.75f && GetSimilarity(word, "uppercut") < 0.70f) { trigger = "HookFast"; recognized = true; }
+            else if (GetSimilarity(word, "hook") > 0.75f && GetSimilarity(word, "uppercut") < 0.70f) { trigger = "Hook"; recognized = true; }
             else if (GetSimilarity(word, "overhead") > 0.75f || word == "chop" || word == "smash") { trigger = "Overhead"; recognized = true; }
             // ── HIGH ATTACKS (Yellow/Gold) ──
-            else if (GetSimilarity(word, "slap") > 0.75f || word == "tap" || word == "hit") { trigger = "SlapHigh"; recognized = true; }
-            else if (GetSimilarity(word, "spin") > 0.75f || word == "spinning" || word == "slash") { trigger = "SpinningSlash"; recognized = true; }
-            else if (GetSimilarity(word, "smash") > 0.75f || GetSimilarity(word, "pound") > 0.75f) { trigger = "SmashHigh"; recognized = true; }
+            else if (GetSimilarity(word, "slap") > 0.75f || word == "tap" || word == "hit") { trigger = "Slap"; recognized = true; }
+            else if (GetSimilarity(word, "spin") > 0.75f || word == "spinning" || word == "slash") { trigger = "Spin"; recognized = true; }
+            else if (GetSimilarity(word, "smash") > 0.75f || GetSimilarity(word, "pound") > 0.75f) { trigger = "UnbreakablePunch"; recognized = true; }
             // ── LOW BLOCKS (Cyan) ──
-            else if (GetSimilarity(word, "crouch") > 0.75f || word == "duck" || GetSimilarity(word, "block") > 0.75f) { trigger = "BlockLow"; recognized = true; }
-            else if (GetSimilarity(word, "counter") > 0.75f) { trigger = "CounterLow"; recognized = true; }
-            else if (GetSimilarity(word, "dodge") > 0.75f || GetSimilarity(word, "left") > 0.75f) { trigger = "DodgeLow"; dashDir = Vector3.left; recognized = true; }
+            else if (GetSimilarity(word, "crouch") > 0.75f || word == "duck" || GetSimilarity(word, "block") > 0.75f) { trigger = "Block"; recognized = true; }
+            else if (GetSimilarity(word, "counter") > 0.75f) { trigger = "Clutch"; recognized = true; }
+            else if (GetSimilarity(word, "dodge") > 0.75f || GetSimilarity(word, "left") > 0.75f) { trigger = "Left"; dashDir = Vector3.left; recognized = true; }
             // ── MID BLOCKS (White) ──
-            else if (GetSimilarity(word, "guard") > 0.75f || word == "middle") { trigger = "GuardMid"; recognized = true; }
-            else if (GetSimilarity(word, "parry") > 0.75f || word == "reflect") { trigger = "ParryMid"; recognized = true; }
-            else if (GetSimilarity(word, "sway") > 0.75f) { trigger = "SwayMid"; recognized = true; }
+            else if (GetSimilarity(word, "guard") > 0.75f || word == "middle") { trigger = "Guard"; recognized = true; }
+            else if (GetSimilarity(word, "parry") > 0.75f || word == "reflect") { trigger = "ParryIntent"; recognized = true; }
+            else if (GetSimilarity(word, "sway") > 0.75f) { trigger = "Fake"; recognized = true; }
             // ── HIGH BLOCKS (Yellow/Gold) ──
-            else if (GetSimilarity(word, "guard_high") > 0.75f || word == "high") { trigger = "GuardHigh"; recognized = true; }
-            else if (GetSimilarity(word, "intercept") > 0.75f) { trigger = "InterceptHigh"; recognized = true; }
-            else if (GetSimilarity(word, "redirect") > 0.75f || word == "bounce") { trigger = "RedirectHigh"; dashDir = Vector3.right; recognized = true; }
+            else if (GetSimilarity(word, "guard_high") > 0.75f || word == "high") { trigger = "Right"; recognized = true; }
+            else if (GetSimilarity(word, "intercept") > 0.75f) { trigger = "Uppercut"; recognized = true; }
+            else if (GetSimilarity(word, "redirect") > 0.75f || word == "bounce") { trigger = "Reverse"; dashDir = Vector3.right; recognized = true; }
             // Combo card selection — "one/two/three/four"
 
 

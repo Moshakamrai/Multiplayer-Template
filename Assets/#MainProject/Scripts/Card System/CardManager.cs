@@ -238,7 +238,16 @@ public class CardManager : NetworkBehaviour
         // Record for next-window cooldown — only during active single-move rhythm rounds
         var rmm = RhythmRoundManager.Instance;
         if (rmm != null && rmm.isRoundActive && rmm.IsSingleMoveMode() && !trigger.StartsWith("Combo"))
+        {
             justUsedTrigger = trigger;
+
+            // Update PlayerCombat's layer cooldown tracking if this is an attack
+            if (IsAttackTrigger(trigger))
+            {
+                var pc = GetComponent<PlayerCombat>();
+                if (pc != null) pc.lastUsedAttackTrigger = trigger;
+            }
+        }
     }
 
     [Server]

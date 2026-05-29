@@ -35,6 +35,7 @@ public class PlayerCombat : NetworkBehaviour
     [SyncVar] public string activeTraitId = "";
     [SyncVar] public int ConsecutiveHitsChain = 0; // For Bloodlust / Momentum traits
     [SyncVar] public bool HasStalwartBuff = false; // Stalwart trait: +10% next attack after block
+    [SyncVar] public string lastUsedAttackTrigger = ""; // For layer cooldown (can't use same layer twice in a row)
 
     private Queue<string> _attackQueue = new Queue<string>();
     public SphereCollider weaponGloveLeft;

@@ -1128,6 +1128,15 @@ public class RhythmRoundManager : NetworkBehaviour
         string atk = move.attack;
         string def = defMove.attack;
 
+        // --- LAYER-BASED BLOCKING MITIGATION (3-LAYER SYSTEM) ---
+        float layerBlockMitigation = 0f; // Will be applied to non-special-defense cases
+        if (!defenderStaggered && IsDefenseMove(def) && GetMoveLayer(atk) == GetMoveLayer(def))
+        {
+            // Layers match: defender blocks perfectly → 70% chip damage
+            // Special defenses (Counter/Parry) handled later will override this
+            layerBlockMitigation = 0.70f; // 30% of damage gets through as chip
+        }
+
         // --- HANDLE CARD EFFECTS THAT PERSIST FROM LAST TURN ---
         // Trap: trigger if opponent moves or blocks
         if (defender.HasPendingTrap && !defenderStaggered)
@@ -1444,9 +1453,18 @@ public class RhythmRoundManager : NetworkBehaviour
         // --- 4. APPLY DAMAGE ---
         if (hits)
         {
+            // Apply block mitigation first, then layer mitigation
             float mitigMult = defenderStaggered ? 1f : (1f - blockMitigation);
+
+            // If layers matched, apply chip damage (30% gets through, 70% blocked)
+            if (layerBlockMitigation > 0f)
+            {
+                mitigMult *= layerBlockMitigation;
+            }
+
             damageDealt = Mathf.RoundToInt(finalDmg * mitigMult);
             if (blockMitigation > 0f) tradeReason = $"{atk} chipped through Block";
+            else if (layerBlockMitigation > 0f) tradeReason = $"{atk} blocked perfectly (chip {damageDealt} dmg)";
             else tradeReason = $"{atk} connected";
 
             // Glass trait: +20% MORE damage taken (high risk for the +40% attack boost)
@@ -1629,62 +1647,38 @@ public class RhythmRoundManager : NetworkBehaviour
         };
     }
 
-    // Hit evaluation: does attack hit given defense? (Rock-Paper-Scissors matchups)
+    // Hit evaluation: does attack hit given defense? (3-layer matching system)
     [Server]
     private bool EvaluateHit(string attack, string defense, bool dodgeSuccessful)
     {
-        // Grapple: beats block and dodge (command grab)
+        // Non-attacking moves never hit
+        if (attack == "Block" || attack == "Taunt" || attack == "Focus" || attack == "Left" || attack == "Right")
+            return false;
+
+        // Grapple is a command grab, always hits (special exception)
         if (attack == "Grapple") return true;
 
-        // UnbreakablePunch / Boom: only miss on successful dodge, beats block
-        if (attack == "UnbreakablePunch") return !dodgeSuccessful;
-
-        // Overclock: only miss on successful dodge
-        if (attack == "Overclock") return !dodgeSuccessful;
-
-        // Reverse: only miss on successful dodge
-        if (attack == "Reverse") return !dodgeSuccessful;
-
-        // Sweep: beats block, misses on dodge
-        if (attack == "Sweep")
-        {
-            if (defense == "Block") return true; // sweep bypasses block
+        // Protected attacks (UnbreakablePunch, Overclock, Reverse) only miss on successful dodge
+        if (attack == "UnbreakablePunch" || attack == "Overclock" || attack == "Reverse")
             return !dodgeSuccessful;
-        }
 
-        // Hook: beats jab and block, misses on dodge, loses to cross
-        if (attack == "Hook")
+        // Get attack and defense layers for matching
+        string atkLayer = GetMoveLayer(attack);
+        string defLayer = GetMoveLayer(defense);
+
+        // Layer matching: if layers match, defense succeeds (no hit)
+        if (atkLayer == defLayer)
         {
-            if (defense == "Block") return true; // hook bypasses block
-            return !dodgeSuccessful;
+            // Special cases: some attacks bypass certain defenses
+            if ((attack == "Sweep" && defense == "Block") || (attack == "Hook" && defense == "Block"))
+                return true; // These bypass block
+            if (attack == "Uppercut" && (defense == "Left" || defense == "Right"))
+                return true; // Uppercut catches dodges
+            return false; // Normal block succeeds
         }
 
-        // Uppercut: beats dodge and grapple, loses to block and cross
-        if (attack == "Uppercut")
-        {
-            if (defense == "Left" || defense == "Right") return true; // catches dodges
-            return true; // anti-dodge, always hits
-        }
-
-        // Cross: beats hook and block and movement, loses to jab and boom
-        if (attack == "Cross") return true;
-
-        // Jab: beats cross, loses to hook and boom
-        if (attack == "Jab") return !dodgeSuccessful;
-
-        // Fake: beats block and parry (handled in ProcessDamage), loses to all attacks
-        if (attack == "Fake") return !dodgeSuccessful;
-
-        // Block, Taunt, Focus: defensive/utility, never hit
-        if (attack == "Block" || attack == "Taunt" || attack == "Focus")
-            return false;
-
-        // Movement: never hits
-        if (attack == "Left" || attack == "Right")
-            return false;
-
-        // Default: misses on successful dodge
-        return !dodgeSuccessful;
+        // Layer mismatch: attack hits fully
+        return true;
     }
 
     // Cards that cannot be interrupted (unstoppable attacks)
@@ -1694,57 +1688,25 @@ public class RhythmRoundManager : NetworkBehaviour
         return attack == "UnbreakablePunch" || attack == "Overclock" || attack == "Reverse";
     }
 
-    // 3-LAYER INTERRUPTION: Attack blocks are based on layer matching
+    // 3-LAYER INTERRUPTION: Simple layer matching system
     private bool DoesInterrupt(string attackerMove, string defenderMove, out string reason)
     {
         reason = "";
         if (string.IsNullOrEmpty(attackerMove) || string.IsNullOrEmpty(defenderMove)) return false;
 
-        // --- ATTACK vs ATTACK RPS ---
-        if (attackerMove == "Jab" && defenderMove == "Cross") { reason = "Jab outraced Cross"; return true; }
-        if (attackerMove == "Cross" && defenderMove == "Hook") { reason = "Cross outranged Hook"; return true; }
-        if (attackerMove == "Hook" && defenderMove == "Jab") { reason = "Hook overpowered Jab"; return true; }
-        if (attackerMove == "UnbreakablePunch" && (defenderMove == "Jab" || defenderMove == "Cross" || defenderMove == "Hook"))
-            { reason = "BOOM crushes everything"; return true; }
+        // If defender is not using a defense card, attack lands cleanly
+        if (!IsDefenseMove(defenderMove)) return false;
 
-        // Fake beats ALL defense cards
-        if (attackerMove == "Fake" && IsDefenseMove(defenderMove))
-            { reason = "Fake slipped through defense"; return true; }
+        // Get attack and defense layers
+        string atkLayer = GetMoveLayer(attackerMove);
+        string defLayer = GetMoveLayer(defenderMove);
 
-        // Uppercut beats Dodge and Grapple
-        if (attackerMove == "Uppercut" && (defenderMove == "Left" || defenderMove == "Right" || defenderMove == "Grapple"))
-            { reason = "Uppercut caught the dodge"; return true; }
+        // If layers match, defender blocks (no interrupt)
+        if (atkLayer == defLayer) return false;
 
-        // Sweep beats Block
-        if (attackerMove == "Sweep" && defenderMove == "Block")
-            { reason = "Sweep went under Block"; return true; }
-
-        // Jab interrupts Grapple
-        if (attackerMove == "Jab" && defenderMove == "Grapple")
-            { reason = "Jab stuffed the Grapple"; return true; }
-
-        // Cross interrupts Grapple and Sweep
-        if (attackerMove == "Cross" && (defenderMove == "Grapple" || defenderMove == "Sweep"))
-            { reason = "Cross interrupted"; return true; }
-
-        // Hook interrupts Grapple
-        if (attackerMove == "Hook" && defenderMove == "Grapple")
-            { reason = "Hook interrupted Grapple"; return true; }
-
-        // All attacks interrupt Fake
-        if (defenderMove == "Fake" && CardManager.IsAttackTrigger(attackerMove))
-            { reason = "Attack punished Fake"; return true; }
-
-        // Boom beats Focus
-        if (attackerMove == "UnbreakablePunch" && defenderMove == "Focus")
-            { reason = "BOOM broke Focus"; return true; }
-
-        // All attacks interrupt Focus, Taunt, Trap, Cage (they're passive)
-        if ((defenderMove == "Focus" || defenderMove == "Taunt" || defenderMove == "Trap" || defenderMove == "Cage")
-            && (CardManager.IsAttackTrigger(attackerMove) && attackerMove != "Fake"))
-            { reason = $"Attack hit during {defenderMove}"; return true; }
-
-        return false;
+        // Layer mismatch: attack penetrates (returns true for full hit)
+        reason = $"{attackerMove} bypassed {defenderMove}";
+        return true;
     }
 
     private bool IsDefenseMove(string move)
@@ -1753,6 +1715,30 @@ public class RhythmRoundManager : NetworkBehaviour
         return move == "Block" || move == "ParryIntent" || move == "Left" || move == "Right"
             || move == "Clutch" || move == "Focus" || move == "Taunt" || move == "Trap"
             || move == "Cage" || move == "Mirror" || move == "Reverse";
+    }
+
+    // Returns the layer (Low/Mid/High) for any attack or defense move
+    private string GetMoveLayer(string move)
+    {
+        if (string.IsNullOrEmpty(move)) return "Mid";
+        return move switch
+        {
+            // Low attacks: Jab, Sweep
+            "Jab" => "Low", "Sweep" => "Low",
+            // High attacks: Hook, Uppercut, Overclock
+            "Hook" => "High", "Uppercut" => "High", "Overclock" => "High",
+            // Mid attacks: Cross, Grapple, Fake, etc.
+            "Cross" => "Mid", "Grapple" => "Mid", "Fake" => "Mid", "Reverse" => "Mid", "Trap" => "Mid", "Cage" => "Mid",
+            // Low defenses: Block, Left (dodge)
+            "Block" => "Low", "Left" => "Low", "Right" => "Low",
+            // High defenses: ParryIntent, Clutch, Mirror
+            "ParryIntent" => "High", "Clutch" => "High", "Mirror" => "High",
+            // Mid defenses: Focus, Taunt
+            "Focus" => "Mid", "Taunt" => "Mid",
+            // Protected attacks (beat all layers)
+            "UnbreakablePunch" => "Mid",
+            _                  => "Mid"
+        };
     }
 
 

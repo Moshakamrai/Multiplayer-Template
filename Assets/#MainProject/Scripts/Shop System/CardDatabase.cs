@@ -14,10 +14,10 @@ public class CardDatabase : MonoBehaviour
     {
         new CombatCardData
         {
-            cardId = "jab", displayName = "Fast Jab", rarity = CardRarity.Basic, type = CardType.Attack,
+            cardId = "jab_low", displayName = "Fast Jab", rarity = CardRarity.Basic, type = CardType.Attack,
             cost = 1, baseDamage = 8, timingWindow = 0.5f, timingWindowBonus = 0.2f,
             damagePercent = "+8%", description = "Fastest low attack. Each consecutive hit +5% damage.",
-            triggerName = "Jab", attackLayer = AttackLayer.Low
+            triggerName = "JabLow", attackLayer = AttackLayer.Low
         },
         new CombatCardData
         {
@@ -47,10 +47,10 @@ public class CardDatabase : MonoBehaviour
         },
         new CombatCardData
         {
-            cardId = "hook", displayName = "Fast Hook", rarity = CardRarity.Basic, type = CardType.Attack,
+            cardId = "hook_fast", displayName = "Fast Hook", rarity = CardRarity.Basic, type = CardType.Attack,
             cost = 1, baseDamage = 10, timingWindow = 0.5f, timingWindowBonus = 0.2f,
             damagePercent = "+10%", description = "Quick mid attack, great for combos.",
-            triggerName = "Hook", attackLayer = AttackLayer.Mid
+            triggerName = "HookFast", attackLayer = AttackLayer.Mid
         },
         new CombatCardData
         {
@@ -66,24 +66,24 @@ public class CardDatabase : MonoBehaviour
     {
         new CombatCardData
         {
-            cardId = "slap", displayName = "Quick Slap", rarity = CardRarity.Basic, type = CardType.Attack,
+            cardId = "slap_high", displayName = "Quick Slap", rarity = CardRarity.Basic, type = CardType.Attack,
             cost = 1, baseDamage = 8, timingWindow = 0.5f, timingWindowBonus = 0.2f,
             damagePercent = "+8%", description = "Fastest high attack. Quick and punishing.",
-            triggerName = "Slap", attackLayer = AttackLayer.High
+            triggerName = "SlapHigh", attackLayer = AttackLayer.High
         },
         new CombatCardData
         {
-            cardId = "spin", displayName = "Spinning Slash", rarity = CardRarity.Basic, type = CardType.Attack,
+            cardId = "spinning_slash", displayName = "Spinning Slash", rarity = CardRarity.Basic, type = CardType.Attack,
             cost = 1, baseDamage = 14, timingWindow = 0.6f, timingWindowBonus = 0.3f,
             damagePercent = "+14%", description = "Balanced high attack. Mid-range speed and damage.",
-            triggerName = "Spin", attackLayer = AttackLayer.High
+            triggerName = "SpinningSlash", attackLayer = AttackLayer.High
         },
         new CombatCardData
         {
-            cardId = "unbreakablepunch", displayName = "Overhead Smash", rarity = CardRarity.Advanced, type = CardType.Attack,
+            cardId = "smash_high", displayName = "Overhead Smash", rarity = CardRarity.Advanced, type = CardType.Attack,
             cost = 2, baseDamage = 18, timingWindow = 0.4f, timingWindowBonus = -0.1f,
             damagePercent = "+18%", description = "Highest damage in game. Very tight timing window.",
-            triggerName = "UnbreakablePunch", attackLayer = AttackLayer.High
+            triggerName = "SmashHigh", attackLayer = AttackLayer.High
         },
     };
 
@@ -96,24 +96,24 @@ public class CardDatabase : MonoBehaviour
     {
         new CombatCardData
         {
-            cardId = "block", displayName = "Crouch Block", rarity = CardRarity.Basic, type = CardType.Defense,
+            cardId = "block_low", displayName = "Crouch Block", rarity = CardRarity.Basic, type = CardType.Defense,
             cost = 1, timingWindow = 0.6f, baseBlockMitigation = 100, defenseType = DefenseType.Passive,
             damagePercent = "100% block", description = "Pure low defense. Safest, most passive.",
-            triggerName = "Block", defenseLayer = DefenseLayer.Low
+            triggerName = "BlockLow", defenseLayer = DefenseLayer.Low
         },
         new CombatCardData
         {
-            cardId = "clutch", displayName = "Counter Sweep", rarity = CardRarity.Basic, type = CardType.Defense,
+            cardId = "counter_low", displayName = "Counter Sweep", rarity = CardRarity.Basic, type = CardType.Defense,
             cost = 1, timingWindow = 0.6f, baseBlockMitigation = 100, defenseType = DefenseType.Counter,
             damagePercent = "100% block + 5% reflect", description = "Block and punish. Reflect 5% damage on successful block.",
-            triggerName = "Clutch", defenseLayer = DefenseLayer.Low
+            triggerName = "CounterLow", defenseLayer = DefenseLayer.Low
         },
         new CombatCardData
         {
-            cardId = "left", displayName = "Quick Dodge Low", rarity = CardRarity.Basic, type = CardType.Defense,
+            cardId = "dodge_low", displayName = "Quick Dodge Low", rarity = CardRarity.Basic, type = CardType.Defense,
             cost = 1, timingWindow = 0.45f, baseBlockMitigation = 100, defenseType = DefenseType.Evasive,
             damagePercent = "100% evasion", description = "Evasive low defense. Perfect timing grants invulnerability frame.",
-            triggerName = "Left", defenseLayer = DefenseLayer.Low
+            triggerName = "DodgeLow", defenseLayer = DefenseLayer.Low
         },
     };
 
@@ -122,24 +122,24 @@ public class CardDatabase : MonoBehaviour
     {
         new CombatCardData
         {
-            cardId = "guard", displayName = "Middle Guard", rarity = CardRarity.Basic, type = CardType.Defense,
+            cardId = "guard_mid", displayName = "Middle Guard", rarity = CardRarity.Basic, type = CardType.Defense,
             cost = 1, timingWindow = 0.6f, baseBlockMitigation = 100, defenseType = DefenseType.Passive,
             damagePercent = "100% block", description = "Balanced mid defense. Most straightforward block.",
-            triggerName = "Guard", defenseLayer = DefenseLayer.Mid
+            triggerName = "GuardMid", defenseLayer = DefenseLayer.Mid
         },
         new CombatCardData
         {
-            cardId = "parryintent", displayName = "Parry Mid", rarity = CardRarity.Basic, type = CardType.Defense,
+            cardId = "parry_mid", displayName = "Parry Mid", rarity = CardRarity.Basic, type = CardType.Defense,
             cost = 1, timingWindow = 0.6f, baseBlockMitigation = 100, defenseType = DefenseType.Counter,
             damagePercent = "100% block + 60% reflect", description = "Risky parry. Good timing reflects 60% damage back.",
-            triggerName = "ParryIntent", defenseLayer = DefenseLayer.Mid
+            triggerName = "ParryMid", defenseLayer = DefenseLayer.Mid
         },
         new CombatCardData
         {
-            cardId = "fake", displayName = "Sway Mid", rarity = CardRarity.Basic, type = CardType.Defense,
+            cardId = "sway_mid", displayName = "Sway Mid", rarity = CardRarity.Basic, type = CardType.Defense,
             cost = 1, timingWindow = 0.45f, baseBlockMitigation = 100, defenseType = DefenseType.Evasive,
             damagePercent = "100% evasion", description = "Evasive mid defense. Perfect timing grants invulnerability.",
-            triggerName = "Fake", defenseLayer = DefenseLayer.Mid
+            triggerName = "SwayMid", defenseLayer = DefenseLayer.Mid
         },
     };
 
@@ -148,24 +148,24 @@ public class CardDatabase : MonoBehaviour
     {
         new CombatCardData
         {
-            cardId = "right", displayName = "High Guard", rarity = CardRarity.Basic, type = CardType.Defense,
+            cardId = "guard_high", displayName = "High Guard", rarity = CardRarity.Basic, type = CardType.Defense,
             cost = 1, timingWindow = 0.6f, baseBlockMitigation = 100, defenseType = DefenseType.Passive,
             damagePercent = "100% block", description = "Pure high defense. Protects head and body.",
-            triggerName = "Right", defenseLayer = DefenseLayer.High
+            triggerName = "GuardHigh", defenseLayer = DefenseLayer.High
         },
         new CombatCardData
         {
-            cardId = "uppercut", displayName = "Intercept High", rarity = CardRarity.Advanced, type = CardType.Defense,
+            cardId = "intercept_high", displayName = "Intercept High", rarity = CardRarity.Advanced, type = CardType.Defense,
             cost = 2, timingWindow = 0.6f, baseBlockMitigation = 100, defenseType = DefenseType.Counter,
             damagePercent = "100% block + disarm", description = "Punish prediction. Forces opponent off high layer next turn.",
-            triggerName = "Uppercut", defenseLayer = DefenseLayer.High
+            triggerName = "InterceptHigh", defenseLayer = DefenseLayer.High
         },
         new CombatCardData
         {
-            cardId = "reverse", displayName = "Redirect High", rarity = CardRarity.Advanced, type = CardType.Defense,
+            cardId = "redirect_high", displayName = "Redirect High", rarity = CardRarity.Advanced, type = CardType.Defense,
             cost = 2, timingWindow = 0.45f, baseBlockMitigation = 100, defenseType = DefenseType.Evasive,
             damagePercent = "100% evasion + push", description = "Evasive counter. Perfect timing pushes opponent back.",
-            triggerName = "Reverse", defenseLayer = DefenseLayer.High
+            triggerName = "RedirectHigh", defenseLayer = DefenseLayer.High
         },
     };
 

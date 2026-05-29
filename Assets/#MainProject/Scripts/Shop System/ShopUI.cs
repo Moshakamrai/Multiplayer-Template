@@ -303,6 +303,11 @@ public class ShopUI : MonoBehaviour
         Rect fullCardRect = new Rect(x, y, w, h);
         bool isHovered = fullCardRect.Contains(Event.current.mousePosition);
 
+        // Check upgrade status
+        bool isOwned = inv != null && inv.OwnsCard(card.cardId);
+        int upgradeLevel = isOwned ? inv.GetUpgradeLevel(card.cardId) : -1;
+        bool isMaxed = upgradeLevel >= PlayerInventory.MaxUpgradeLevel;
+
         // Background
         GUI.color = isHovered ? new Color(0.08f, 0.1f, 0.18f) : new Color(0.05f, 0.06f, 0.12f);
         GUI.DrawTexture(fullCardRect, _whiteTex);
@@ -327,30 +332,81 @@ public class ShopUI : MonoBehaviour
             GUI.DrawTexture(new Rect(x, y + h - 2f, w, 2f), _whiteTex);
         }
 
-        // Card name with glow
+        // Card name with glow + upgrade stars
         GUIStyle nameStyle = new GUIStyle(_cardNameStyle);
         Color nameColor = isHovered ? new Color(1f, 1f, 0.3f) : Color.white;
-        CyberpunkGUIUtils.DrawGlowText(new Rect(x + 8f, y + 4f, w - 70f, 18f), card.displayName.ToUpper(), nameColor, nameStyle, nameColor);
+        string displayText = card.displayName.ToUpper();
+        if (isOwned && upgradeLevel >= 0)
+        {
+            string stars = inv.GetUpgradeStars(card.cardId);
+            displayText = $"{displayText} {stars}";
+        }
+        CyberpunkGUIUtils.DrawGlowText(new Rect(x + 8f, y + 4f, w - 70f, 18f), displayText, nameColor, nameStyle, nameColor);
 
         // Description with better visibility
         _descStyle.fontSize = 11;
         GUI.color = isHovered ? new Color(1f, 1f, 1f, 0.95f) : new Color(0.9f, 0.9f, 0.9f, 0.85f);
-        GUI.Label(new Rect(x + 8f, y + 24f, w - 16f, h - 54f), card.description, _descStyle);
+
+        string descText = card.description;
+        if (isOwned && upgradeLevel >= 0)
+        {
+            float currentMult = inv.GetUpgradeMultiplier(card.cardId);
+            int baseDmg = card.baseDamage;
+            int currentDmg = Mathf.RoundToInt(baseDmg * currentMult);
+            descText += $"\n\nUpgraded to Tier {upgradeLevel + 1}: {currentDmg}% damage";
+            if (!isMaxed && upgradeLevel + 1 <= PlayerInventory.MaxUpgradeLevel)
+            {
+                float nextMult = upgradeLevel switch
+                {
+                    0 => 1.1f,
+                    1 => 1.2f,
+                    2 => 1.35f,
+                    _ => 1.0f
+                };
+                int nextDmg = Mathf.RoundToInt(baseDmg * nextMult);
+                descText += $" (Next: {nextDmg}%, +{(nextDmg - currentDmg)}%)";
+            }
+        }
+
+        GUI.Label(new Rect(x + 8f, y + 24f, w - 16f, h - 54f), descText, _descStyle);
 
         // Cost with glow
         GUIStyle costStyle = new GUIStyle(_costStyle);
         CyberpunkGUIUtils.DrawGlowText(new Rect(x + 8f, y + h - 22f, 50f, 18f), $"{card.cost} CR", CyberpunkGUIUtils.NEON_YELLOW, costStyle, CyberpunkGUIUtils.NEON_YELLOW);
 
-        // Buy button — disabled when inventory is full
+        // Button logic: BUY, UPGRADE, or MAXED
         bool inventoryFull = inv != null && inv.ownedCombatCards.Count >= PlayerInventory.MaxCombatCards;
         Rect btnRect = new Rect(x + w - 75f, y + h - 24f, 70f, 22f);
-        if (inventoryFull)
+
+        if (isOwned && isMaxed)
         {
+            // Already maxed out
+            GUI.color = new Color(0.6f, 0.3f, 0.3f, 0.6f);
+            GUI.Button(btnRect, "MAXED", _buttonStyle);
+            GUI.color = Color.white;
+        }
+        else if (isOwned)
+        {
+            // Upgrade button
+            GUI.color = isHovered ? new Color(0.8f, 0.6f, 0.2f, 0.9f) : new Color(0.7f, 0.5f, 0.1f, 0.8f);
+            if (GUI.Button(btnRect, "UPGRADE", _buttonStyle))
+            {
+                var localPc = GameManager.localPlayer?.GetComponent<PlayerCombat>();
+                if (localPc != null) localPc.CmdBuyCombatCard(slotIndex);
+                spm.MarkCombatSlotPurchased(slotIndex);
+            }
+            GUI.color = Color.white;
+        }
+        else if (inventoryFull)
+        {
+            // Inventory full
             GUI.color = new Color(0.5f, 0.5f, 0.5f, 0.5f);
             GUI.Button(btnRect, "FULL", _buttonStyle);
+            GUI.color = Color.white;
         }
         else
         {
+            // Buy button
             GUI.color = isHovered ? new Color(0.2f, 0.9f, 0.4f, 0.9f) : new Color(0.15f, 0.7f, 0.3f, 0.8f);
             if (GUI.Button(btnRect, "BUY", _buttonStyle))
             {
@@ -358,11 +414,11 @@ public class ShopUI : MonoBehaviour
                 if (localPc != null) localPc.CmdBuyCombatCard(slotIndex);
                 spm.MarkCombatSlotPurchased(slotIndex);
             }
+            GUI.color = Color.white;
         }
-        GUI.color = Color.white;
 
-        // "DECK FULL" overlay hint when hovering and full
-        if (inventoryFull && isHovered)
+        // Hover hints
+        if (inventoryFull && !isOwned && isHovered)
         {
             GUIStyle fullHint = new GUIStyle(GUI.skin.label) { fontSize = 10, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
             fullHint.normal.textColor = new Color(1f, 0.5f, 0.2f);
@@ -375,6 +431,8 @@ public class ShopUI : MonoBehaviour
             _tooltipPos = Event.current.mousePosition;
             _tooltipTitle = card.displayName;
             _tooltipText = card.description;
+            if (isOwned && upgradeLevel >= 0)
+                _tooltipText += $"\n\nTier {upgradeLevel + 1} ({inv.GetUpgradeStars(card.cardId)})";
             _hasTooltip = true;
         }
     }

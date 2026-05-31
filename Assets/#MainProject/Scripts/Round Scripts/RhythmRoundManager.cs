@@ -153,7 +153,35 @@ public class RhythmRoundManager : NetworkBehaviour
         yield return new WaitForSeconds(2f);
         // Spawn bot if playing solo (only 1 human connected)
         EnsureBotExists();
-        StartShopPhase();
+        // Skip the old pre-round draft shop. Hand everyone the Tier 0 learning deck
+        // (Strike / Block / Parry) so they learn the triangle, then buy more in post-round shops.
+        GrantStarterDeckAndBegin();
+    }
+
+    // Tier 0 starter deck: Jab (Strike), Block (Block), Reflect (Parry).
+    // Players learn the core triangle before the shop ever opens.
+    private static readonly string[] StarterDeck = { "jab", "block", "reflect" };
+
+    [Server]
+    private void GrantStarterDeckAndBegin()
+    {
+        foreach (var player in GameManager.players)
+        {
+            if (player == null) continue;
+            var inv = player.GetComponent<PlayerInventory>();
+            if (inv == null) continue;
+
+            foreach (var id in StarterDeck)
+                if (!inv.ownedCombatCards.Contains(id))
+                    inv.ownedCombatCards.Add(id);
+
+            // Equip the full starter deck for the first round (SetupRound builds triggers from this).
+            inv.EquipCombatCards(new List<string>(inv.ownedCombatCards));
+            Debug.Log($"<color=green>STARTER DECK:</color> {player.PlayerName} starts with {string.Join(",", inv.ownedCombatCards)}");
+        }
+
+        // Go straight to the round picker — no first shop.
+        ShowRoundPicker();
     }
 
     [Server]
@@ -530,11 +558,11 @@ public class RhythmRoundManager : NetworkBehaviour
                 Debug.Log($"<color=green>SETUP ROUND:</color> {player.PlayerName} equipped {inv.equippedCombatCards.Count} cards -> triggers: {pc.availableCardsString}");
             }
 
-            if (cm != null && player.GetComponent<BotController>() == null)
+            if (cm != null)
             {
                 cm.currentHandIndices.Clear();
-                cm.ResetSlots();
-                Debug.Log($"<color=green>SERVER:</color> Reset slots for {player.PlayerName}");
+                cm.ResetSlots(); // also draws the initial per-family hand (needed by humans AND the bot)
+                Debug.Log($"<color=green>SERVER:</color> Reset slots + drew hand for {player.PlayerName}");
             }
         }
 
@@ -848,8 +876,11 @@ public class RhythmRoundManager : NetworkBehaviour
 
             if (_upcomingImpacts.Count == 0) shouldEndRound = true;
 
-            // Hard 60-second cap — applies to all round types regardless of beat map length
-            if (currentTime >= 60f) shouldEndRound = true;
+            // Hard 60-second cap on WALL-CLOCK time (not audio time). The audio clock
+            // (audioSource.time) plateaus when a custom clip ends, so beats scheduled past
+            // the clip's length would otherwise never fire and the round would hang forever.
+            double wallElapsed = NetworkTime.time - _startTime;
+            if (wallElapsed >= 60.0) shouldEndRound = true;
 
             if (shouldEndRound && !_isEndingRound)
             {
@@ -881,22 +912,8 @@ public class RhythmRoundManager : NetworkBehaviour
                         }
                     }
 
-                    // Check for same-move tie BEFORE animations fire (in wind-up, not impact)
-                    if (IsSingleMoveMode())
-                    {
-                        var playerList = new List<PlayerController>(GameManager.players);
-                        if (playerList.Count >= 2)
-                        {
-                            var m1 = playerList[0].GetComponent<PlayerCombat>().PeekNextMove();
-                            var m2 = playerList[1].GetComponent<PlayerCombat>().PeekNextMove();
-                            if (!string.IsNullOrEmpty(m1.attack) && m1.attack == m2.attack && CardManager.IsAttackTrigger(m1.attack))
-                            {
-                                _tiebreakerPaused = true;
-                                TiebreakerManager.Instance?.StartTiebreaker(m1.attack); // pass tied card for blocking
-                                return; // skip impact — tiebreaker handles it
-                            }
-                        }
-                    }
+                    // Tiebreaker minigame disabled — same-family offense clashes are now resolved
+                    // by the better-timing logic in ResolveRhythmCombat (closer to the beat wins).
                 }
 
                 // Impact Logic
@@ -1048,13 +1065,18 @@ public class RhythmRoundManager : NetworkBehaviour
 
         float targetBeat = GetNextBeatTime();
 
-        // --- CLOSENESS TIE-BREAKER ---
+        // --- TIMING CLASH: same-family offense (Strike v Strike, Throw v Throw) ---
+        // The triangle can't separate two of the same attack type, so better beat timing wins;
+        // the loser is treated as interrupted (whiffs). Different offense (Strike vs Throw) is
+        // decided by the triangle in DoesInterrupt instead.
         bool p1WinsTie = false;
         bool p2WinsTie = false;
-        if (m1.attack == m2.attack && !string.IsNullOrEmpty(m1.attack))
+        CardFamily fam1 = GetFamily(m1.attack);
+        CardFamily fam2 = GetFamily(m2.attack);
+        if (IsOffense(fam1) && fam1 == fam2)
         {
-            float p1Off = Mathf.Abs(targetBeat - p1.lastVocalSpikeTime);
-            float p2Off = Mathf.Abs(targetBeat - p2.lastVocalSpikeTime);
+            float p1Off = p1.lastVocalSpikeTime > 0f ? Mathf.Abs(targetBeat - p1.lastVocalSpikeTime) : float.MaxValue;
+            float p2Off = p2.lastVocalSpikeTime > 0f ? Mathf.Abs(targetBeat - p2.lastVocalSpikeTime) : float.MaxValue;
             if (p1Off < p2Off) p1WinsTie = true;
             else if (p2Off < p1Off) p2WinsTie = true;
         }
@@ -1128,6 +1150,9 @@ public class RhythmRoundManager : NetworkBehaviour
         string atk = move.attack;
         string def = defMove.attack;
 
+        // THROW family breaks through all defense (Block, Dodge, Parry). Strike does not.
+        bool throwBreaks = GetFamily(atk) == CardFamily.Throw;
+
         // --- HANDLE CARD EFFECTS THAT PERSIST FROM LAST TURN ---
         // Trap: trigger if opponent moves or blocks
         if (defender.HasPendingTrap && !defenderStaggered)
@@ -1165,6 +1190,14 @@ public class RhythmRoundManager : NetworkBehaviour
             return 1;
         }
 
+        // Interrupted attacker whiffs entirely — unless the attack is unstoppable (Boom/Overclock/Reverse).
+        // Covers Strike-beats-Throw and the loser of a same-family timing clash. (Traps/Cages above still punish.)
+        if (isInterrupted && !IsProtected(atk))
+        {
+            tradeReason = $"{atk} was interrupted";
+            return 0;
+        }
+
         // --- 1. DEFENSE CHECKS (bypassed when staggered) ---
         // Fake: cancels opponent defense with at least good timing
         if (!defenderStaggered && atk == "Fake")
@@ -1189,13 +1222,13 @@ public class RhythmRoundManager : NetworkBehaviour
             return 0;
         }
 
-        // Mirror: returns damage +15% bonus
-        if (!defenderStaggered && def == "Mirror" && defender.HasMirrorBuff)
+        // Mirror: returns damage +15% bonus (a Throw breaks through it)
+        if (!defenderStaggered && !throwBreaks && def == "Mirror" && defender.HasMirrorBuff)
         {
             if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Parry");
             PlayHitParticle(defender.transform.position);
             int baseDmg = GetBaseDamage(atk);
-            int reflectedDmg = ApplyTraitMultiplier(Mathf.RoundToInt(baseDmg * 1.15f));
+            int reflectedDmg = Mathf.RoundToInt(ApplyTraitMultiplier(Mathf.RoundToInt(baseDmg * 1.15f)) * CardUpgradeMult(defender, def));
             Vector3 kbDir = (attacker.transform.position - defender.transform.position).normalized;
             attacker.TakeDamage(reflectedDmg, kbDir);
             defender.HasMirrorBuff = false;
@@ -1203,8 +1236,8 @@ public class RhythmRoundManager : NetworkBehaviour
             return -1;
         }
 
-        // ParryIntent: full reflect on excellent timing (≤0.30s), 50% block on good timing (≤0.45s)
-        if (!defenderStaggered && def == "ParryIntent")
+        // ParryIntent: full reflect on excellent timing (≤0.30s), 50% block on good timing (≤0.45s). A Throw breaks through it.
+        if (!defenderStaggered && !throwBreaks && def == "ParryIntent")
         {
             float pSpike = defender.lastVocalSpikeTime;
             float offset = Mathf.Abs(GetNextBeatTime() - pSpike);
@@ -1213,7 +1246,7 @@ public class RhythmRoundManager : NetworkBehaviour
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Parry");
                 PlayHitParticle(defender.transform.position);
                 int baseDmg = GetBaseDamage(atk);
-                int reflectedDmg = ApplyTraitMultiplier(Mathf.RoundToInt(baseDmg * 1.1f));
+                int reflectedDmg = Mathf.RoundToInt(ApplyTraitMultiplier(Mathf.RoundToInt(baseDmg * 1.1f)) * CardUpgradeMult(defender, def));
                 Vector3 parryDir = (attacker.transform.position - defender.transform.position).normalized;
                 attacker.TakeDamage(reflectedDmg, parryDir);
                 tradeReason = "Reflect punished the attack";
@@ -1234,8 +1267,8 @@ public class RhythmRoundManager : NetworkBehaviour
             }
         }
 
-        // Reverse: high risk/reward — negate damage on good+ timing, or take 50% more on bad
-        if (!defenderStaggered && def == "Reverse")
+        // Reverse: high risk/reward — negate damage on good+ timing, or take 50% more on bad. A Throw breaks through it.
+        if (!defenderStaggered && !throwBreaks && def == "Reverse")
         {
             float rSpike = defender.lastVocalSpikeTime;
             float offset = Mathf.Abs(GetNextBeatTime() - rSpike);
@@ -1246,7 +1279,7 @@ public class RhythmRoundManager : NetworkBehaviour
             {
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Parry");
                 PlayHitParticle(defender.transform.position);
-                int returnDmg = ApplyTraitMultiplier(baseDmg);
+                int returnDmg = Mathf.RoundToInt(ApplyTraitMultiplier(baseDmg) * CardUpgradeMult(defender, def));
                 attacker.TakeDamage(returnDmg, revDir);
                 tradeReason = "Reverse countered";
                 return -1;
@@ -1261,8 +1294,8 @@ public class RhythmRoundManager : NetworkBehaviour
             }
         }
 
-        // Clutch: perfect (≤0.15s) = nullify + reflect; good (≤0.30s) = full block; miss = self-damage
-        if (!defenderStaggered && def == "Clutch")
+        // Clutch: perfect (≤0.15s) = nullify + reflect; good (≤0.30s) = full block; miss = self-damage. A Throw breaks through it.
+        if (!defenderStaggered && !throwBreaks && def == "Clutch")
         {
             float cSpike = defender.lastVocalSpikeTime;
             float offset = Mathf.Abs(GetNextBeatTime() - cSpike);
@@ -1273,7 +1306,7 @@ public class RhythmRoundManager : NetworkBehaviour
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Parry");
                 PlayHitParticle(defender.transform.position);
                 int baseDmg = GetBaseDamage(atk);
-                int clutchReflect = ApplyTraitMultiplier(Mathf.RoundToInt(baseDmg * 0.5f));
+                int clutchReflect = Mathf.RoundToInt(ApplyTraitMultiplier(Mathf.RoundToInt(baseDmg * 0.5f)) * CardUpgradeMult(defender, def));
                 Vector3 clutchDir = (attacker.transform.position - defender.transform.position).normalized;
                 attacker.TakeDamage(clutchReflect, clutchDir);
                 tradeReason = "CLUTCH! Perfect counter";
@@ -1305,14 +1338,10 @@ public class RhythmRoundManager : NetworkBehaviour
             float dSpike = defender.lastVocalSpikeTime;
             if (dSpike > 0 && (GetNextBeatTime() - dSpike) <= 0.3f)
             {
-                // Check if attack catches the dodge
-                if (atk == "Uppercut" || atk == "Grapple")
+                // Dodge (Block family) evades Strikes but loses to Throws.
+                if (throwBreaks)
                 {
-                    moveSuccessful = false; // Uppercut and Grapple catch dodges
-                }
-                else if (atk == "UnbreakablePunch") // Boom is hard to dodge
-                {
-                    moveSuccessful = false;
+                    moveSuccessful = false; // a Throw catches the dodge
                 }
                 else
                 {
@@ -1331,8 +1360,8 @@ public class RhythmRoundManager : NetworkBehaviour
             float offset = Mathf.Abs(GetNextBeatTime() - bSpike);
             if (bSpike > 0 && offset <= 0.4f) // block has longest window
             {
-                // Attacks that bypass block: Hook, Grapple, Sweep, Fake
-                if (atk == "Hook" || atk == "Grapple" || atk == "Sweep")
+                // Only Throws break through Block. Strikes are fully stopped.
+                if (throwBreaks)
                 {
                     blockMitigation = 0f;
                 }
@@ -1417,6 +1446,9 @@ public class RhythmRoundManager : NetworkBehaviour
 
         // Apply trait multiplier to final damage
         finalDmg = ApplyTraitMultiplier(finalDmg, attacker);
+
+        // Card upgrade level: +15% damage per level above 1 (Lv2 = +15%, Lv3 = +30%).
+        finalDmg = Mathf.RoundToInt(finalDmg * CardUpgradeMult(attacker, atk));
 
         // --- 3. HIT DETECTION (rock-paper-scissors) ---
         bool hits = false;
@@ -1556,6 +1588,17 @@ public class RhythmRoundManager : NetworkBehaviour
         };
     }
 
+    // Card upgrade level multiplier: +15% per level above 1 (Lv1=1.0, Lv2=1.15, Lv3=1.30).
+    [Server]
+    private float CardUpgradeMult(PlayerCombat player, string trigger)
+    {
+        if (player == null || string.IsNullOrEmpty(trigger)) return 1f;
+        var inv = player.GetComponent<PlayerInventory>();
+        if (inv == null) return 1f;
+        int lvl = inv.GetLevel(TriggerToCardId(trigger));
+        return 1f + 0.15f * (lvl - 1);
+    }
+
     // Apply trait and vex card damage multipliers
     [Server]
     private int ApplyTraitMultiplier(int baseDmg, PlayerCombat player = null)
@@ -1629,63 +1672,44 @@ public class RhythmRoundManager : NetworkBehaviour
         };
     }
 
-    // Hit evaluation: does attack hit given defense? (Rock-Paper-Scissors matchups)
+    // Family-based hit evaluation. Block mitigation and Parry reflection are resolved
+    // earlier in ProcessDamage; by the time we get here we only decide if a clean hit lands.
     [Server]
     private bool EvaluateHit(string attack, string defense, bool dodgeSuccessful)
     {
-        // Grapple: beats block and dodge (command grab)
-        if (attack == "Grapple") return true;
+        CardFamily af = GetFamily(attack);
 
-        // UnbreakablePunch / Boom: only miss on successful dodge, beats block
-        if (attack == "UnbreakablePunch") return !dodgeSuccessful;
+        // THROW — grabs through any guard. (Dodge that "caught" a throw already set dodgeSuccessful=false.)
+        if (af == CardFamily.Throw) return true;
 
-        // Overclock: only miss on successful dodge
-        if (attack == "Overclock") return !dodgeSuccessful;
+        // STRIKE — lands unless evaded by a dodge. (Block is applied as mitigation, not a miss.)
+        if (af == CardFamily.Strike) return !dodgeSuccessful;
 
-        // Reverse: only miss on successful dodge
-        if (attack == "Reverse") return !dodgeSuccessful;
-
-        // Sweep: beats block, misses on dodge
-        if (attack == "Sweep")
-        {
-            if (defense == "Block") return true; // sweep bypasses block
-            return !dodgeSuccessful;
-        }
-
-        // Hook: beats jab and block, misses on dodge, loses to cross
-        if (attack == "Hook")
-        {
-            if (defense == "Block") return true; // hook bypasses block
-            return !dodgeSuccessful;
-        }
-
-        // Uppercut: beats dodge and grapple, loses to block and cross
-        if (attack == "Uppercut")
-        {
-            if (defense == "Left" || defense == "Right") return true; // catches dodges
-            return true; // anti-dodge, always hits
-        }
-
-        // Cross: beats hook and block and movement, loses to jab and boom
-        if (attack == "Cross") return true;
-
-        // Jab: beats cross, loses to hook and boom
-        if (attack == "Jab") return !dodgeSuccessful;
-
-        // Fake: beats block and parry (handled in ProcessDamage), loses to all attacks
-        if (attack == "Fake") return !dodgeSuccessful;
-
-        // Block, Taunt, Focus: defensive/utility, never hit
-        if (attack == "Block" || attack == "Taunt" || attack == "Focus")
-            return false;
-
-        // Movement: never hits
-        if (attack == "Left" || attack == "Right")
-            return false;
-
-        // Default: misses on successful dodge
-        return !dodgeSuccessful;
+        // Block / Parry / Support never deal damage through this path.
+        return false;
     }
+
+    // Map a move's trigger name to its combat family (the simplified triangle).
+    // Strike beats Throw -> Throw beats Block/Parry -> Block/Parry beats Strike.
+    // Support cards sit outside the triangle. Overclock deals direct unstoppable damage, so it reads as a Strike.
+    private CardFamily GetFamily(string trigger)
+    {
+        switch (trigger)
+        {
+            case "Jab": case "Cross": case "Hook": case "UnbreakablePunch": case "Uppercut": case "Overclock":
+                return CardFamily.Strike;
+            case "Grapple": case "Fake": case "Sweep":
+                return CardFamily.Throw;
+            case "Block": case "Left": case "Right":
+                return CardFamily.Block;
+            case "ParryIntent": case "Clutch": case "Reverse": case "Mirror":
+                return CardFamily.Parry;
+            default:
+                return CardFamily.Support; // Focus, Taunt, Trap, Cage, empty/unknown — outside the triangle
+        }
+    }
+
+    private bool IsOffense(CardFamily f) => f == CardFamily.Strike || f == CardFamily.Throw;
 
     // Cards that cannot be interrupted (unstoppable attacks)
     private bool IsProtected(string attack)
@@ -1694,55 +1718,24 @@ public class RhythmRoundManager : NetworkBehaviour
         return attack == "UnbreakablePunch" || attack == "Overclock" || attack == "Reverse";
     }
 
-    // Rock-paper-scissors interruption: does attacker interrupt defender?
+    // Family-based interruption (the simplified triangle).
+    // Strike beats Throw. Offense (Strike/Throw) stuffs passive Support setups.
+    // (Throw beats Block/Parry is handled inside ProcessDamage via the "throw bypasses defense" path.)
     private bool DoesInterrupt(string attackerMove, string defenderMove, out string reason)
     {
         reason = "";
         if (string.IsNullOrEmpty(attackerMove) || string.IsNullOrEmpty(defenderMove)) return false;
 
-        // --- ATTACK vs ATTACK RPS ---
-        if (attackerMove == "Jab" && defenderMove == "Cross") { reason = "Jab outraced Cross"; return true; }
-        if (attackerMove == "Cross" && defenderMove == "Hook") { reason = "Cross outranged Hook"; return true; }
-        if (attackerMove == "Hook" && defenderMove == "Jab") { reason = "Hook overpowered Jab"; return true; }
-        if (attackerMove == "UnbreakablePunch" && (defenderMove == "Jab" || defenderMove == "Cross" || defenderMove == "Hook"))
-            { reason = "BOOM crushes everything"; return true; }
+        CardFamily af = GetFamily(attackerMove);
+        CardFamily df = GetFamily(defenderMove);
 
-        // Fake beats ALL defense cards
-        if (attackerMove == "Fake" && IsDefenseMove(defenderMove))
-            { reason = "Fake slipped through defense"; return true; }
+        // Strike beats Throw — you hit them before the grab connects.
+        if (af == CardFamily.Strike && df == CardFamily.Throw)
+            { reason = "Strike stuffed the Throw"; return true; }
 
-        // Uppercut beats Dodge and Grapple
-        if (attackerMove == "Uppercut" && (defenderMove == "Left" || defenderMove == "Right" || defenderMove == "Grapple"))
-            { reason = "Uppercut caught the dodge"; return true; }
-
-        // Sweep beats Block
-        if (attackerMove == "Sweep" && defenderMove == "Block")
-            { reason = "Sweep went under Block"; return true; }
-
-        // Jab interrupts Grapple
-        if (attackerMove == "Jab" && defenderMove == "Grapple")
-            { reason = "Jab stuffed the Grapple"; return true; }
-
-        // Cross interrupts Grapple and Sweep
-        if (attackerMove == "Cross" && (defenderMove == "Grapple" || defenderMove == "Sweep"))
-            { reason = "Cross interrupted"; return true; }
-
-        // Hook interrupts Grapple
-        if (attackerMove == "Hook" && defenderMove == "Grapple")
-            { reason = "Hook interrupted Grapple"; return true; }
-
-        // All attacks interrupt Fake
-        if (defenderMove == "Fake" && CardManager.IsAttackTrigger(attackerMove))
-            { reason = "Attack punished Fake"; return true; }
-
-        // Boom beats Focus
-        if (attackerMove == "UnbreakablePunch" && defenderMove == "Focus")
-            { reason = "BOOM broke Focus"; return true; }
-
-        // All attacks interrupt Focus, Taunt, Trap, Cage (they're passive)
-        if ((defenderMove == "Focus" || defenderMove == "Taunt" || defenderMove == "Trap" || defenderMove == "Cage")
-            && (CardManager.IsAttackTrigger(attackerMove) && attackerMove != "Fake"))
-            { reason = $"Attack hit during {defenderMove}"; return true; }
+        // Offense catches a passive Support setup (Focus, Taunt, Trap, Cage) mid-cast.
+        if (IsOffense(af) && df == CardFamily.Support)
+            { reason = $"Caught mid-{defenderMove}"; return true; }
 
         return false;
     }
@@ -2443,42 +2436,53 @@ public class RhythmRoundManager : NetworkBehaviour
             }
         }
 
-        // --- 4. COMBAT LOG (Right Side) ---
+        // --- 4. COMBAT LOG (Right Side) — vertical feed, newest on top ---
         if (combatLogs.Count > 0)
         {
-            GUILayout.BeginArea(new Rect(Screen.width - 420, 180, 400, 220));
-            GUIStyle logStyle = new GUIStyle(GUI.skin.label) { fontSize = 16, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
-            GUIStyle reasonStyle = new GUIStyle(GUI.skin.label) { fontSize = 11, alignment = TextAnchor.MiddleCenter };
-            reasonStyle.normal.textColor = new Color(1f, 0.85f, 0.2f, 0.85f);
-            GUIStyle boxStyle = new GUIStyle(GUI.skin.box);
-            GUILayout.Label("COMBAT LOG", logStyle); GUILayout.Space(5);
+            if (_whiteTex == null) { _whiteTex = new Texture2D(1, 1); _whiteTex.SetPixel(0, 0, Color.white); _whiteTex.Apply(); }
 
-            for (int i = 0; i < combatLogs.Count; i++)
+            float panelW = 360f;
+            float panelX = Screen.width - panelW - 16f;
+            float panelY = 170f;
+            int show = Mathf.Min(combatLogs.Count, 4);
+            float entryH = 62f;
+            float panelH = 34f + show * entryH;
+
+            // Background + top accent
+            GUI.color = new Color(0.03f, 0.04f, 0.10f, 0.85f);
+            GUI.DrawTexture(new Rect(panelX, panelY, panelW, panelH), _whiteTex);
+            GUI.color = new Color(0f, 0.9f, 0.9f, 0.75f);
+            GUI.DrawTexture(new Rect(panelX, panelY, panelW, 2f), _whiteTex);
+            GUI.color = Color.white;
+
+            GUIStyle hdrStyle = new GUIStyle(GUI.skin.label) { fontSize = 15, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+            hdrStyle.normal.textColor = new Color(0f, 1f, 0.9f);
+            GUI.Label(new Rect(panelX, panelY + 5f, panelW, 22f), "⚔  COMBAT LOG", hdrStyle);
+
+            GUIStyle lineStyle = new GUIStyle(GUI.skin.label) { fontSize = 15, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleLeft };
+            GUIStyle reasonStyle = new GUIStyle(GUI.skin.label) { fontSize = 12, fontStyle = FontStyle.Italic, alignment = TextAnchor.MiddleLeft, wordWrap = false };
+            reasonStyle.normal.textColor = new Color(1f, 0.85f, 0.3f, 0.9f);
+
+            float ey = panelY + 30f;
+            for (int k = 0; k < show; k++)
             {
-                var log = combatLogs[i];
-                GUILayout.BeginHorizontal(boxStyle);
-                string p1DmgStr = log.p1Damage > 0 ? $" (-{log.p1Damage} HP)" : "";
-                string p2DmgStr = log.p2Damage > 0 ? $" (-{log.p2Damage} HP)" : "";
+                var log = combatLogs[combatLogs.Count - 1 - k]; // newest first
+                string p1d = log.p1Damage > 0 ? $"  −{log.p1Damage}" : "";
+                string p2d = log.p2Damage > 0 ? $"  −{log.p2Damage}" : "";
 
-                logStyle.normal.textColor = GetStateColor(log.p1State);
-                GUILayout.Label($"{log.p1Name}: {log.p1Move}{p1DmgStr}", logStyle, GUILayout.Width(230));
-
-                logStyle.normal.textColor = Color.white;
-                GUILayout.Label(" vs ", logStyle, GUILayout.Width(40));
-
-                logStyle.normal.textColor = GetStateColor(log.p2State);
-                GUILayout.Label($"{log.p2Name}: {log.p2Move}{p2DmgStr}", logStyle, GUILayout.Width(230));
-                GUILayout.EndHorizontal();
+                lineStyle.normal.textColor = GetStateColor(log.p1State);
+                GUI.Label(new Rect(panelX + 12f, ey, panelW - 24f, 18f), $"{log.p1Name}: {log.p1Move}{p1d}", lineStyle);
+                lineStyle.normal.textColor = GetStateColor(log.p2State);
+                GUI.Label(new Rect(panelX + 12f, ey + 18f, panelW - 24f, 18f), $"{log.p2Name}: {log.p2Move}{p2d}", lineStyle);
 
                 if (!string.IsNullOrEmpty(log.reason))
-                {
-                    GUILayout.Label(log.reason, reasonStyle);
-                    GUILayout.Space(1);
-                }
-                else GUILayout.Space(2);
+                    GUI.Label(new Rect(panelX + 12f, ey + 36f, panelW - 24f, 16f), log.reason, reasonStyle);
+
+                GUI.color = new Color(1f, 1f, 1f, 0.08f);
+                GUI.DrawTexture(new Rect(panelX + 8f, ey + entryH - 5f, panelW - 16f, 1f), _whiteTex);
+                GUI.color = Color.white;
+                ey += entryH;
             }
-            GUILayout.EndArea();
-            GUI.color = Color.white;
         }
         // --- MATCH OVER OVERLAY ---
         if (isMatchOver)

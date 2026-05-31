@@ -100,6 +100,13 @@ public class PlayerCombat : NetworkBehaviour
     }
 
     [Command]
+    public void CmdSelectLoadoutCard(string cardId)
+    {
+        var inv = GetComponent<PlayerInventory>();
+        if (inv != null) inv.SelectCard(cardId);
+    }
+
+    [Command]
     public void CmdRemoveCard(string cardId)
     {
         var inv = GetComponent<PlayerInventory>();
@@ -682,9 +689,9 @@ public class PlayerCombat : NetworkBehaviour
     private void RpcShowDamageNumber(int damage, bool isOpponentDamage)
     {
         if (FloatingDamageTextManager.Instance == null) return;
-        // Red if taking damage (local player), Green if opponent taking damage (remote player)
-        Color damageColor = isLocalPlayer ? new Color(1f, 0.3f, 0.3f) : new Color(0.3f, 1f, 0.3f);
-        FloatingDamageTextManager.Instance.ShowDamage(damage, damageColor, transform.position + Vector3.up);
+        // Bright RED = damage YOU took.  Bright GREEN = damage YOU dealt to the opponent.
+        Color damageColor = isLocalPlayer ? new Color(1f, 0.22f, 0.18f) : new Color(0.35f, 1f, 0.45f);
+        FloatingDamageTextManager.Instance.ShowDamage(damage, damageColor, transform.position + Vector3.up * 2f);
     }
 
     [ClientRpc]

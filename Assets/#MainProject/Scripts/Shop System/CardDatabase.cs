@@ -8,36 +8,36 @@ public class CardDatabase : MonoBehaviour
     // ── BASIC (1 cost) ─────────────────────────────────────────────────────
     public static readonly CombatCardData[] BasicCards = new CombatCardData[]
     {
-        new CombatCardData { cardId="jab", displayName="Jab", rarity=CardRarity.Basic, type=CardType.Attack, cost=1, timingWindow=0.30f, damagePercent="+8%", description="Fast low hit. COUNTERS: Dodge. BEATEN BY: Cross, Hook, Block. Safe opener.", triggerName="Jab" },
-        new CombatCardData { cardId="cross", displayName="Cross", rarity=CardRarity.Basic, type=CardType.Attack, cost=1, timingWindow=0.30f, damagePercent="+12%", description="Straight power hit. COUNTERS: Jab, Dodge. BEATEN BY: Hook, Block, Clutch.", triggerName="Cross" },
-        new CombatCardData { cardId="hook", displayName="Hook", rarity=CardRarity.Basic, type=CardType.Attack, cost=1, timingWindow=0.30f, damagePercent="+15%", description="Wide heavy hit. COUNTERS: Cross, Jab. BEATEN BY: Clutch, Block, Grapple interrupt. TRIGGERS Clutch.", triggerName="Hook" },
-        new CombatCardData { cardId="block", displayName="Block", rarity=CardRarity.Basic, type=CardType.Defense, cost=1, timingWindow=0.40f, damagePercent="+2%", description="Reduces all incoming damage by ~50%. COUNTERS: Jab, Cross. BEATEN BY: Grapple (breaks through). Timing bonus reduces damage further.", triggerName="Block" },
-        new CombatCardData { cardId="dodge_left", displayName="Dodge Left", rarity=CardRarity.Basic, type=CardType.Defense, cost=1, timingWindow=0.30f, damagePercent="0%", description="Sidestep left — nullifies most straight hits. COUNTERS: Jab, Cross. BEATEN BY: Hook, Sweep, Grapple.", triggerName="Left" },
-        new CombatCardData { cardId="dodge_right", displayName="Dodge Right", rarity=CardRarity.Basic, type=CardType.Defense, cost=1, timingWindow=0.30f, damagePercent="0%", description="Sidestep right — nullifies most straight hits. COUNTERS: Jab, Cross. BEATEN BY: Hook, Sweep, Grapple.", triggerName="Right" },
-        new CombatCardData { cardId="reflect", displayName="Reflect", rarity=CardRarity.Basic, type=CardType.Defense, cost=1, timingWindow=0.30f, damagePercent="+10% to attacker", description="Returns 10% damage to attacker on hit. COUNTERS: any attack. BEATEN BY: Grapple, Boom (reflect doesn't fully negate). Good timing = 50% block.", triggerName="ParryIntent" },
-        new CombatCardData { cardId="boom", displayName="Boom", rarity=CardRarity.Basic, type=CardType.Attack, cost=1, timingWindow=0.30f, damagePercent="+25%", description="Explosive hit, high damage. COUNTERS: Dodge (wide arc). BEATEN BY: Clutch (perfect), Block. TRIGGERS Clutch.", triggerName="UnbreakablePunch" },
-        new CombatCardData { cardId="grapple", displayName="Grapple", rarity=CardRarity.Basic, type=CardType.Attack, cost=1, timingWindow=0.30f, damagePercent="+18%", description="Breaks through Block and Dodge. COUNTERS: Block, Dodge Left, Dodge Right. BEATEN BY: Fake, Uppercut interrupt.", triggerName="Grapple" },
-        new CombatCardData { cardId="fake", displayName="Fake", rarity=CardRarity.Basic, type=CardType.Attack, cost=1, timingWindow=0.30f, damagePercent="+5%", description="Bait the opponent. COUNTERS: Grapple (dodge at last second). BEATEN BY: Jab, Cross (not fooled).", triggerName="Fake" },
+        new CombatCardData { cardId="jab", displayName="Jab", rarity=CardRarity.Basic, type=CardType.Attack, family=CardFamily.Strike, cost=1, timingWindow=0.30f, damagePercent="+8%", description="STRIKE — fast, light hit. Beats Throws, stopped by Block & Parry. Shout on the beat for bonus damage.", triggerName="Jab" },
+        new CombatCardData { cardId="cross", displayName="Cross", rarity=CardRarity.Basic, type=CardType.Attack, family=CardFamily.Strike, cost=1, timingWindow=0.30f, damagePercent="+12%", description="STRIKE — solid mid hit. Beats Throws, stopped by guards. Shout on the beat to power it up.", triggerName="Cross" },
+        new CombatCardData { cardId="hook", displayName="Hook", rarity=CardRarity.Basic, type=CardType.Attack, family=CardFamily.Strike, cost=1, timingWindow=0.30f, damagePercent="+15%", description="STRIKE — heavy swing. Beats Throws, loses to guards. Shout on the beat for a big hit.", triggerName="Hook" },
+        new CombatCardData { cardId="block", displayName="Block", rarity=CardRarity.Basic, type=CardType.Defense, family=CardFamily.Block, cost=1, timingWindow=0.40f, damagePercent="+2%", description="BLOCK — safe guard. Stops Strikes, loses to Throws. No shout needed; good timing reduces damage further.", triggerName="Block" },
+        new CombatCardData { cardId="dodge_left", displayName="Dodge Left", rarity=CardRarity.Basic, type=CardType.Defense, family=CardFamily.Block, cost=1, timingWindow=0.30f, damagePercent="0%", description="BLOCK — slip left. Evades Strikes, loses to Throws.", triggerName="Left" },
+        new CombatCardData { cardId="dodge_right", displayName="Dodge Right", rarity=CardRarity.Basic, type=CardType.Defense, family=CardFamily.Block, cost=1, timingWindow=0.30f, damagePercent="0%", description="BLOCK — slip right. Evades Strikes, loses to Throws.", triggerName="Right" },
+        new CombatCardData { cardId="reflect", displayName="Reflect", rarity=CardRarity.Basic, type=CardType.Defense, family=CardFamily.Parry, cost=1, timingWindow=0.30f, damagePercent="+10% to attacker", description="PARRY — shout on the exact beat to nullify a Strike and counter for damage. Loses to Throws.", triggerName="ParryIntent" },
+        new CombatCardData { cardId="boom", displayName="Boom", rarity=CardRarity.Basic, type=CardType.Attack, family=CardFamily.Strike, cost=1, timingWindow=0.30f, damagePercent="+25%", description="STRIKE — huge, slow haymaker. Beats Throws, loses to guards. Shout on the beat to confirm the hit.", triggerName="UnbreakablePunch" },
+        new CombatCardData { cardId="grapple", displayName="Grapple", rarity=CardRarity.Basic, type=CardType.Attack, family=CardFamily.Throw, cost=1, timingWindow=0.30f, damagePercent="+18%", description="THROW — grab through any guard. Beats Block & Parry, loses to Strikes. Shout on the beat to land it.", triggerName="Grapple" },
+        new CombatCardData { cardId="fake", displayName="Fake", rarity=CardRarity.Basic, type=CardType.Attack, family=CardFamily.Throw, cost=1, timingWindow=0.30f, damagePercent="+5%", description="THROW — feint that cracks defense. Beats Block & Parry, loses to Strikes. Shout on the beat.", triggerName="Fake" },
     };
 
     // ── ADVANCED (2 cost) ──────────────────────────────────────────────────
     public static readonly CombatCardData[] AdvancedCards = new CombatCardData[]
     {
-        new CombatCardData { cardId="uppercut", displayName="Uppercut", rarity=CardRarity.Advanced, type=CardType.Attack, cost=2, timingWindow=0.30f, damagePercent="+20%", description="Rising hit that catches dodgers and grapplers. COUNTERS: Dodge Left, Dodge Right, Grapple. BEATEN BY: Block, Cross.", triggerName="Uppercut" },
-        new CombatCardData { cardId="sweep", displayName="Sweep", rarity=CardRarity.Advanced, type=CardType.Attack, cost=2, timingWindow=0.30f, damagePercent="+16%", description="Low kick that goes under Block entirely. COUNTERS: Block. BEATEN BY: Dodge, Cross. Catches turtling players.", triggerName="Sweep" },
-        new CombatCardData { cardId="focus", displayName="Focus", rarity=CardRarity.Advanced, type=CardType.Defense, cost=2, timingWindow=0.30f, damagePercent="0%", description="Charge up. Your NEXT attack deals +50% damage. Safe setup — no self-damage. BEATEN BY: Boom (breaks Focus). Best paired with Hook or Boom.", triggerName="Focus" },
-        new CombatCardData { cardId="taunt", displayName="Taunt", rarity=CardRarity.Advanced, type=CardType.Defense, cost=2, timingWindow=0.35f, damagePercent="+3% self", description="Forces opponent into attack-only on the next beat — no Block, Dodge, or defense. RISK: you take +3% self-damage and eat whatever attack they throw.", triggerName="Taunt" },
+        new CombatCardData { cardId="uppercut", displayName="Uppercut", rarity=CardRarity.Advanced, type=CardType.Attack, family=CardFamily.Strike, cost=2, timingWindow=0.30f, damagePercent="+20%", description="STRIKE — rising hit. Beats Throws, stopped by guards. Shout on the beat for a counter-hit.", triggerName="Uppercut" },
+        new CombatCardData { cardId="sweep", displayName="Sweep", rarity=CardRarity.Advanced, type=CardType.Attack, family=CardFamily.Throw, cost=2, timingWindow=0.30f, damagePercent="+16%", description="THROW — low hit that goes under guards. Beats Block & Parry, loses to Strikes. Shout on the beat.", triggerName="Sweep" },
+        new CombatCardData { cardId="focus", displayName="Focus", rarity=CardRarity.Advanced, type=CardType.Defense, family=CardFamily.Support, cost=2, timingWindow=0.30f, damagePercent="0%", description="SUPPORT — charge up. Your next Strike deals +50% damage. No counter, just setup. Best before Hook or Boom.", triggerName="Focus" },
+        new CombatCardData { cardId="taunt", displayName="Taunt", rarity=CardRarity.Advanced, type=CardType.Defense, family=CardFamily.Support, cost=2, timingWindow=0.35f, damagePercent="+3% self", description="SUPPORT — force the opponent into attack-only on the next beat (no defense). Risk: you take +3% self-damage.", triggerName="Taunt" },
     };
 
     // ── LEGENDARY (3 cost) ─────────────────────────────────────────────────
     public static readonly CombatCardData[] LegendaryCards = new CombatCardData[]
     {
-        new CombatCardData { cardId="overclock", displayName="Overclock", rarity=CardRarity.Legendary, type=CardType.Attack, cost=3, timingWindow=0.30f, damagePercent="+35% opp / +10% self", description="Overclock your next attack: +35% damage, +10% self-damage risk. COUNTERS: anything — amplifies your next hit. Use before a big attack.", triggerName="Overclock" },
-        new CombatCardData { cardId="reverse", displayName="Reverse", rarity=CardRarity.Legendary, type=CardType.Attack, cost=3, timingWindow=0.30f, damagePercent="0% up to +30", description="Redirect up to 30% of incoming damage back to attacker. COUNTERS: heavy attacks. BEATEN BY: Fake (no damage to reflect).", triggerName="Reverse" },
-        new CombatCardData { cardId="trap", displayName="Trap", rarity=CardRarity.Legendary, type=CardType.Defense, cost=3, timingWindow=0.30f, damagePercent="15%", description="Hidden delayed hit triggers on opponent's next attack. COUNTERS: aggressive players. BEATEN BY: defensive play (they can dodge/block trigger).", triggerName="Trap" },
-        new CombatCardData { cardId="cage", displayName="Cage", rarity=CardRarity.Legendary, type=CardType.Defense, cost=2, timingWindow=0.30f, damagePercent="10%", description="Prevents opponent using defense on next beat. COUNTERS: Block, Dodge. BEATEN BY: offensive counter before cage activates.", triggerName="Cage" },
-        new CombatCardData { cardId="mirror", displayName="Mirror", rarity=CardRarity.Legendary, type=CardType.Defense, cost=3, timingWindow=0.30f, damagePercent="+15% to attacker", description="Copy opponent's move and return it. COUNTERS: attack-heavy players. BEATEN BY: Fake (nothing to copy).", triggerName="Mirror" },
-        new CombatCardData { cardId="clutch", displayName="Clutch", rarity=CardRarity.Legendary, type=CardType.Defense, cost=3, timingWindow=0.30f, damagePercent="0% or +30%", description="HIGH RISK. Perfect timing nullifies Boom/Hook and reflects +15% back. Good timing = full block, no reflect. Miss = +20% self-damage. ONCE PER ROUND. COUNTERS: Boom, Hook. BEATEN BY: Jab, Cross, Grapple.", triggerName="Clutch" },
+        new CombatCardData { cardId="overclock", displayName="Overclock", rarity=CardRarity.Legendary, type=CardType.Attack, family=CardFamily.Strike, cost=3, timingWindow=0.30f, damagePercent="+35% opp / +10% self", description="STRIKE — unstoppable heavy hit. Can't be interrupted, beats Throws. Huge damage but +10% self-damage.", triggerName="Overclock" },
+        new CombatCardData { cardId="reverse", displayName="Reverse", rarity=CardRarity.Legendary, type=CardType.Attack, family=CardFamily.Parry, cost=3, timingWindow=0.30f, damagePercent="0% up to +30", description="PARRY — nullify a Strike and return up to 30% of its damage. Shout on the beat. Loses to Throws.", triggerName="Reverse" },
+        new CombatCardData { cardId="trap", displayName="Trap", rarity=CardRarity.Legendary, type=CardType.Defense, family=CardFamily.Support, cost=3, timingWindow=0.30f, damagePercent="15%", description="SUPPORT — set a hidden hit that punishes the opponent's next move. Rewards reading aggression.", triggerName="Trap" },
+        new CombatCardData { cardId="cage", displayName="Cage", rarity=CardRarity.Legendary, type=CardType.Defense, family=CardFamily.Support, cost=2, timingWindow=0.30f, damagePercent="10%", description="SUPPORT — lock the opponent out of defending on the next beat. Forces them to eat a hit.", triggerName="Cage" },
+        new CombatCardData { cardId="mirror", displayName="Mirror", rarity=CardRarity.Legendary, type=CardType.Defense, family=CardFamily.Parry, cost=3, timingWindow=0.30f, damagePercent="+15% to attacker", description="PARRY — reflect the next Strike back with +15% bonus. Shout on the beat. Loses to Throws.", triggerName="Mirror" },
+        new CombatCardData { cardId="clutch", displayName="Clutch", rarity=CardRarity.Legendary, type=CardType.Defense, family=CardFamily.Parry, cost=3, timingWindow=0.30f, damagePercent="0% or +30%", description="PARRY — high-risk read on heavy Strikes. Perfect beat = nullify + big counter; miss = +20% self-damage. ONCE PER ROUND. Loses to Throws.", triggerName="Clutch" },
     };
 
     // ── TRAIT CARDS (passive effects for the entire round) ────────────────
@@ -83,6 +83,21 @@ public class CardDatabase : MonoBehaviour
             default:
                 basicChance = 0.15f; advancedChance = 0.35f; legendaryChance = 0.50f; break;
         }
+    }
+
+    // ── LOOKUP HELPERS ─────────────────────────────────────────────────────
+    public static CombatCardData GetCombatCard(string cardId)
+    {
+        foreach (var c in BasicCards)     if (c.cardId == cardId) return c;
+        foreach (var c in AdvancedCards)  if (c.cardId == cardId) return c;
+        foreach (var c in LegendaryCards) if (c.cardId == cardId) return c;
+        return null;
+    }
+
+    public static CardFamily GetCardFamily(string cardId)
+    {
+        var c = GetCombatCard(cardId);
+        return c != null ? c.family : CardFamily.Support;
     }
 
     void Awake() { if (Instance == null) Instance = this; }

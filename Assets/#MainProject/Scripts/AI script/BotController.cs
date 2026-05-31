@@ -24,13 +24,29 @@ public class BotController : NetworkBehaviour
     {
         if (_combat.IsHurting || _combat.IsDead) return;
 
-        // Use equipped cards from PlayerInventory, fallback to defaults
-        var avail = _myCards != null && _myCards.availableCardsForRound.Count > 0
-            ? _myCards.availableCardsForRound
-            : new List<string> { "Jab", "Cross", "Hook", "Block", "Left", "Right", "UnbreakablePunch", "ParryIntent" };
+        // In single mode the bot can only play its currently-drawn hand (one card per family,
+        // minus the locked type) — same rule as the human. Fall back to the full pool otherwise.
+        List<string> avail;
+        var rmmAvail = RhythmRoundManager.Instance;
+        if (_myCards != null && rmmAvail != null && rmmAvail.IsSingleMoveMode())
+        {
+            avail = _myCards.GetHandTriggers();
+            if (avail.Count == 0) avail = new List<string>(_myCards.availableCardsForRound);
+        }
+        else
+        {
+            avail = _myCards != null && _myCards.availableCardsForRound.Count > 0
+                ? _myCards.availableCardsForRound
+                : new List<string> { "Jab", "Cross", "Hook", "Block", "Left", "Right", "UnbreakablePunch", "ParryIntent" };
+        }
+
+        // Difficulty ramp: rounds 1-2 are easy (sloppy timing, rarely hard-counters),
+        // rounds 3-4 medium, round 5+ semi-pro.
+        var rmm = RhythmRoundManager.Instance;
+        int round = rmm != null ? rmm.currentRoundNumber : 1;
+        GetTimingOffset(round, out float minOff, out float maxOff);
 
         // COMBO MODE: fill buffer with random moves from available pool
-        var rmm = RhythmRoundManager.Instance;
         if (rmm != null && !rmm.IsSingleMoveMode())
         {
             while (_combat._comboBuffer.Count < rmm.currentComboCount)
@@ -38,7 +54,8 @@ public class BotController : NetworkBehaviour
                 string move = avail[Random.Range(0, avail.Count)];
                 _combat._comboBuffer.Add(new PlayerCombat.RhythmAction { attack = move, dash = Vector3.zero });
             }
-            _combat.lastVocalSpikeTime = rmm.GetNextBeatTime() - Random.Range(0.3f, 0.7f);
+            // Looser timing in combo mode, and looser still in early rounds.
+            _combat.lastVocalSpikeTime = rmm.GetNextBeatTime() - Random.Range(minOff + 0.15f, maxOff + 0.25f);
             return;
         }
 
@@ -68,7 +85,10 @@ public class BotController : NetworkBehaviour
         string mostSpammed = GetMostSpammedMove();
         float adaptiveChance = Random.value;
 
-        if (adaptiveChance < 0.6f && !string.IsNullOrEmpty(mostSpammed))
+        // Early rounds rarely hard-counter the player; later rounds punish heavily.
+        float adaptiveThreshold = (round <= 2) ? 0.15f : (round <= 4) ? 0.40f : 0.65f;
+
+        if (adaptiveChance < adaptiveThreshold && !string.IsNullOrEmpty(mostSpammed))
         {
             switch (mostSpammed)
             {
@@ -164,12 +184,21 @@ public class BotController : NetworkBehaviour
 
         trigger = dash != Vector3.zero ? (dash == Vector3.left ? "Left" : "Right") : attack;
 
-        // 6. SEMI-PRO TIMING
+        // 6. TIMING — scaled by difficulty (early rounds = sloppy, loses timing clashes)
         float targetBeat = RhythmRoundManager.Instance.GetNextBeatTime();
-        _combat.lastVocalSpikeTime = targetBeat - Random.Range(0.05f, 0.21f);
+        _combat.lastVocalSpikeTime = targetBeat - Random.Range(minOff, maxOff);
 
         _combat.QueueRhythmMove(attack, dash);
         if (_myCards != null) _myCards.ConsumeSlot(trigger);
+    }
+
+    // Bot timing offset from the beat, by round. Bigger offset = worse timing =
+    // less damage and loses same-family timing clashes to a competent player.
+    private void GetTimingOffset(int round, out float min, out float max)
+    {
+        if (round <= 2)      { min = 0.28f; max = 0.50f; } // EASY — frequently mistimes
+        else if (round <= 4) { min = 0.14f; max = 0.30f; } // MEDIUM
+        else                 { min = 0.05f; max = 0.21f; } // HARD — semi-pro
     }
 
     private Vector3 PickDash(bool hasLeft, bool hasRight)

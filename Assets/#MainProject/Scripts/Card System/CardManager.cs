@@ -31,6 +31,16 @@ public class CardManager : NetworkBehaviour
     [SyncVar] public string justUsedTrigger = "";  // set when a card is consumed this window
     [SyncVar] public string blockedTrigger  = "";  // the trigger blocked during the NEXT window
 
+    // ── Per-family drawn hand ──────────────────────────────────────────────
+    // The hand shows ONE card per family at a time, drawn at random from owned cards of that
+    // family. Using a card locks its family for one beat, then a fresh card of that family is drawn.
+    [SyncVar] public string handStrike  = "";
+    [SyncVar] public string handThrow   = "";
+    [SyncVar] public string handBlock   = "";
+    [SyncVar] public string handParry   = "";
+    [SyncVar] public string handSupport = "";
+    [SyncVar] public string lockedFamily = ""; // family name locked THIS beat (just used last beat); "" = none
+
     private int _cfgAttack  = 3;
     private int _cfgDefense = 2;
 
@@ -159,24 +169,19 @@ public class CardManager : NetworkBehaviour
         bool isRhythm = RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive;
         if (!isRhythm) return IsAttackTrigger(trigger) || IsDefenseTrigger(trigger);
 
-        // Block the last-used card for one full input window
-        if (trigger == blockedTrigger) return false;
-
         // Taunt effect: opponent can only use attack cards next turn
         PlayerCombat pc = GetComponent<PlayerCombat>();
         if (pc != null && pc.IsTauntedNextTurn && IsDefenseTrigger(trigger))
             return false; // Prevent all defense cards
 
         if (trigger.StartsWith("Combo"))
-        {
-            CombatCard card = GetCardInHand(trigger);
-            if (card == null) return false;
-            // Slot system disabled — all non-blocked cards are always available
-            return true;
-        }
-        if (IsAttackTrigger(trigger))  return true;
-        if (IsDefenseTrigger(trigger)) return true;
-        return false;
+            return GetCardInHand(trigger) != null;
+
+        // Per-family draw: only the currently-drawn card of each family is playable,
+        // and not while that family is locked (it was used on the previous beat).
+        CardFamily fam = FamilyOfTrigger(trigger);
+        if (lockedFamily == fam.ToString()) return false;
+        return GetHandCard(fam) == trigger;
     }
 
     private bool IsOpponentStaggered()
@@ -235,30 +240,125 @@ public class CardManager : NetworkBehaviour
     {
         blockedTrigger    = "";
         justUsedTrigger   = "";
+        lockedFamily      = "";
         attackSlotsRemaining  = attackSlotsTotal;
         defenseSlotsRemaining = defenseSlotTotal;
+        DrawInitialHand();
     }
 
-    // Called every beat by RhythmRoundManager to roll the cooldown forward one window
+    // Called every beat by RhythmRoundManager: roll the per-family lock forward one beat.
     [Server]
     public void AdvanceCooldown()
     {
-        // Echo trait: 25% chance card refreshes and doesn't get blocked
-        PlayerCombat pc = GetComponent<PlayerCombat>();
-        bool echoRefreshed = false;
-        if (pc != null && !string.IsNullOrEmpty(pc.activeTraitId) && pc.activeTraitId == "echo")
-        {
-            if (Random.value < 0.25f) // 25% chance
-            {
-                echoRefreshed = true;
-            }
-        }
+        // The family that was locked this beat has served its 1-beat lock — draw it a fresh card.
+        if (TryFamily(lockedFamily, out CardFamily expired))
+            RedrawFamily(expired);
 
-        if (!echoRefreshed)
-        {
-            blockedTrigger = justUsedTrigger;
-        }
+        // Echo trait: 25% chance the just-used family is NOT locked (stays available).
+        PlayerCombat pc = GetComponent<PlayerCombat>();
+        bool echoRefreshed = pc != null && pc.activeTraitId == "echo" && Random.value < 0.25f;
+
+        lockedFamily = (echoRefreshed || string.IsNullOrEmpty(justUsedTrigger))
+            ? ""
+            : FamilyOfTrigger(justUsedTrigger).ToString();
         justUsedTrigger = "";
+        blockedTrigger  = ""; // legacy field, no longer used for gating
+    }
+
+    // ── Per-family hand draw ───────────────────────────────────────────────
+    private CardFamily FamilyOfTrigger(string t)
+    {
+        switch (t)
+        {
+            case "Jab": case "Cross": case "Hook": case "UnbreakablePunch": case "Uppercut": case "Overclock": return CardFamily.Strike;
+            case "Grapple": case "Fake": case "Sweep": return CardFamily.Throw;
+            case "Block": case "Left": case "Right": return CardFamily.Block;
+            case "ParryIntent": case "Clutch": case "Reverse": case "Mirror": return CardFamily.Parry;
+            default: return CardFamily.Support;
+        }
+    }
+
+    private bool TryFamily(string s, out CardFamily f)
+    {
+        f = CardFamily.Support;
+        return !string.IsNullOrEmpty(s) && System.Enum.TryParse(s, out f);
+    }
+
+    public string GetHandCard(CardFamily f)
+    {
+        switch (f)
+        {
+            case CardFamily.Strike: return handStrike;
+            case CardFamily.Throw:  return handThrow;
+            case CardFamily.Block:  return handBlock;
+            case CardFamily.Parry:  return handParry;
+            default:                return handSupport;
+        }
+    }
+
+    [Server]
+    private void SetHandCard(CardFamily f, string trigger)
+    {
+        switch (f)
+        {
+            case CardFamily.Strike: handStrike  = trigger; break;
+            case CardFamily.Throw:  handThrow   = trigger; break;
+            case CardFamily.Block:  handBlock   = trigger; break;
+            case CardFamily.Parry:  handParry   = trigger; break;
+            default:                handSupport = trigger; break;
+        }
+    }
+
+    // Owned triggers of a family (the random draw pool for that family's slot).
+    private List<string> FamilyPool(CardFamily f)
+    {
+        var pool = new List<string>();
+        foreach (var t in availableCardsForRound)
+            if (FamilyOfTrigger(t) == f && !pool.Contains(t))
+                pool.Add(t);
+        return pool;
+    }
+
+    [Server]
+    public void RedrawFamily(CardFamily f)
+    {
+        var pool = FamilyPool(f);
+        SetHandCard(f, pool.Count > 0 ? pool[Random.Range(0, pool.Count)] : "");
+    }
+
+    [Server]
+    public void DrawInitialHand()
+    {
+        RedrawFamily(CardFamily.Strike);
+        RedrawFamily(CardFamily.Throw);
+        RedrawFamily(CardFamily.Block);
+        RedrawFamily(CardFamily.Parry);
+        RedrawFamily(CardFamily.Support);
+    }
+
+    // The drawn cards for a set of families, in order (skips families you own nothing in).
+    private List<string> BuildHandRow(CardFamily[] families)
+    {
+        var row = new List<string>();
+        foreach (var f in families)
+        {
+            string t = GetHandCard(f);
+            if (!string.IsNullOrEmpty(t)) row.Add(t);
+        }
+        return row;
+    }
+
+    // Currently-playable triggers (each family's drawn card, excluding the locked family) — used by the bot.
+    public List<string> GetHandTriggers()
+    {
+        var list = new List<string>();
+        foreach (var f in new[] { CardFamily.Strike, CardFamily.Throw, CardFamily.Block, CardFamily.Parry, CardFamily.Support })
+        {
+            if (lockedFamily == f.ToString()) continue;
+            string t = GetHandCard(f);
+            if (!string.IsNullOrEmpty(t)) list.Add(t);
+        }
+        return list;
     }
 
     [Command]
@@ -463,41 +563,38 @@ public class CardManager : NetworkBehaviour
             float baseY     = Screen.height - nHeight - 20f + hoverY;
             float gap       = 50f;
 
-            var allDefCards = new[] { "Block", "ParryIntent", "Left", "Right", "Clutch", "Focus", "Taunt", "Trap", "Cage", "Mirror", "Striker", "Tank", "Speedster", "Grappler", "Trickster", "Vampire", "Glass", "Momentum" };
-            var allAtkCards = new[] { "Jab", "Cross", "Hook", "UnbreakablePunch", "Grapple", "Fake", "Uppercut", "Sweep", "Overclock", "Reverse" };
+            // Per-family drawn hand: ONE card per family. Defense types on the left,
+            // attack types on the right; the locked type (just used) is greyed out.
+            var defFams = new[] { CardFamily.Block, CardFamily.Parry, CardFamily.Support };
+            var atkFams = new[] { CardFamily.Strike, CardFamily.Throw };
 
-            var defCards = (availableCardsForRound.Count > 0)
-                ? System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Where(allDefCards, c => availableCardsForRound.Contains(c)))
-                : allDefCards;
-            var atkCards = (availableCardsForRound.Count > 0)
-                ? System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Where(allAtkCards, c => availableCardsForRound.Contains(c)))
-                : allAtkCards;
+            var defCards = BuildHandRow(defFams);
+            var atkCards = BuildHandRow(atkFams);
 
-            float defGroupW = nWidth * defCards.Length + nSpace * Mathf.Max(0, defCards.Length - 1);
-            float atkGroupW = nWidth * atkCards.Length + nSpace * Mathf.Max(0, atkCards.Length - 1);
+            float defGroupW = nWidth * defCards.Count + nSpace * Mathf.Max(0, defCards.Count - 1);
+            float atkGroupW = nWidth * atkCards.Count + nSpace * Mathf.Max(0, atkCards.Count - 1);
             float totalW    = defGroupW + gap + atkGroupW;
             float defStartX = Screen.width / 2f - totalW / 2f;
             float atkStartX = defStartX + defGroupW + gap;
 
-
-            for (int i = 0; i < defCards.Length; i++)
+            for (int i = 0; i < defCards.Count; i++)
             {
                 int libIdx = cardLibrary.FindIndex(c => c.triggerName == defCards[i] && !c.isCombo);
                 if (libIdx < 0) continue;
-                bool isBlocked = (defCards[i] == blockedTrigger);
-                float alpha = isBlocked ? 0.18f : (!inputLocked ? 1f : 0.30f);
+                bool isLocked = (lockedFamily == FamilyOfTrigger(defCards[i]).ToString());
+                float alpha = isLocked ? 0.18f : (!inputLocked ? 1f : 0.30f);
                 Rect r = new Rect(defStartX + i * (nWidth + nSpace), baseY, nWidth, nHeight);
-                DrawCard(r, cardLibrary[libIdx], isRhythm, approachFrac, isShout, pulse, alpha, isBlocked, isDefense: true);
+                DrawCard(r, cardLibrary[libIdx], isRhythm, approachFrac, isShout, pulse, alpha, isLocked, isDefense: true);
             }
 
-            for (int i = 0; i < atkCards.Length; i++)
+            for (int i = 0; i < atkCards.Count; i++)
             {
                 int libIdx = cardLibrary.FindIndex(c => c.triggerName == atkCards[i] && !c.isCombo);
                 if (libIdx < 0) continue;
-                bool isBlocked = (atkCards[i] == blockedTrigger);
-                float alpha = isBlocked ? 0.18f : (!inputLocked ? 1f : 0.30f);
+                bool isLocked = (lockedFamily == FamilyOfTrigger(atkCards[i]).ToString());
+                float alpha = isLocked ? 0.18f : (!inputLocked ? 1f : 0.30f);
                 Rect r = new Rect(atkStartX + i * (nWidth + nSpace), baseY, nWidth, nHeight);
-                DrawCard(r, cardLibrary[libIdx], isRhythm, approachFrac, isShout, pulse, alpha, isBlocked, isDefense: false);
+                DrawCard(r, cardLibrary[libIdx], isRhythm, approachFrac, isShout, pulse, alpha, isLocked, isDefense: false);
             }
 
             // Beat indicator panel on left side of screen

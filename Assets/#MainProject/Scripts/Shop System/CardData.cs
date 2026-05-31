@@ -4,6 +4,11 @@ public enum CardRarity { Basic, Advanced, Legendary }
 public enum CardType { Attack, Defense, Meta }
 public enum ShopCategory { CombatCard, TraitCard }
 
+// Simplified combat archetype. The counter logic lives in the family, never the card.
+// Strike beats Throw -> Throw beats Block/Parry -> Block/Parry beats Strike.
+// Support cards sit outside the triangle (they modify your moves instead of countering).
+public enum CardFamily { Strike, Throw, Block, Parry, Support }
+
 [System.Serializable]
 public class CombatCardData
 {
@@ -11,6 +16,7 @@ public class CombatCardData
     public string displayName;
     public CardRarity rarity;
     public CardType type;
+    public CardFamily family;
     public int cost;
     public float timingWindow;
     public string damagePercent;

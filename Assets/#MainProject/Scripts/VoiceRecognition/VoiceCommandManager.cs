@@ -192,12 +192,12 @@ public class VoiceCommandManager : NetworkBehaviour
                 continue;
             }
 
-            if (GetSimilarity(word, "punch") > 0.7f ) { trigger = "Jab"; recognized = true; }
-            else if (word == "flank" || word == "blank" || word == "frank" || GetSimilarity(word, "flank") > 0.75f) { trigger = "Cross"; recognized = true; }
+            if (word == "jab" || GetSimilarity(word, "jab") > 0.82f || GetSimilarity(word, "punch") > 0.7f ) { trigger = "Jab"; recognized = true; }
+            else if (GetSimilarity(word, "cross") > 0.78f || word == "flank" || word == "blank" || word == "frank" || GetSimilarity(word, "flank") > 0.75f) { trigger = "Cross"; recognized = true; }
             else if (GetSimilarity(word, "hook") > 0.75f) { trigger = "Hook"; recognized = true; }
             else if (GetSimilarity(word, "block") > 0.75f || GetSimilarity(word, "guard") > 0.75f) { trigger = "Block"; recognized = true; }
-            else if (GetSimilarity(word, "parry") > 0.75f || word == "reflect") { trigger = "ParryIntent"; recognized = true; }
-            else if (word == "crush" || word == "crash" || word == "crushing" || word == "crashing" || GetSimilarity(word, "crush") > 0.75f) { trigger = "UnbreakablePunch"; recognized = true; }
+            else if (GetSimilarity(word, "reflect") > 0.68f || word == "deflect" || GetSimilarity(word, "parry") > 0.75f) { trigger = "ParryIntent"; recognized = true; }
+            else if (word == "boom" || GetSimilarity(word, "boom") > 0.78f || word == "crush" || word == "crash" || word == "crushing" || word == "crashing" || GetSimilarity(word, "crush") > 0.75f) { trigger = "UnbreakablePunch"; recognized = true; }
             else if (GetSimilarity(word, "left") > 0.75f) { trigger = "Left"; dashDir = Vector3.left; recognized = true; }
             else if (GetSimilarity(word, "right") > 0.75f) { trigger = "Right"; dashDir = Vector3.right; recognized = true; }
             // ── NEW CARDS (Basic) ──
@@ -211,7 +211,7 @@ public class VoiceCommandManager : NetworkBehaviour
             else if (GetSimilarity(word, "taunt") > 0.75f || word == "taught" || word == "tall") { trigger = "Taunt"; recognized = true; }
             // ── NEW CARDS (Legendary) ──
             else if (GetSimilarity(word, "overclock") > 0.70f || word == "over" || word == "clock" || word == "overload") { trigger = "Overclock"; recognized = true; }
-            else if (GetSimilarity(word, "reverse") > 0.75f || word == "revert" || word == "reflect") { trigger = "Reverse"; recognized = true; }
+            else if (GetSimilarity(word, "reverse") > 0.75f || word == "revert") { trigger = "Reverse"; recognized = true; }
             else if (GetSimilarity(word, "trap") > 0.75f || word == "trip" || word == "track") { trigger = "Trap"; recognized = true; }
             else if (GetSimilarity(word, "mirror") > 0.75f || word == "mere" || word == "near") { trigger = "Mirror"; recognized = true; }
             else if (GetSimilarity(word, "cage") > 0.75f || word == "lock" || word == "seal") { trigger = "Cage"; recognized = true; }

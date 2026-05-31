@@ -63,20 +63,14 @@ public class ShopPhaseManager : MonoBehaviour
 
         CardDatabase.GetRarityChances(roundNumber, out float basicChance, out float advancedChance, out float legendaryChance);
 
-        // Collect all owned card IDs across players so we don't show duplicates
-        var ownedCardIds = new HashSet<string>();
-        foreach (var p in GameManager.players)
-        {
-            var inv = p?.GetComponent<PlayerInventory>();
-            if (inv != null)
-                foreach (var id in inv.ownedCombatCards)
-                    ownedCardIds.Add(id);
-        }
+        // Local player's inventory — used only to skip cards they've already maxed (nothing to gain).
+        var localInv = GameManager.localPlayer?.GetComponent<PlayerInventory>();
 
-        // Generate 8 combat card slots (no duplicates, no already-owned cards)
+        // Generate 4 combat card slots. Owned cards CAN appear (buying a duplicate upgrades it);
+        // we just skip ones already at max level and avoid duplicate slots in the same shop.
         var usedIds = new HashSet<string>();
         int attempts = 0;
-        while (_combatShopSlots.Count < 8 && attempts < 80)
+        while (_combatShopSlots.Count < 4 && attempts < 80)
         {
             attempts++;
             float roll = Random.value;
@@ -88,8 +82,8 @@ public class ShopPhaseManager : MonoBehaviour
             if (pool.Length == 0) continue;
             var card = pool[Random.Range(0, pool.Length)];
 
-            if (ownedCardIds.Contains(card.cardId)) continue;
             if (usedIds.Contains(card.cardId)) continue;
+            if (localInv != null && localInv.ownedCombatCards.Contains(card.cardId) && localInv.IsMaxLevel(card.cardId)) continue;
 
             usedIds.Add(card.cardId);
             _combatShopSlots.Add(card);
@@ -141,35 +135,29 @@ public class ShopPhaseManager : MonoBehaviour
     {
         if (botInv == null) return;
 
-        int credits = botInv.credits;
-        bool inventoryFull = botInv.ownedCombatCards.Count >= PlayerInventory.MaxCombatCards;
-
-        // 1. Buy best affordable combat cards (respect 8-card inventory limit)
-        if (!inventoryFull)
+        // 1. Buy/upgrade affordable combat cards (a duplicate purchase upgrades an owned card)
+        var affordableCombat = new List<(CombatCardData card, int index)>();
+        for (int i = 0; i < _combatShopSlots.Count; i++)
         {
-            var affordableCombat = new List<(CombatCardData card, int index)>();
-            for (int i = 0; i < _combatShopSlots.Count; i++)
-            {
-                var card = _combatShopSlots[i];
-                if (card != null && card.cost <= credits && !botInv.ownedCombatCards.Contains(card.cardId))
-                    affordableCombat.Add((card, i));
-            }
+            var card = _combatShopSlots[i];
+            if (card == null) continue;
+            bool ownedMaxed = botInv.ownedCombatCards.Contains(card.cardId) && botInv.IsMaxLevel(card.cardId);
+            if (card.cost <= botInv.credits && !ownedMaxed)
+                affordableCombat.Add((card, i));
+        }
 
-            // Prefer expensive/higher rarity cards
-            affordableCombat.Sort((a, b) =>
-            {
-                int costCompare = b.card.cost.CompareTo(a.card.cost);
-                if (costCompare != 0) return costCompare;
-                return b.card.rarity.CompareTo(a.card.rarity);
-            });
+        // Prefer expensive/higher rarity cards
+        affordableCombat.Sort((a, b) =>
+        {
+            int costCompare = b.card.cost.CompareTo(a.card.cost);
+            if (costCompare != 0) return costCompare;
+            return b.card.rarity.CompareTo(a.card.rarity);
+        });
 
-            foreach (var item in affordableCombat)
-            {
-                if (botInv.ownedCombatCards.Count >= PlayerInventory.MaxCombatCards) break;
-                if (botInv.credits < item.card.cost) break;
-                if (botInv.ownedCombatCards.Contains(item.card.cardId)) continue;
-                botInv.BuyCombatCard(item.card.cardId, item.card.cost);
-            }
+        foreach (var item in affordableCombat)
+        {
+            if (botInv.credits < item.card.cost) continue;
+            botInv.BuyCombatCard(item.card.cardId, item.card.cost);
         }
 
         // 2. Buy a trait card if affordable (replaces existing trait)
@@ -193,8 +181,7 @@ public class ShopPhaseManager : MonoBehaviour
         if (!isShopPhase || slotIndex < 0 || slotIndex >= _combatShopSlots.Count) return;
         var card = _combatShopSlots[slotIndex];
         if (card == null) return;
-        if (inv.ownedCombatCards.Count >= PlayerInventory.MaxCombatCards) return;
-        inv.BuyCombatCard(card.cardId, card.cost);
+        inv.BuyCombatCard(card.cardId, card.cost); // adds the card, or upgrades it if already owned
     }
 
     public void TryBuyTraitCard(PlayerInventory inv, int slotIndex)

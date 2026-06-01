@@ -278,6 +278,7 @@ public class VoiceCommandManager : NetworkBehaviour
                         SetEchoGuard();
                         VoskInstance.FlushAudioBuffer();
                         if (SoundManagerMain.Instance != null) SoundManagerMain.Instance.PlayCardAccepted();
+                        if (_myCards != null) _myCards.PlayActivationFor(trigger); // shine/glow burst on the hand card
                         LogExecution("QUEUED: " + trigger);
                     }
                     else

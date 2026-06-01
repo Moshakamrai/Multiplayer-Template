@@ -90,6 +90,10 @@ public class PlayerController : NetworkBehaviour
     {
         if (!isServer || !_isSpacingActive) return;
 
+        // Only the BOT closes distance — the player stands still.
+        bool isBot = GetComponent<BotController>() != null;
+        if (!isBot) return;
+
         PlayerController opponent = GetOpponent();
         if (opponent == null) return;
 
@@ -215,9 +219,10 @@ public class PlayerController : NetworkBehaviour
             playerCollider.enabled = true;
         }
 
-        // 4. Auto-Spacing Logic
+        // 4. Auto-Spacing Logic — ONLY the bot closes distance; the player stays put.
         Vector3 autoSpacingVelocity = Vector3.zero;
-        if (opponent != null && !_isDashing && !_combat.isAttacking && !_combat.IsHurting)
+        bool isBot = GetComponent<BotController>() != null;
+        if (isBot && opponent != null && !_isDashing && !_combat.isAttacking && !_combat.IsHurting)
         {
             float currentDist = Vector3.Distance(transform.position, opponent.transform.position);
             if (Mathf.Abs(currentDist - DesiredDistance) > 0.2f)

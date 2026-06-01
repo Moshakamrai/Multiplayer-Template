@@ -5,6 +5,9 @@ public class PlayerInventory : MonoBehaviour
 {
     public int credits = 0;
 
+    // Separate currency for TRAIT cards only (+3 every round, accumulates). Combat cards use credits.
+    public int traitTokens = 0;
+
     // Owned combat cards (one entry per unique card; duplicates upgrade instead of stacking).
     public List<string> ownedCombatCards = new List<string>();
 
@@ -62,11 +65,12 @@ public class PlayerInventory : MonoBehaviour
         return true;
     }
 
+    // Traits are bought with Trait Tokens, NOT combat credits.
     public bool BuyTraitCard(string traitId, int cost)
     {
-        if (credits < cost) return false;
+        if (traitTokens < cost) return false;
         equippedTraitId = traitId;
-        credits -= cost;
+        traitTokens -= cost;
         return true;
     }
 
@@ -92,6 +96,7 @@ public class PlayerInventory : MonoBehaviour
     public void ResetForNewMatch()
     {
         credits = 0;
+        traitTokens = 0;
         ownedCombatCards.Clear();
         cardLevels.Clear();
         selectedByFamily.Clear();

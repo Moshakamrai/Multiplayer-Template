@@ -752,11 +752,12 @@ public class RhythmRoundManager : NetworkBehaviour
         p1TotalCredits += p1Credits;
         p2TotalCredits += p2Credits;
 
-        // Transfer earned credits to PlayerInventory for shop spending
+        // Transfer earned credits to PlayerInventory for shop spending.
+        // Plus a flat +3 Trait Tokens to BOTH players every round (separate trait economy).
         var p1Inv = playerList[0].GetComponent<PlayerInventory>();
         var p2Inv = playerList[1].GetComponent<PlayerInventory>();
-        if (p1Inv != null) p1Inv.AddCredits(p1Credits);
-        if (p2Inv != null) p2Inv.AddCredits(p2Credits);
+        if (p1Inv != null) { p1Inv.AddCredits(p1Credits); p1Inv.traitTokens += 3; }
+        if (p2Inv != null) { p2Inv.AddCredits(p2Credits); p2Inv.traitTokens += 3; }
 
         if (roundWinner == 1) p1RoundWins++;
         else if (roundWinner == 2) p2RoundWins++;
@@ -1065,6 +1066,10 @@ public class RhythmRoundManager : NetworkBehaviour
 
         float targetBeat = GetNextBeatTime();
 
+        // --- TAUNT: punish a player who was ordered to Strike last beat but didn't ---
+        CheckMustStrike(p1, m1);
+        CheckMustStrike(p2, m2);
+
         // --- TIMING CLASH: same-family offense (Strike v Strike, Throw v Throw) ---
         // The triangle can't separate two of the same attack type, so better beat timing wins;
         // the loser is treated as interrupted (whiffs). Different offense (Strike vs Throw) is
@@ -1207,28 +1212,37 @@ public class RhythmRoundManager : NetworkBehaviour
             if (fSpike > 0 && offset <= 0.3f)
             {
                 if (attacker.connectionToClient != null) attacker.TargetPlaySuccessSound("Attack");
-                int fakeDmg = 5;
-                if (attacker.activeTraitId == "trickster")
+                int fakeDmg = GetBaseDamage("Fake", attacker);
+                // FakeCounter Lv3: double damage if defender defended last beat
+                var fakeCard = GetCardData("Fake");
+                int fakeLvl = GetCardLevel(attacker, "Fake");
+                if (fakeCard != null && fakeCard.PerkActiveAt(fakeLvl) && defender.DefendedLastBeat)
+                {
                     fakeDmg *= 2;
+                    tradeReason = "Fake punished the defender — DOUBLE DAMAGE";
+                }
+                else tradeReason = "Fake slipped through";
+                if (attacker.activeTraitId == "trickster") fakeDmg *= 2;
                 fakeDmg = ApplyTraitMultiplier(fakeDmg);
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Hurt");
                 PlayHitParticle(defender.transform.position);
                 Vector3 dir = (defender.transform.position - attacker.transform.position).normalized;
                 defender.TakeDamage(fakeDmg, dir, isOpponentDamage: true);
                 damageDealt = fakeDmg;
-                tradeReason = "Fake slipped through";
                 return 1;
             }
             return 0;
         }
 
-        // Mirror: returns damage +15% bonus (a Throw breaks through it)
+        // Mirror: returns damage (Lv1=+15%, Lv2=+20%, Lv3=+25% bonus). A Throw breaks through it.
         if (!defenderStaggered && !throwBreaks && def == "Mirror" && defender.HasMirrorBuff)
         {
             if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Parry");
             PlayHitParticle(defender.transform.position);
-            int baseDmg = GetBaseDamage(atk);
-            int reflectedDmg = Mathf.RoundToInt(ApplyTraitMultiplier(Mathf.RoundToInt(baseDmg * 1.15f)) * CardUpgradeMult(defender, def));
+            int baseDmg = GetBaseDamage(atk, attacker);
+            int mirLvl = GetCardLevel(defender, "Mirror");
+            float mirBonus = mirLvl >= 3 ? 1.25f : mirLvl == 2 ? 1.20f : 1.15f;
+            int reflectedDmg = Mathf.RoundToInt(ApplyTraitMultiplier(Mathf.RoundToInt(baseDmg * mirBonus)) * CardUpgradeMult(defender, def));
             Vector3 kbDir = (attacker.transform.position - defender.transform.position).normalized;
             attacker.TakeDamage(reflectedDmg, kbDir);
             defender.HasMirrorBuff = false;
@@ -1236,28 +1250,29 @@ public class RhythmRoundManager : NetworkBehaviour
             return -1;
         }
 
-        // ParryIntent: full reflect on excellent timing (≤0.30s), 50% block on good timing (≤0.45s). A Throw breaks through it.
+        // ParryIntent: full reflect on good timing (≤0.42s), 50% block on loose timing (≤0.58s). A Throw breaks through it.
         if (!defenderStaggered && !throwBreaks && def == "ParryIntent")
         {
             float pSpike = defender.lastVocalSpikeTime;
             float offset = Mathf.Abs(GetNextBeatTime() - pSpike);
-            if (pSpike > 0 && offset <= 0.30f)
+            if (pSpike > 0 && offset <= DefenseWindow(defender, "ParryIntent", 0.42f))
             {
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Parry");
                 PlayHitParticle(defender.transform.position);
-                int baseDmg = GetBaseDamage(atk);
-                int reflectedDmg = Mathf.RoundToInt(ApplyTraitMultiplier(Mathf.RoundToInt(baseDmg * 1.1f)) * CardUpgradeMult(defender, def));
+                int baseDmg = GetBaseDamage(atk, attacker);
+                // Reward the read: reflect 150% of the attack's damage, with a satisfying floor.
+                int reflectedDmg = Mathf.Max(12, Mathf.RoundToInt(ApplyTraitMultiplier(Mathf.RoundToInt(baseDmg * 1.5f)) * CardUpgradeMult(defender, def)));
                 Vector3 parryDir = (attacker.transform.position - defender.transform.position).normalized;
-                attacker.TakeDamage(reflectedDmg, parryDir);
+                attacker.TakeDamage(reflectedDmg, parryDir, isOpponentDamage: true);
                 tradeReason = "Reflect punished the attack";
                 return -1;
             }
-            else if (pSpike > 0 && offset <= 0.45f)
+            else if (pSpike > 0 && offset <= DefenseWindow(defender, "ParryIntent", 0.58f))
             {
                 // Good timing — block 50% damage, no reflect
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Block");
                 PlayHitParticle(defender.transform.position);
-                int baseDmg = GetBaseDamage(atk);
+                int baseDmg = GetBaseDamage(atk, attacker);
                 int partialDmg = ApplyTraitMultiplier(Mathf.RoundToInt(baseDmg * 0.5f));
                 Vector3 parryDir = (attacker.transform.position - defender.transform.position).normalized;
                 defender.TakeDamage(partialDmg, parryDir, isOpponentDamage: true);
@@ -1272,21 +1287,30 @@ public class RhythmRoundManager : NetworkBehaviour
         {
             float rSpike = defender.lastVocalSpikeTime;
             float offset = Mathf.Abs(GetNextBeatTime() - rSpike);
-            int baseDmg = GetBaseDamage(atk);
+            int baseDmg = GetBaseDamage(atk, attacker);
             Vector3 revDir = (attacker.transform.position - defender.transform.position).normalized;
 
-            if (rSpike > 0 && offset <= 0.3f)
+            if (rSpike > 0 && offset <= DefenseWindow(defender, "Reverse", 0.42f))
             {
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Parry");
                 PlayHitParticle(defender.transform.position);
                 int returnDmg = Mathf.RoundToInt(ApplyTraitMultiplier(baseDmg) * CardUpgradeMult(defender, def));
                 attacker.TakeDamage(returnDmg, revDir);
                 tradeReason = "Reverse countered";
+                // ReverseLeech Lv3: heal 5% of returned damage as HP
+                var revCard = GetCardData("Reverse");
+                int revLvl = GetCardLevel(defender, "Reverse");
+                if (revCard != null && revCard.PerkActiveAt(revLvl))
+                {
+                    int healAmt = Mathf.Max(1, Mathf.RoundToInt(returnDmg * 0.05f));
+                    defender.CurrentPercentage -= healAmt; // reduce % = heal
+                    tradeReason += " + LEECH";
+                }
                 return -1;
             }
             else
             {
-                int failedReverseDmg = ApplyTraitMultiplier(Mathf.RoundToInt(baseDmg * 1.5f));
+                int failedReverseDmg = ApplyTraitMultiplier(Mathf.RoundToInt(baseDmg * 1.25f));
                 defender.TakeDamage(failedReverseDmg, revDir);
                 damageDealt = failedReverseDmg;
                 tradeReason = "Reverse mistimed — took extra damage";
@@ -1294,25 +1318,25 @@ public class RhythmRoundManager : NetworkBehaviour
             }
         }
 
-        // Clutch: perfect (≤0.15s) = nullify + reflect; good (≤0.30s) = full block; miss = self-damage. A Throw breaks through it.
+        // Clutch: perfect (≤0.24s) = nullify + reflect; good (≤0.44s) = full block; miss = self-damage. A Throw breaks through it.
         if (!defenderStaggered && !throwBreaks && def == "Clutch")
         {
             float cSpike = defender.lastVocalSpikeTime;
             float offset = Mathf.Abs(GetNextBeatTime() - cSpike);
             bool isHeavy = (atk == "UnbreakablePunch" || atk == "Hook" || atk == "Overclock");
-            if (cSpike > 0 && offset <= 0.15f && isHeavy)
+            if (cSpike > 0 && offset <= DefenseWindow(defender, "Clutch", 0.24f) && isHeavy)
             {
                 // Perfect clutch — nullify and reflect
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Parry");
                 PlayHitParticle(defender.transform.position);
-                int baseDmg = GetBaseDamage(atk);
+                int baseDmg = GetBaseDamage(atk, attacker);
                 int clutchReflect = Mathf.RoundToInt(ApplyTraitMultiplier(Mathf.RoundToInt(baseDmg * 0.5f)) * CardUpgradeMult(defender, def));
                 Vector3 clutchDir = (attacker.transform.position - defender.transform.position).normalized;
                 attacker.TakeDamage(clutchReflect, clutchDir);
                 tradeReason = "CLUTCH! Perfect counter";
                 return -1;
             }
-            else if (cSpike > 0 && offset <= 0.30f && isHeavy)
+            else if (cSpike > 0 && offset <= DefenseWindow(defender, "Clutch", 0.44f) && isHeavy)
             {
                 // Good clutch — full block, no reflect, no self-damage
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Block");
@@ -1322,8 +1346,12 @@ public class RhythmRoundManager : NetworkBehaviour
             }
             else
             {
-                // Failed clutch — self-damage
-                int selfDmg = ApplyTraitMultiplier(10);
+                // Failed clutch — self-damage (Lv3: reduced from 20% to 10%)
+                var clutchCard = GetCardData("Clutch");
+                int clutchLvl = GetCardLevel(defender, "Clutch");
+                float missRatio = (clutchCard != null && clutchCard.PerkActiveAt(clutchLvl)) ? 0.10f : 0.20f;
+                int clutchBaseDmg = GetBaseDamage(atk, attacker);
+                int selfDmg = ApplyTraitMultiplier(Mathf.RoundToInt(clutchBaseDmg * missRatio));
                 defender.TakeDamage(selfDmg);
                 damageDealt = selfDmg;
                 tradeReason = "Clutch mistimed — self-damage";
@@ -1331,61 +1359,60 @@ public class RhythmRoundManager : NetworkBehaviour
             }
         }
 
-        // Movement dodge check
+        // Movement dodge check — Dodge (Block family) RELIABLY evades Strikes whenever you dash;
+        // a Throw catches it. No tight timing gate: playing the dodge is enough.
         bool moveSuccessful = false;
         if (!defenderStaggered && defMove.dash != Vector3.zero)
         {
-            float dSpike = defender.lastVocalSpikeTime;
-            if (dSpike > 0 && (GetNextBeatTime() - dSpike) <= 0.3f)
+            if (throwBreaks)
             {
-                // Dodge (Block family) evades Strikes but loses to Throws.
-                if (throwBreaks)
-                {
-                    moveSuccessful = false; // a Throw catches the dodge
-                }
-                else
-                {
-                    moveSuccessful = true;
-                    if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Dash");
-                    PlayHitParticle(defender.transform.position);
-                }
+                moveSuccessful = false; // a Throw catches the dodge
+            }
+            else
+            {
+                moveSuccessful = true;
+                if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Dash");
+                PlayHitParticle(defender.transform.position);
             }
         }
 
-        // Block check and mitigation
+        // Block check — Block beats Strike by the family rule, so it RELIABLY stops Strikes
+        // whenever you play it. Throws break through. Timing only adds a bonus; it never makes
+        // the block FAIL (that "block but still got hit" feel was a tight-timing gate).
         float blockMitigation = 0f;
         if (!defenderStaggered && def == "Block")
         {
-            float bSpike = defender.lastVocalSpikeTime;
-            float offset = Mathf.Abs(GetNextBeatTime() - bSpike);
-            if (bSpike > 0 && offset <= 0.4f) // block has longest window
+            if (throwBreaks)
             {
-                // Only Throws break through Block. Strikes are fully stopped.
-                if (throwBreaks)
+                blockMitigation = 0f; // Throws bypass Block
+            }
+            else
+            {
+                blockMitigation = 1.0f; // full stop vs Strikes
+
+                // Piercing trait: chips through 70% of the block
+                if (attacker.activeTraitId == "piercing")
+                    blockMitigation = 0.30f;
+
+                // On-beat bonus only (block itself never fails): trait + perk rewards.
+                float bSpike = defender.lastVocalSpikeTime;
+                bool onBeat = bSpike > 0 && Mathf.Abs(GetNextBeatTime() - bSpike) <= 0.4f;
+                if (onBeat)
                 {
-                    blockMitigation = 0f;
+                    if (defender.activeTraitId == "stalwart") defender.HasStalwartBuff = true;
+                    var blkCard = GetCardData("Block");
+                    int blkLvl = GetCardLevel(defender, "Block");
+                    if (blkCard != null && blkCard.PerkActiveAt(blkLvl) && blkCard.perk == CardPerk.BlockCounter)
+                        defender.BlockChargeReady = true;
                 }
-                else
-                {
-                    blockMitigation = 1.0f;
-                    // Piercing trait: ignores 30% of block reduction
-                    if (!string.IsNullOrEmpty(attacker.activeTraitId) && attacker.activeTraitId == "piercing")
-                    {
-                        blockMitigation = 0.30f; // 70% blocked instead of 100%
-                    }
-                    // Stalwart trait: block sets up next attack buff
-                    if (!string.IsNullOrEmpty(defender.activeTraitId) && defender.activeTraitId == "stalwart")
-                    {
-                        defender.HasStalwartBuff = true;
-                    }
-                    if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Block");
-                    PlayHitParticle(defender.transform.position);
-                }
+
+                if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Block");
+                PlayHitParticle(defender.transform.position);
             }
         }
 
         // --- 2. CALCULATE ATTACK DAMAGE ---
-        int finalDmg = GetBaseDamage(atk);
+        int finalDmg = GetBaseDamage(atk, attacker); // level-aware from CardDatabase
 
         // Timing multiplier: EXCELLENT +25%, GOOD base, BAD −50%
         finalDmg = Mathf.RoundToInt(finalDmg * GetTimingMultiplier(attacker));
@@ -1401,20 +1428,6 @@ public class RhythmRoundManager : NetworkBehaviour
                 float t = Mathf.Clamp01((vol - volThreshold) / (1f - volThreshold));
                 finalDmg = Mathf.RoundToInt(finalDmg * Mathf.Lerp(1f, 1.25f, t));
             }
-        }
-
-        // Focus buff: next attack deals +50%
-        if (attacker.HasFocusBuff)
-        {
-            finalDmg = Mathf.RoundToInt(finalDmg * 1.5f);
-            attacker.HasFocusBuff = false;
-        }
-
-        // Stalwart buff: successful block sets +10% next attack
-        if (attacker.HasStalwartBuff)
-        {
-            finalDmg = Mathf.RoundToInt(finalDmg * 1.10f);
-            attacker.HasStalwartBuff = false;
         }
 
         // Chain trait: +5% per consecutive hit
@@ -1437,11 +1450,46 @@ public class RhythmRoundManager : NetworkBehaviour
             finalDmg = Mathf.RoundToInt(finalDmg * 1.30f);
         }
 
-        // Overclock self-damage: +10% of final damage to self
+        // ── PER-CARD PERKS: pre-hit modifiers ──────────────────────────────
+        var atkCard = GetCardData(atk);
+        int atkLvl  = GetCardLevel(attacker, atk);
+        bool perkOn = atkCard != null && atkCard.PerkActiveAt(atkLvl);
+
+        // Boom self-cost (always active): pay 5% HP to throw
+        if (atk == "UnbreakablePunch")
+            attacker.TakeDamage(Mathf.Max(1, Mathf.RoundToInt(attacker.CurrentPercentage * 0.05f)));
+
+        // Overclock: self-damage (10% normal, 6% at Lv3)
         if (atk == "Overclock")
         {
-            int selfDmg = ApplyTraitMultiplier(Mathf.RoundToInt(finalDmg * 0.1f), attacker);
+            float selfRatio = (atkLvl >= 3) ? 0.06f : 0.10f;
+            int selfDmg = ApplyTraitMultiplier(Mathf.RoundToInt(finalDmg * selfRatio), attacker);
             attacker.TakeDamage(selfDmg);
+        }
+
+        // CounterBonus (Cross Lv3 / Uppercut Lv3): +20% if opponent attacked last beat
+        if (perkOn && atkCard.perk == CardPerk.CounterBonus && defender.AttackedLastBeat)
+            finalDmg = Mathf.RoundToInt(finalDmg * 1.20f);
+
+        // BlockChargeReady (Block Lv3): attacker had a block-charge from last beat
+        if (attacker.BlockChargeReady)
+        {
+            finalDmg = Mathf.RoundToInt(finalDmg * 1.15f);
+            attacker.BlockChargeReady = false;
+        }
+
+        // Focus buff: Lv3 makes it uninterruptible (already tracked via HasFocusBuff flag)
+        if (attacker.HasFocusBuff)
+        {
+            finalDmg = Mathf.RoundToInt(finalDmg * 1.5f);
+            attacker.HasFocusBuff = false;
+        }
+
+        // Stalwart buff
+        if (attacker.HasStalwartBuff)
+        {
+            finalDmg = Mathf.RoundToInt(finalDmg * 1.10f);
+            attacker.HasStalwartBuff = false;
         }
 
         // Apply trait multiplier to final damage
@@ -1473,6 +1521,44 @@ public class RhythmRoundManager : NetworkBehaviour
             }
         }
 
+        // --- SUPPORT / SETUP MOVES — resolve when NOT interrupted (they don't "hit"). ---
+        // Stuffed by any offense (isInterrupted covers that); they land when the opponent plays safe.
+        if (!isInterrupted && !defenderStaggered)
+        {
+            var setupCard = GetCardData(atk);
+            int setupLvl  = GetCardLevel(attacker, atk);
+            bool setupLv3 = setupCard != null && setupCard.PerkActiveAt(setupLvl);
+            bool tricky   = attacker.activeTraitId == "trickster";
+
+            switch (atk)
+            {
+                case "Focus":
+                    attacker.HasFocusBuff = true;
+                    tradeReason = "Focus — next Strike powered up";
+                    break;
+                case "Mirror":
+                    attacker.HasMirrorBuff = true;
+                    tradeReason = "Mirror — primed to reflect";
+                    break;
+                case "Trap":
+                    attacker.HasPendingTrap  = true;
+                    attacker.PendingTrapCount = (setupLv3 || tricky) ? 2 : 1; // Lv3 / Trickster: punish 2 moves
+                    tradeReason = "Trap armed";
+                    break;
+                case "Cage":
+                    attacker.HasPendingCage = true;
+                    defender.CageBeatsRemaining = setupLv3 ? 2 : 1;            // Lv3: locked out 2 beats
+                    tradeReason = "Cage — opponent can't defend next beat";
+                    break;
+                case "Taunt":
+                    // Force the opponent to throw a STRIKE next beat — or take damage.
+                    defender.MustStrikeBeats = (setupLv3 || tricky) ? 2 : 1;
+                    tradeReason = "Taunt — opponent MUST Strike next beat";
+                    if (defender.connectionToClient != null) defender.TargetMustStrikeWarn(defender.connectionToClient);
+                    break;
+            }
+        }
+
         // --- 4. APPLY DAMAGE ---
         if (hits)
         {
@@ -1500,23 +1586,46 @@ public class RhythmRoundManager : NetworkBehaviour
                 damageDealt = Mathf.RoundToInt(damageDealt * (1f - defensiveReduction));
             }
 
-            // Set persistent effects after hit (even if 0 damage, like Taunt)
-            if (atk == "Trap") attacker.HasPendingTrap = true;
-            if (atk == "Cage") attacker.HasPendingCage = true;
-            if (atk == "Mirror") attacker.HasMirrorBuff = true;
-            if (atk == "Taunt")
-            {
-                // Trickster doubles Taunt duration (2 turns instead of 1)
-                int tauntDuration = (attacker.activeTraitId == "trickster") ? 2 : 1;
-                defender.TauntTurnsRemaining = tauntDuration;
-                defender.IsTauntedNextTurn = true;
-            }
-
             if (damageDealt > 0)
             {
                 if (atk == "UnbreakablePunch" || atk == "Overclock") _heavyHitThisBeat = true;
                 if (attacker.connectionToClient != null) attacker.TargetPlaySuccessSound("Attack");
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Hurt");
+
+                // ── POST-HIT PERK EFFECTS ──────────────────────────────────
+                if (perkOn)
+                {
+                    switch (atkCard.perk)
+                    {
+                        case CardPerk.Stagger:
+                            // Hook Lv3: opponent can't act next beat
+                            defender.StaggerNextBeat = true;
+                            tradeReason += " — STUNNED";
+                            break;
+
+                        case CardPerk.GrappleBleed:
+                            // Grapple Lv3: 3% HP bleed for 2 beats
+                            defender.BleedTurnsRemaining = 2;
+                            defender.BleedDamagePerBeat  = Mathf.Max(1, Mathf.RoundToInt(defender.CurrentPercentage * 0.03f));
+                            tradeReason += " — BLEED";
+                            break;
+
+                        case CardPerk.SweepKnockback:
+                            // Sweep Lv3: clear opponent's combo buffer
+                            defender._comboBuffer?.Clear();
+                            tradeReason += " — COMBO BROKEN";
+                            break;
+
+                        case CardPerk.FastRedraw:
+                            // Jab Lv3: no family lockout — redraw Strike immediately
+                            var jabCm = attacker.GetComponent<CardManager>();
+                            if (jabCm != null) jabCm.RedrawFamily(CardFamily.Strike);
+                            break;
+                    }
+                }
+
+                // FakeCounter (Fake Lv3): already applied pre-hit — nothing extra needed
+                // BlockCounter (Block Lv3): set charge on successful block — handled in block section below
                 PlayHitParticle(defender.transform.position);
                 PlayCardActivationEffect(attacker, atk);
                 Vector3 kbDir = (defender.transform.position - attacker.transform.position).normalized;
@@ -1558,37 +1667,44 @@ public class RhythmRoundManager : NetworkBehaviour
         return 0;
     }
 
-    // Base damage values for all 20 combat cards (from card balance sheet)
+    // Base damage from CardDatabase — level-aware (Lv1/2/3 damage pulled directly from card definition).
     [Server]
-    private int GetBaseDamage(string attack)
+    private int GetBaseDamage(string attack, PlayerCombat attacker = null)
     {
-        return attack switch
+        var card = CardDatabase.GetCombatCard(TriggerToCardId(attack));
+        if (card == null) return 5;
+        int lvl = 1;
+        if (attacker != null)
         {
-            "Jab"              => 8,
-            "Cross"            => 12,
-            "Hook"             => 15,
-            "Block"            => 2,
-            "Left"             => 0,
-            "Right"            => 0,
-            "ParryIntent"      => 10,
-            "UnbreakablePunch" => 25,
-            "Grapple"          => 18,
-            "Fake"            => 5,
-            "Clutch"           => 0,
-            "Uppercut"         => 20,
-            "Sweep"            => 16,
-            "Focus"            => 0,
-            "Taunt"            => 0,
-            "Overclock"        => 35,
-            "Reverse"          => 0,
-            "Trap"             => 15,
-            "Cage"             => 10,
-            "Mirror"           => 15,
-            _                  => 5
-        };
+            var inv = attacker.GetComponent<PlayerInventory>();
+            if (inv != null) lvl = inv.GetLevel(TriggerToCardId(attack));
+        }
+        return card.DamageForLevel(lvl);
     }
 
-    // Card upgrade level multiplier: +15% per level above 1 (Lv1=1.0, Lv2=1.15, Lv3=1.30).
+    // Level for a trigger on a given player.
+    private int GetCardLevel(PlayerCombat player, string trigger)
+    {
+        if (player == null) return 1;
+        var inv = player.GetComponent<PlayerInventory>();
+        return inv != null ? inv.GetLevel(TriggerToCardId(trigger)) : 1;
+    }
+
+    // Perk data for a trigger, or null.
+    private CombatCardData GetCardData(string trigger) => CardDatabase.GetCombatCard(TriggerToCardId(trigger));
+
+    // Effective timing window for a defender's parry/defense card.
+    // Base value is widened by the card's per-level timing bonus so upgrades feel real.
+    private float DefenseWindow(PlayerCombat defender, string trigger, float baseWindow)
+    {
+        var card = GetCardData(trigger);
+        if (card == null) return baseWindow;
+        int lvl = GetCardLevel(defender, trigger);
+        float bonus = lvl >= 3 ? card.lv3TimingBonus : lvl == 2 ? card.lv2TimingBonus : 0f;
+        return baseWindow + bonus;
+    }
+
+    // Card upgrade level multiplier — kept for the existing reflect damage calls that already use it.
     [Server]
     private float CardUpgradeMult(PlayerCombat player, string trigger)
     {
@@ -1710,6 +1826,16 @@ public class RhythmRoundManager : NetworkBehaviour
     }
 
     private bool IsOffense(CardFamily f) => f == CardFamily.Strike || f == CardFamily.Throw;
+
+    // Taunt enforcement: if a player was ordered to Strike this beat and didn't, punish them.
+    [Server]
+    private void CheckMustStrike(PlayerCombat p, PlayerCombat.RhythmAction move)
+    {
+        if (p == null || p.MustStrikeBeats <= 0) return;
+        p.MustStrikeBeats--;
+        if (GetFamily(move.attack) != CardFamily.Strike)
+            p.TakeDamage(12); // disobeyed the Taunt
+    }
 
     // Cards that cannot be interrupted (unstoppable attacks)
     private bool IsProtected(string attack)
@@ -1977,8 +2103,35 @@ public class RhythmRoundManager : NetworkBehaviour
                         if (!string.IsNullOrEmpty(pc.activeTraitId) && pc.activeTraitId == "regenerate")
                         {
                             int healAmount = Mathf.Max(1, Mathf.RoundToInt(pc.CurrentPercentage * 0.04f));
-                            pc.CurrentPercentage -= healAmount; // Reduce percentage = healing
+                            pc.CurrentPercentage -= healAmount;
                         }
+
+                        // ── Per-card perk state ticks ──────────────────────
+                        // GrappleBleed: tick damage each beat
+                        if (pc.BleedTurnsRemaining > 0)
+                        {
+                            pc.TakeDamage(pc.BleedDamagePerBeat);
+                            pc.BleedTurnsRemaining--;
+                            if (pc.BleedTurnsRemaining <= 0) pc.BleedDamagePerBeat = 0;
+                        }
+
+                        // Stagger perk (Hook Lv3): apply stagger on the beat after the hit
+                        if (pc.StaggerNextBeat)
+                        {
+                            pc.TriggerStagger(1); // 1-beat stagger
+                            pc.StaggerNextBeat = false;
+                        }
+
+                        // CageBreak Lv3: decay extra cage beats
+                        if (pc.CageBeatsRemaining > 0) pc.CageBeatsRemaining--;
+
+                        // Track last-beat action for FakeCounter / CounterBonus
+                        bool didAttack  = !string.IsNullOrEmpty(pc.PendingAttackTrigger) &&
+                                          CardManager.IsAttackTrigger(pc.PendingAttackTrigger);
+                        bool didDefend  = !string.IsNullOrEmpty(pc.PendingAttackTrigger) &&
+                                          CardManager.IsDefenseTrigger(pc.PendingAttackTrigger);
+                        pc.AttackedLastBeat  = didAttack;
+                        pc.DefendedLastBeat  = didDefend;
                     }
                 }
             }
@@ -2372,27 +2525,39 @@ public class RhythmRoundManager : NetworkBehaviour
             GUILayout.EndArea();
         }
 
-        // --- 2. MATCH STATUS (Left Bottom Corner) ---
-        GUILayout.BeginArea(new Rect(10, Screen.height - 280 - 20, 220, 280));
-        GUIStyle matchStyle = new GUIStyle(GUI.skin.box) { fontSize = 16, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleLeft };
-        matchStyle.normal.textColor = Color.cyan;
-        GUILayout.Label($"ROUND {currentRoundNumber} / 9", matchStyle, GUILayout.Height(30));
-        matchStyle.normal.textColor = Color.yellow;
-        GUILayout.Label($"SCORE: {p1RoundWins} - {p2RoundWins}", matchStyle, GUILayout.Height(30));
-        matchStyle.normal.textColor = Color.green;
-        GUILayout.Label($"P1 Credits: {p1TotalCredits}", matchStyle, GUILayout.Height(28));
-        GUILayout.Label($"P2 Credits: {p2TotalCredits}", matchStyle, GUILayout.Height(28));
-
-        foreach (var p in GameManager.players)
+        // --- 2. MATCH STATUS (Right side, just above MIC LEVEL box) ---
+        // MIC LEVEL sits at x=Screen.width-420, y=Screen.height-120, w=400, h=100.
+        // Stack the match panel directly above it with the same right alignment.
         {
-            if (p != null)
+            float panelW = 200f;
+            float panelX = Screen.width - panelW - 20f; // flush with right edge
+            float micTop = Screen.height - 120f;         // top of the MIC LEVEL box
+            float rowH   = 26f;
+            int   rows   = 4 + GameManager.players.Count; // round+score+p1cr+p2cr + one per player
+            float panelH = rows * rowH + 8f;
+            float panelY = micTop - panelH - 8f;          // 8px gap above MIC box
+
+            GUILayout.BeginArea(new Rect(panelX, panelY, panelW, panelH));
+            GUIStyle matchStyle = new GUIStyle(GUI.skin.box) { fontSize = 14, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleLeft };
+            matchStyle.normal.textColor = Color.cyan;
+            GUILayout.Label($"ROUND {currentRoundNumber} / 9", matchStyle, GUILayout.Height(rowH));
+            matchStyle.normal.textColor = Color.yellow;
+            GUILayout.Label($"SCORE: {p1RoundWins} - {p2RoundWins}", matchStyle, GUILayout.Height(rowH));
+            matchStyle.normal.textColor = Color.green;
+            GUILayout.Label($"P1 Credits: {p1TotalCredits}", matchStyle, GUILayout.Height(rowH));
+            GUILayout.Label($"P2 Credits: {p2TotalCredits}", matchStyle, GUILayout.Height(rowH));
+
+            foreach (var p in GameManager.players)
             {
-                PlayerCombat pc = p.GetComponent<PlayerCombat>();
-                matchStyle.normal.textColor = pc.CurrentPercentage >= 75f ? Color.red : new Color(0f, 1f, 0.5f);
-                GUILayout.Label($"{p.PlayerName}: {pc.CurrentPercentage:F0}%", matchStyle, GUILayout.Height(30));
+                if (p != null)
+                {
+                    PlayerCombat pc = p.GetComponent<PlayerCombat>();
+                    matchStyle.normal.textColor = pc.CurrentPercentage >= 75f ? Color.red : new Color(0f, 1f, 0.5f);
+                    GUILayout.Label($"{p.PlayerName}: {pc.CurrentPercentage:F0}%", matchStyle, GUILayout.Height(rowH));
+                }
             }
+            GUILayout.EndArea();
         }
-        GUILayout.EndArea();
 
         // --- 3. THE MASTERPIECE TIMER (Top Center) ---
         if (isRoundActive && _startTime != 0)

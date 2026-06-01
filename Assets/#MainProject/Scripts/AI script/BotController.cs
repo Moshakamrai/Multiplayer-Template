@@ -25,20 +25,24 @@ public class BotController : NetworkBehaviour
         if (_combat.IsHurting || _combat.IsDead) return;
 
         // In single mode the bot can only play its currently-drawn hand (one card per family,
-        // minus the locked type) — same rule as the human. Fall back to the full pool otherwise.
-        List<string> avail;
+        // minus the locked type) — same rule as the human.
+        List<string> avail = null;
         var rmmAvail = RhythmRoundManager.Instance;
         if (_myCards != null && rmmAvail != null && rmmAvail.IsSingleMoveMode())
         {
             avail = _myCards.GetHandTriggers();
-            if (avail.Count == 0) avail = new List<string>(_myCards.availableCardsForRound);
+            if (avail.Count == 0 && _myCards.availableCardsForRound.Count > 0)
+                avail = new List<string>(_myCards.availableCardsForRound);
         }
-        else
+        else if (_myCards != null && _myCards.availableCardsForRound.Count > 0)
         {
-            avail = _myCards != null && _myCards.availableCardsForRound.Count > 0
-                ? _myCards.availableCardsForRound
-                : new List<string> { "Jab", "Cross", "Hook", "Block", "Left", "Right", "UnbreakablePunch", "ParryIntent" };
+            avail = new List<string>(_myCards.availableCardsForRound);
         }
+
+        // Ultimate fallback: the Tier-0 starter trio ONLY (never the full 20). This keeps the bot
+        // limited to its real deck — e.g. it can't spam Throws that would bypass the player's Reflect.
+        if (avail == null || avail.Count == 0)
+            avail = new List<string> { "Jab", "Block", "ParryIntent" };
 
         // Difficulty ramp: rounds 1-2 are easy (sloppy timing, rarely hard-counters),
         // rounds 3-4 medium, round 5+ semi-pro.
@@ -57,6 +61,22 @@ public class BotController : NetworkBehaviour
             // Looser timing in combo mode, and looser still in early rounds.
             _combat.lastVocalSpikeTime = rmm.GetNextBeatTime() - Random.Range(minOff + 0.15f, maxOff + 0.25f);
             return;
+        }
+
+        // 0. TAUNTED — must throw a Strike this beat or take damage. Comply if we can.
+        if (_combat.MustStrikeBeats > 0)
+        {
+            var strikes = avail.FindAll(c => CardManager.IsAttackTrigger(c)
+                && c != "Grapple" && c != "Fake" && c != "Sweep"); // attacks that are Strikes (not Throws)
+            if (strikes.Count > 0)
+            {
+                string pick = strikes[Random.Range(0, strikes.Count)];
+                float beat = RhythmRoundManager.Instance.GetNextBeatTime();
+                _combat.lastVocalSpikeTime = beat - Random.Range(minOff, maxOff);
+                _combat.QueueRhythmMove(pick, Vector3.zero);
+                if (_myCards != null) _myCards.ConsumeSlot(pick);
+                return;
+            }
         }
 
         // 1. ANALYZE PLAYER

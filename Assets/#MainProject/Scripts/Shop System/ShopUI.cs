@@ -98,10 +98,10 @@ public class ShopUI : MonoBehaviour
         CyberpunkGUIUtils.DrawGlowText(new Rect(MARGIN, barY, thirdW - MARGIN * 2, 30), $"⏱  {Mathf.Max(0f, spm.shopTimeRemaining):F0}s",
             timerColor, _timerStyle, timerColor);
 
-        // Credits
-        string creditsStr = inv != null ? $"💰 {inv.credits}" : "💰 --";
+        // Credits (combat cards) + Trait Tokens (traits) — two separate economies
+        string creditsStr = inv != null ? $"💰 {inv.credits}   🟢 {inv.traitTokens} TK" : "💰 --";
         GUIStyle creditStyle = new GUIStyle(_timerStyle);
-        CyberpunkGUIUtils.DrawGlowText(new Rect(thirdW, barY, thirdW, 30), creditsStr,
+        CyberpunkGUIUtils.DrawGlowText(new Rect(thirdW - MARGIN, barY, thirdW + MARGIN * 2, 30), creditsStr,
             CyberpunkGUIUtils.NEON_YELLOW, creditStyle, CyberpunkGUIUtils.NEON_YELLOW);
 
         // Round
@@ -414,9 +414,29 @@ public class ShopUI : MonoBehaviour
         if (isHovered)
         {
             _hoveredCardId = card.cardId;
-            _tooltipPos = Event.current.mousePosition;
-            _tooltipTitle = card.displayName;
-            _tooltipText = card.description;
+            _tooltipPos    = Event.current.mousePosition;
+            _tooltipTitle  = card.displayName;
+
+            // Show upgrade preview when hovered: Lv1/Lv2/Lv3 damage + timing + perk
+            if (owned)
+            {
+                string lv1 = $"Lv1 — {card.baseDamage}dmg  |  {card.timingWindow:F2}s window";
+                string lv2 = $"Lv2 — {card.lv2Damage}dmg  |  {(card.timingWindow + card.lv2TimingBonus):F2}s window";
+                string lv3 = $"Lv3 — {card.lv3Damage}dmg  |  {(card.timingWindow + card.lv3TimingBonus):F2}s window";
+                string perkLine = string.IsNullOrEmpty(card.perkDescription) ? "" : $"\nPERK: {card.perkDescription}";
+                string arrow = ownedLvl == 1 ? $"  ← you are here\n{lv2}\n{lv3}" :
+                               ownedLvl == 2 ? $"\n{lv2}  ← you are here\n{lv3}" :
+                                               $"\n{lv2}\n{lv3}  ← MAXED";
+                _tooltipText = $"{lv1}{arrow}{perkLine}";
+            }
+            else
+            {
+                string lv1 = $"Lv1 — {card.baseDamage}dmg  |  {card.timingWindow:F2}s window";
+                string lv2 = $"Lv2 — {card.lv2Damage}dmg  |  {(card.timingWindow + card.lv2TimingBonus):F2}s window";
+                string lv3 = $"Lv3 — {card.lv3Damage}dmg  |  {(card.timingWindow + card.lv3TimingBonus):F2}s window";
+                string perkLine = string.IsNullOrEmpty(card.perkDescription) ? "" : $"\nPERK: {card.perkDescription}";
+                _tooltipText = $"{card.description}\n\n{lv1}\n{lv2}\n{lv3}{perkLine}";
+            }
             _hasTooltip = true;
         }
     }
@@ -469,12 +489,12 @@ public class ShopUI : MonoBehaviour
         effSt.normal.textColor = isHovered ? new Color(1f, 1f, 1f, 0.98f) : new Color(0.85f, 0.97f, 0.88f, 0.92f);
         GUI.Label(new Rect(textX, y + pad + 32f, textW, h - pad * 2 - 56f), card.effect, effSt);
 
-        // Cost (big)
+        // Cost (big) — traits cost Trait Tokens (TK), not credits
         GUIStyle costStyle = new GUIStyle(_costStyle) { fontSize = 20 };
-        CyberpunkGUIUtils.DrawGlowText(new Rect(textX, y + h - 34f, 110f, 26f), $"{card.cost} CR", CyberpunkGUIUtils.NEON_YELLOW, costStyle, CyberpunkGUIUtils.NEON_YELLOW);
+        CyberpunkGUIUtils.DrawGlowText(new Rect(textX, y + h - 34f, 130f, 26f), $"{card.cost} TK", new Color(0.6f, 1f, 0.5f), costStyle, new Color(0.6f, 1f, 0.5f));
 
         // Buy / Equipped / Can't-afford state
-        bool canAfford = inv != null && inv.credits >= card.cost;
+        bool canAfford = inv != null && inv.traitTokens >= card.cost;
         float bw = 120f, bh = 34f;
         Rect btnRect = new Rect(x + w - bw - pad, y + h - bh - 8f, bw, bh);
         GUIStyle bigBtn = new GUIStyle(GUI.skin.button) { fontSize = 16, fontStyle = FontStyle.Bold };
@@ -619,9 +639,11 @@ public class ShopUI : MonoBehaviour
 
         Texture2D cardArt = GetCardTexture(_hoveredCardId);
         float artW = cardArt != null ? 100f : 0f;
-        float tooltipW  = 420f + artW;
+        float tooltipW  = 460f + artW;
         float headerH   = 38f;
-        float descH     = 100f;
+        // Scale desc height to content — upgrade preview has 4-6 lines
+        int newlineCount = _tooltipText.Split('\n').Length;
+        float descH     = Mathf.Max(100f, newlineCount * 18f + 10f);
         float matchupH  = hasCounters ? (hasTwoParts ? 48f : 28f) : 0f;
         float oppH      = hasOppHint  ? 42f : 0f;
         float sepCount  = (hasCounters ? 1 : 0) + (hasOppHint ? 1 : 0);

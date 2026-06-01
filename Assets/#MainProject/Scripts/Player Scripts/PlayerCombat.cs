@@ -31,6 +31,17 @@ public class PlayerCombat : NetworkBehaviour
     [SyncVar] public bool IsTauntedNextTurn = false;
     [SyncVar] public int TauntTurnsRemaining = 0;
 
+    // ── Per-card perk state ───────────────────────────────────────────────────
+    [SyncVar] public int  BleedTurnsRemaining  = 0;  // GrappleBleed: ticks left
+    [SyncVar] public int  BleedDamagePerBeat   = 0;  // damage each bleed tick
+    [SyncVar] public bool BlockChargeReady     = false; // BlockCounter: next atk +15%
+    [SyncVar] public bool DefendedLastBeat     = false; // FakeCounter: was last action defense?
+    [SyncVar] public bool AttackedLastBeat     = false; // CounterBonus: was last action attack?
+    [SyncVar] public int  PendingTrapCount     = 0;  // TrapPunish Lv3: punish next 2 moves
+    [SyncVar] public int  CageBeatsRemaining   = 0;  // CageBreak Lv3: blocks defense 2 beats
+    [SyncVar] public bool StaggerNextBeat      = false; // Stagger perk: stun next beat
+    [SyncVar] public int  MustStrikeBeats      = 0;  // Taunt: must play a Strike next beat(s) or take damage
+
     // ── Trait Effects ─────────────────────────────────────────────────────────
     [SyncVar] public string activeTraitId = "";
     [SyncVar] public int ConsecutiveHitsChain = 0; // For Bloodlust / Momentum traits
@@ -205,6 +216,15 @@ public class PlayerCombat : NetworkBehaviour
         TauntTurnsRemaining = 0;
         activeTraitId = "";
         ConsecutiveHitsChain = 0;
+        BleedTurnsRemaining = 0;
+        BleedDamagePerBeat  = 0;
+        BlockChargeReady    = false;
+        DefendedLastBeat    = false;
+        AttackedLastBeat    = false;
+        PendingTrapCount    = 0;
+        CageBeatsRemaining  = 0;
+        MustStrikeBeats     = 0;
+        StaggerNextBeat     = false;
     }
 
     private void Start()
@@ -331,8 +351,10 @@ public class PlayerCombat : NetworkBehaviour
         if (!isChainMode && currentMove == "ParryIntent")
         {
             CmdConfirmEliteParry(currentTime, currentVol);
-            Debug.Log($"<color=green>VOCAL SUCCESS:</color> Parry (CAGE) at {timeUntilImpact:F3}s until beat.");
-            _pendingAttackTrigger = "ParryLocked";
+            Debug.Log($"<color=green>VOCAL SUCCESS:</color> Elite Parry at {timeUntilImpact:F3}s until beat.");
+            // Keep the move as "ParryIntent" so the family reflect logic resolves it.
+            // (The old "ParryLocked" rename made it read as Support → interrupted by Strikes.)
+            _pendingAttackTrigger = "ParryIntent";
         }
         else
         {
@@ -773,12 +795,28 @@ public class PlayerCombat : NetworkBehaviour
 
     private Texture2D _whiteTexture;
 
+    private float _mustStrikeWarnUntil = 0f;
+
+    [TargetRpc]
+    public void TargetMustStrikeWarn(NetworkConnection target)
+    {
+        _mustStrikeWarnUntil = Time.time + 1.8f;
+    }
+
     private void OnGUI()
     {
         if (!isLocalPlayer) return;
         if (TiebreakerManager.Instance != null && TiebreakerManager.Instance.IsTiebreakerActive) return;
         if (RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isShopPhase) return;
         if (ShopPhaseManager.Instance != null && ShopPhaseManager.Instance.isShopPhase) return;
+
+        // Taunt warning: you've been ordered to throw a Strike or take damage.
+        if (Time.time < _mustStrikeWarnUntil)
+        {
+            GUIStyle warnSt = new GUIStyle(GUI.skin.label) { fontSize = 34, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+            warnSt.normal.textColor = new Color(1f, 0.25f, 0.15f);
+            GUI.Label(new Rect(Screen.width / 2 - 300, Screen.height * 0.30f, 600, 50), "⚠ TAUNTED — STRIKE NOW OR TAKE DAMAGE!", warnSt);
+        }
 
         // --- INITIALIZE TEXTURE ---
         if (_whiteTexture == null)

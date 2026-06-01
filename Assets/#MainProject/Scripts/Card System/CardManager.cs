@@ -41,6 +41,13 @@ public class CardManager : NetworkBehaviour
     [SyncVar] public string handSupport = "";
     [SyncVar] public string lockedFamily = ""; // family name locked THIS beat (just used last beat); "" = none
 
+    // ── Hand card UI buttons (5 slots: one per family) ────────────────────
+    public UnityEngine.UI.Button strikeCardButton;
+    public UnityEngine.UI.Button throwCardButton;
+    public UnityEngine.UI.Button blockCardButton;
+    public UnityEngine.UI.Button parryCardButton;
+    public UnityEngine.UI.Button supportCardButton;
+
     private int _cfgAttack  = 3;
     private int _cfgDefense = 2;
 
@@ -160,6 +167,88 @@ public class CardManager : NetworkBehaviour
         foreach (var nc in BuildNormalCardDefs())
             if (!existingTriggers.Contains(nc.triggerName))
                 cardLibrary.Add(nc);
+    }
+
+    private void Update()
+    {
+        // Sync the 5 hand card buttons with the current drawn cards (local player only).
+        if (!isLocalPlayer) return;
+
+        // Only show the per-family hand during an active single-move round.
+        // (Menus/shop = no hand; combo rounds use the combo HUD instead.)
+        var rmm = RhythmRoundManager.Instance;
+        bool showHand = rmm != null && rmm.isRoundActive && rmm.IsSingleMoveMode();
+
+        if (!showHand)
+        {
+            ApplyHandVisibility(strikeCardButton, false);
+            ApplyHandVisibility(throwCardButton, false);
+            ApplyHandVisibility(blockCardButton, false);
+            ApplyHandVisibility(parryCardButton, false);
+            ApplyHandVisibility(supportCardButton, false);
+            return;
+        }
+
+        UpdateHandButton(strikeCardButton, handStrike, CardFamily.Strike);
+        UpdateHandButton(throwCardButton, handThrow, CardFamily.Throw);
+        UpdateHandButton(blockCardButton, handBlock, CardFamily.Block);
+        UpdateHandButton(parryCardButton, handParry, CardFamily.Parry);
+        UpdateHandButton(supportCardButton, handSupport, CardFamily.Support);
+    }
+
+    // Show/hide a card slot. Uses the CardShineEffect dissolve if present, else a plain toggle.
+    private void ApplyHandVisibility(UnityEngine.UI.Button b, bool show)
+    {
+        if (b == null) return;
+        var fx = b.GetComponent<CardShineEffect>();
+        if (fx != null) fx.SetShown(show);
+        else if (b.gameObject.activeSelf != show) b.gameObject.SetActive(show);
+    }
+
+    private UnityEngine.UI.Button HandButtonForFamily(CardFamily f)
+    {
+        switch (f)
+        {
+            case CardFamily.Strike: return strikeCardButton;
+            case CardFamily.Throw:  return throwCardButton;
+            case CardFamily.Block:  return blockCardButton;
+            case CardFamily.Parry:  return parryCardButton;
+            default:                return supportCardButton;
+        }
+    }
+
+    // Fire the activation shine/glow on the hand card for this trigger (call client-side when a card is accepted).
+    public void PlayActivationFor(string trigger)
+    {
+        if (string.IsNullOrEmpty(trigger)) return;
+        var btn = HandButtonForFamily(FamilyOfTrigger(trigger));
+        if (btn == null) return;
+        var fx = btn.GetComponent<CardShineEffect>();
+        if (fx != null) fx.Activate();
+    }
+
+    private void UpdateHandButton(UnityEngine.UI.Button btn, string trigger, CardFamily fam)
+    {
+        if (btn == null) return;
+
+        // Hide the slot if its family is locked (just used) or empty (you own nothing of it).
+        bool isLocked = (lockedFamily == fam.ToString());
+        bool isEmpty = string.IsNullOrEmpty(trigger);
+        bool shouldShow = !isLocked && !isEmpty;
+
+        // Set the art of the card ACTUALLY drawn (before showing, so the dissolve-in reveals it).
+        // What you see is what you shout.
+        if (shouldShow && CardArtLibrary.Instance != null)
+        {
+            var img = btn.image != null ? btn.image : btn.GetComponent<UnityEngine.UI.Image>();
+            if (img != null)
+            {
+                var sprite = CardArtLibrary.Instance.GetSpriteForTrigger(trigger);
+                if (sprite != null && img.sprite != sprite) img.sprite = sprite; // keep manual art if library is empty
+            }
+        }
+
+        ApplyHandVisibility(btn, shouldShow); // dissolves in/out via CardShineEffect
     }
 
     // ── Slot API ───────────────────────────────────────────────────────────
@@ -336,18 +425,6 @@ public class CardManager : NetworkBehaviour
         RedrawFamily(CardFamily.Support);
     }
 
-    // The drawn cards for a set of families, in order (skips families you own nothing in).
-    private List<string> BuildHandRow(CardFamily[] families)
-    {
-        var row = new List<string>();
-        foreach (var f in families)
-        {
-            string t = GetHandCard(f);
-            if (!string.IsNullOrEmpty(t)) row.Add(t);
-        }
-        return row;
-    }
-
     // Currently-playable triggers (each family's drawn card, excluding the locked family) — used by the bot.
     public List<string> GetHandTriggers()
     {
@@ -458,11 +535,8 @@ public class CardManager : NetworkBehaviour
     [TargetRpc]
     private void TargetRpcPlayDiscardAnim(NetworkConnection target, int libIndex)
     {
-        if (libIndex < 0 || libIndex >= cardLibrary.Count) return;
-        float startX = GetCardScreenX(cardLibrary[libIndex].triggerName);
-        float baseY  = Screen.height - nHeight - 60f;
-        _activeCardFlashes.Add(new CardFlash { startX = startX, baseY = baseY, startTime = Time.time });
-        _activeDiscardAnims.Add(new DiscardAnim { libIndex = libIndex, startX = startX, startTime = Time.time });
+        // No-op: the hand is now UI buttons. The card simply disappears from the hand
+        // (its family slot is hidden) and redraws after the lock — no OnGUI ghost needed.
     }
 
     private float GetCardScreenX(string trigger)
@@ -559,44 +633,7 @@ public class CardManager : NetworkBehaviour
         }
         else
         {
-            // ── SINGLE MODE: original defense LEFT / attack RIGHT ───────────
-            float baseY     = Screen.height - nHeight - 20f + hoverY;
-            float gap       = 50f;
-
-            // Per-family drawn hand: ONE card per family. Defense types on the left,
-            // attack types on the right; the locked type (just used) is greyed out.
-            var defFams = new[] { CardFamily.Block, CardFamily.Parry, CardFamily.Support };
-            var atkFams = new[] { CardFamily.Strike, CardFamily.Throw };
-
-            var defCards = BuildHandRow(defFams);
-            var atkCards = BuildHandRow(atkFams);
-
-            float defGroupW = nWidth * defCards.Count + nSpace * Mathf.Max(0, defCards.Count - 1);
-            float atkGroupW = nWidth * atkCards.Count + nSpace * Mathf.Max(0, atkCards.Count - 1);
-            float totalW    = defGroupW + gap + atkGroupW;
-            float defStartX = Screen.width / 2f - totalW / 2f;
-            float atkStartX = defStartX + defGroupW + gap;
-
-            for (int i = 0; i < defCards.Count; i++)
-            {
-                int libIdx = cardLibrary.FindIndex(c => c.triggerName == defCards[i] && !c.isCombo);
-                if (libIdx < 0) continue;
-                bool isLocked = (lockedFamily == FamilyOfTrigger(defCards[i]).ToString());
-                float alpha = isLocked ? 0.18f : (!inputLocked ? 1f : 0.30f);
-                Rect r = new Rect(defStartX + i * (nWidth + nSpace), baseY, nWidth, nHeight);
-                DrawCard(r, cardLibrary[libIdx], isRhythm, approachFrac, isShout, pulse, alpha, isLocked, isDefense: true);
-            }
-
-            for (int i = 0; i < atkCards.Count; i++)
-            {
-                int libIdx = cardLibrary.FindIndex(c => c.triggerName == atkCards[i] && !c.isCombo);
-                if (libIdx < 0) continue;
-                bool isLocked = (lockedFamily == FamilyOfTrigger(atkCards[i]).ToString());
-                float alpha = isLocked ? 0.18f : (!inputLocked ? 1f : 0.30f);
-                Rect r = new Rect(atkStartX + i * (nWidth + nSpace), baseY, nWidth, nHeight);
-                DrawCard(r, cardLibrary[libIdx], isRhythm, approachFrac, isShout, pulse, alpha, isLocked, isDefense: false);
-            }
-
+            // ── SINGLE MODE: Hand is now rendered via UI buttons (see SyncHandButtons) ──
             // Beat indicator panel on left side of screen
             if (isRhythm) DrawRhythmPanel(approachFrac, isShout, pulse);
         }
@@ -623,25 +660,8 @@ public class CardManager : NetworkBehaviour
             GUI.color = Color.white;
         }
 
-        // ── Card-use flash ──
-        for (int i = _activeCardFlashes.Count - 1; i >= 0; i--)
-        {
-            float t = (Time.time - _activeCardFlashes[i].startTime) / 0.12f;
-            if (t > 1f) { _activeCardFlashes.RemoveAt(i); continue; }
-            Rect r = new Rect(_activeCardFlashes[i].startX, Screen.height - nHeight - 20f, nWidth, nHeight);
-            GUI.color = new Color(1f, 1f, 1f, (1f - t) * 0.85f);
-            GUI.DrawTexture(r, _whiteTex);
-        }
-
-        // ── Discard ghosts ──
-        for (int i = _activeDiscardAnims.Count - 1; i >= 0; i--)
-        {
-            float t = (Time.time - _activeDiscardAnims[i].startTime) / 0.5f;
-            if (t > 1f) { _activeDiscardAnims.RemoveAt(i); continue; }
-            Rect r = new Rect(_activeDiscardAnims[i].startX,
-                              Screen.height - nHeight - 60f - t * 150f, nWidth, nHeight);
-            DrawCard(r, cardLibrary[_activeDiscardAnims[i].libIndex], false, 0f, false, 0f, 1f - t);
-        }
+        // (Old card-use flash + discard-ghost effects removed — the hand is now UI buttons,
+        //  and those drew phantom cards at the old bottom-of-screen positions.)
 
         GUI.color = Color.white;
     }

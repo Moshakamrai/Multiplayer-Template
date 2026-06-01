@@ -160,10 +160,10 @@ public class ShopPhaseManager : MonoBehaviour
             botInv.BuyCombatCard(item.card.cardId, item.card.cost);
         }
 
-        // 2. Buy a trait card if affordable (replaces existing trait)
+        // 2. Buy a trait card if affordable (traits use Trait Tokens, not credits)
         foreach (var trait in _traitShopSlots)
         {
-            if (trait != null && botInv.credits >= trait.cost)
+            if (trait != null && botInv.traitTokens >= trait.cost)
             {
                 botInv.BuyTraitCard(trait.traitId, trait.cost);
                 break;

@@ -96,6 +96,13 @@ public class CardArtLibrary : MonoBehaviour
         return GetTexture(id);
     }
 
+    // Sprite version, keyed by trigger name — used by the hand card buttons.
+    public Sprite GetSpriteForTrigger(string triggerName)
+    {
+        if (string.IsNullOrEmpty(triggerName)) return null;
+        return GetSprite(TriggerToCardId(triggerName));
+    }
+
     static string TriggerToCardId(string trigger)
     {
         switch (trigger)

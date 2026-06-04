@@ -19,16 +19,6 @@ public class CardDatabase : MonoBehaviour
             perkDescription="Lv3: No cooldown — Strike slot redraws instantly after Jab lands."
         },
         new CombatCardData {
-            cardId="cross", displayName="Cross", rarity=CardRarity.Basic, type=CardType.Attack,
-            family=CardFamily.Strike, cost=1, triggerName="Cross", timingWindow=0.30f,
-            baseDamage=12, lv2Damage=16, lv3Damage=21,
-            lv2TimingBonus=0.03f, lv3TimingBonus=0.06f,
-            damagePercent="12%",
-            description="STRIKE — reliable mid-range punch. Beats Throws, stopped by guards. Lv2: +timing. Lv3: +counter bonus.",
-            perk=CardPerk.CounterBonus, perkActiveAtLv1=false, perkActiveAtLv2=false,
-            perkDescription="Lv3: If opponent attacked last beat, Cross deals +20% bonus damage."
-        },
-        new CombatCardData {
             cardId="hook", displayName="Hook", rarity=CardRarity.Basic, type=CardType.Attack,
             family=CardFamily.Strike, cost=1, triggerName="Hook", timingWindow=0.28f,
             baseDamage=15, lv2Damage=20, lv3Damage=26,
@@ -54,9 +44,9 @@ public class CardDatabase : MonoBehaviour
             baseDamage=0, lv2Damage=0, lv3Damage=0,
             lv2TimingBonus=0.04f, lv3TimingBonus=0.08f,
             damagePercent="0 (evade)",
-            description="BLOCK — slip left. Evades Strikes completely, breaks on Throws. Lv3: full dodge negates ALL Strike damage.",
+            description="BLOCK — slip left. Evades Strikes, breaks on Throws. Lv3: slipping a Strike charges your next attack +15%.",
             perk=CardPerk.DodgeEvade, perkActiveAtLv1=false, perkActiveAtLv2=false,
-            perkDescription="Lv3: If opponent threw a Strike, Dodge Left negates 100% of the damage this beat."
+            perkDescription="Lv3: A successful dodge whiff-punishes — your next attack deals +15% bonus damage."
         },
         new CombatCardData {
             cardId="dodge_right", displayName="Dodge Right", rarity=CardRarity.Basic, type=CardType.Defense,
@@ -64,9 +54,9 @@ public class CardDatabase : MonoBehaviour
             baseDamage=0, lv2Damage=0, lv3Damage=0,
             lv2TimingBonus=0.04f, lv3TimingBonus=0.08f,
             damagePercent="0 (evade)",
-            description="BLOCK — slip right. Evades Strikes completely, breaks on Throws. Lv3: full dodge negates ALL Strike damage.",
+            description="BLOCK — slip right. Evades Strikes, breaks on Throws. Lv3: slipping a Strike charges your next attack +15%.",
             perk=CardPerk.DodgeEvade, perkActiveAtLv1=false, perkActiveAtLv2=false,
-            perkDescription="Lv3: If opponent threw a Strike, Dodge Right negates 100% of the damage this beat."
+            perkDescription="Lv3: A successful dodge whiff-punishes — your next attack deals +15% bonus damage."
         },
         new CombatCardData {
             cardId="reflect", displayName="Reflect", rarity=CardRarity.Basic, type=CardType.Defense,
@@ -84,9 +74,9 @@ public class CardDatabase : MonoBehaviour
             baseDamage=22, lv2Damage=29, lv3Damage=37,
             lv2TimingBonus=0.03f, lv3TimingBonus=0.05f,
             damagePercent="22%",
-            description="STRIKE — slow, massive haymaker. Uninterruptible. Beats Throws. Costs 5% HP to throw. Cannot be blocked.",
+            description="STRIKE — slow, massive haymaker. Uninterruptible. Beats Throws. Costs 5% HP to throw.",
             perk=CardPerk.SelfCost, perkActiveAtLv1=true, perkActiveAtLv2=true,
-            perkDescription="Always: costs 5% self HP to throw, but cannot be interrupted. Lv3: +0.05s timing window."
+            perkDescription="Always: uninterruptible, costs 5% self HP. Lv3: self-cost cut to 2% + wider window."
         },
         new CombatCardData {
             cardId="grapple", displayName="Grapple", rarity=CardRarity.Basic, type=CardType.Attack,
@@ -113,16 +103,6 @@ public class CardDatabase : MonoBehaviour
     // ── ADVANCED (2 cost) ──────────────────────────────────────────────────
     public static readonly CombatCardData[] AdvancedCards = new CombatCardData[]
     {
-        new CombatCardData {
-            cardId="uppercut", displayName="Uppercut", rarity=CardRarity.Advanced, type=CardType.Attack,
-            family=CardFamily.Strike, cost=2, triggerName="Uppercut", timingWindow=0.28f,
-            baseDamage=20, lv2Damage=26, lv3Damage=33,
-            lv2TimingBonus=0.04f, lv3TimingBonus=0.08f,
-            damagePercent="20%",
-            description="STRIKE — rising punch. Beats Throws, stopped by guards. Lv3: +20% dmg if opponent attacked last beat.",
-            perk=CardPerk.CounterBonus, perkActiveAtLv1=false, perkActiveAtLv2=false,
-            perkDescription="Lv3: If opponent attacked last beat, Uppercut deals +20% bonus damage."
-        },
         new CombatCardData {
             cardId="sweep", displayName="Sweep", rarity=CardRarity.Advanced, type=CardType.Attack,
             family=CardFamily.Throw, cost=2, triggerName="Sweep", timingWindow=0.30f,
@@ -159,16 +139,6 @@ public class CardDatabase : MonoBehaviour
     public static readonly CombatCardData[] LegendaryCards = new CombatCardData[]
     {
         new CombatCardData {
-            cardId="overclock", displayName="Overclock", rarity=CardRarity.Legendary, type=CardType.Attack,
-            family=CardFamily.Strike, cost=3, triggerName="Overclock", timingWindow=0.26f,
-            baseDamage=30, lv2Damage=38, lv3Damage=48,
-            lv2TimingBonus=0.03f, lv3TimingBonus=0.06f,
-            damagePercent="30%",
-            description="STRIKE — uninterruptible super hit. Beats Throws, costs 10% self HP. Lv3: self-damage reduced to 6%.",
-            perk=CardPerk.Overload, perkActiveAtLv1=true, perkActiveAtLv2=true,
-            perkDescription="Always: cannot be interrupted. Costs 10% self HP (Lv3: reduced to 6% self HP)."
-        },
-        new CombatCardData {
             cardId="reverse", displayName="Reverse", rarity=CardRarity.Legendary, type=CardType.Defense,
             family=CardFamily.Parry, cost=3, triggerName="Reverse", timingWindow=0.28f,
             baseDamage=0, lv2Damage=0, lv3Damage=0,
@@ -189,34 +159,14 @@ public class CardDatabase : MonoBehaviour
             perkDescription="Always: punishes opponent's next move. Lv3: punishes next 2 moves instead of 1."
         },
         new CombatCardData {
-            cardId="cage", displayName="Cage", rarity=CardRarity.Legendary, type=CardType.Defense,
-            family=CardFamily.Support, cost=2, triggerName="Cage", timingWindow=0.30f,
-            baseDamage=10, lv2Damage=13, lv3Damage=17,
-            lv2TimingBonus=0.04f, lv3TimingBonus=0.08f,
-            damagePercent="10%",
-            description="SUPPORT — lock opponent out of defending next beat. Forces them to eat a hit. Lv3: lasts 2 beats.",
-            perk=CardPerk.CageBreak, perkActiveAtLv1=true, perkActiveAtLv2=true,
-            perkDescription="Always: opponent cannot defend for 1 beat. Lv3: opponent cannot defend for 2 beats."
-        },
-        new CombatCardData {
-            cardId="mirror", displayName="Mirror", rarity=CardRarity.Legendary, type=CardType.Defense,
-            family=CardFamily.Parry, cost=3, triggerName="Mirror", timingWindow=0.28f,
-            baseDamage=0, lv2Damage=0, lv3Damage=0,
-            lv2TimingBonus=0.04f, lv3TimingBonus=0.08f,
-            damagePercent="counter (+15%)",
-            description="PARRY — reflect a Strike back with +15% bonus damage. Lv3: amplified to +25% bonus.",
-            perk=CardPerk.MirrorAmplify, perkActiveAtLv1=true, perkActiveAtLv2=true,
-            perkDescription="Always: reflect + 15% bonus (Lv2: +20%, Lv3: +25% bonus on top of reflected damage)."
-        },
-        new CombatCardData {
             cardId="clutch", displayName="Clutch", rarity=CardRarity.Legendary, type=CardType.Defense,
             family=CardFamily.Parry, cost=3, triggerName="Clutch", timingWindow=0.30f,
             baseDamage=0, lv2Damage=0, lv3Damage=0,
             lv2TimingBonus=0.04f, lv3TimingBonus=0.08f,
             damagePercent="0 or ×2 counter",
-            description="PARRY — high-risk read. Within 0.1s of beat = double counter; miss = 20% self-damage. Lv3: miss penalty reduced to 10%.",
+            description="PARRY — high-risk read on heavy hits. Perfect = ×2 counter; miss = self-damage. Lv3: perfect clutch also HEALS you 8%.",
             perk=CardPerk.ClutchCritical, perkActiveAtLv1=true, perkActiveAtLv2=true,
-            perkDescription="Always: perfect timing = ×2 counter; miss = 20% self-dmg. Lv3: miss penalty reduced to 10%."
+            perkDescription="Perfect timing = ×2 counter; miss = self-dmg. Lv3: a perfect clutch also heals you 8%."
         },
     };
 

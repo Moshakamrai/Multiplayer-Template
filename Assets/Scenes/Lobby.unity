@@ -905,7 +905,11 @@ PrefabInstance:
     - target: {fileID: 5658552433460229877, guid: 108b1f036cc01d2489d08e339e8c3dc2, type: 3}
       propertyPath: botPrefab
       value: 
-      objectReference: {fileID: 1196059692255734455, guid: dc9524f97a588bd46a65d405200b9a0b, type: 3}
+      objectReference: {fileID: 1196059692255734455, guid: bd96548af3860644db19937ffc96f501, type: 3}
+    - target: {fileID: 5658552433460229877, guid: 108b1f036cc01d2489d08e339e8c3dc2, type: 3}
+      propertyPath: botSpawnY
+      value: 2
+      objectReference: {fileID: 0}
     - target: {fileID: 5658552433460229877, guid: 108b1f036cc01d2489d08e339e8c3dc2, type: 3}
       propertyPath: currentType
       value: 1
@@ -918,6 +922,14 @@ PrefabInstance:
       propertyPath: slowRhythmMusic
       value: 
       objectReference: {fileID: 8300000, guid: 39f8a31ad625a8f4ba0e14d52204e4ac, type: 3}
+    - target: {fileID: 5658552433460229877, guid: 108b1f036cc01d2489d08e339e8c3dc2, type: 3}
+      propertyPath: botStandDistance
+      value: 2.5
+      objectReference: {fileID: 0}
+    - target: {fileID: 5658552433460229877, guid: 108b1f036cc01d2489d08e339e8c3dc2, type: 3}
+      propertyPath: botPrefabSecondary
+      value: 
+      objectReference: {fileID: 1196059692255734455, guid: dc9524f97a588bd46a65d405200b9a0b, type: 3}
     - target: {fileID: 5658552433460229877, guid: 108b1f036cc01d2489d08e339e8c3dc2, type: 3}
       propertyPath: availableTracks.Array.size
       value: 3
@@ -3353,19 +3365,24 @@ MonoBehaviour:
   mat4: {fileID: 2100000, guid: 20237a9b130fa3a49ba31903a8e1869a, type: 2}
   mat5: {fileID: 2100000, guid: 3ca49754a68cfff4ebb54bfdbf894aa0, type: 2}
   mat6: {fileID: 2100000, guid: 1bef8e1595cd0634185cdddc5d00cc5c, type: 2}
-  color1: {r: 0, g: 1, b: 0.27, a: 1}
-  color2: {r: 1, g: 0, b: 0.47, a: 1}
-  color3: {r: 0.8, g: 1, b: 0, a: 1}
-  color4: {r: 0.2, g: 0, b: 0.8, a: 1}
-  color5: {r: 1, g: 0.27, b: 0.13, a: 1}
-  color6: {r: 0.67, g: 0, b: 1, a: 1}
-  idleMin: 0.25
-  idleMax: 0.8
-  breatheSpeed: 1
-  chargeMaxIntensity: 3.5
-  flickerSpeed: 20
-  hitPeakIntensity: 9
-  hitDecayRate: 6
+  waitColor: {r: 0.1, g: 0.3, b: 1, a: 1}
+  readyColor: {r: 1, g: 0.55, b: 0, a: 1}
+  popColor: {r: 1, g: 0.85, b: 0.3, a: 1}
+  shoutColor: {r: 0.15, g: 1, b: 0.25, a: 1}
+  shoutPeak: {r: 1, g: 1, b: 1, a: 1}
+  waitIntensity: 0.35
+  readyIntensity: 2.25
+  popIntensity: 3.64
+  shoutIntensity: 7.8
+  anticipationLead: 1.8
+  popSharpness: 9
+  shoutDecayRate: 5
+  randomizePattern: 1
+  useSweep: 1
+  reverseSweep: 1
+  pulseSpeedMax: 9
+  idleBreatheSpeed: 0.7
+  driveShaderProps: 1
 --- !u!1 &1771424217
 GameObject:
   m_ObjectHideFlags: 0

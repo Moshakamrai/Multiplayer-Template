@@ -61,8 +61,16 @@ public class RhythmRoundManager : NetworkBehaviour
     private List<CombatLogEntry> combatLogs = new List<CombatLogEntry>();
 
     [Header("Single Player Settings")]
-    public GameObject botPrefab; // Drag your Bot Prefab here in the Inspector
+    public GameObject botPrefab;          // Rounds 1-2: the NEW (sword) bot
+    public GameObject botPrefabSecondary; // Rounds 3+: the PREVIOUS bot (leave empty to always use botPrefab)
+    [Tooltip("Rounds 1..N use botPrefab; rounds after this use botPrefabSecondary.")]
+    public int botSwapAfterRound = 2;
+    [Tooltip("How far the bot stands from the player (sword bot wants more reach).")]
+    public float botStandDistance = 3.5f;
+    [Tooltip("Spawn height offset for the bot. Raise this if the bot's legs sink into the floor on spawn.")]
+    public float botSpawnY = 1.0f;
     private GameObject _activeBot;
+    private GameObject _activeBotPrefab;  // which prefab the current bot was spawned from
 
     // Runtime-loaded clips from SmartBeatMapper file paths
     private Dictionary<string, AudioClip> _runtimeClips = new Dictionary<string, AudioClip>();
@@ -91,7 +99,7 @@ public class RhythmRoundManager : NetworkBehaviour
     private bool _pendingCustomAudioPlay = false;
 
     private readonly Vector3 _spawnP1 = new Vector3(0f, 0f, -2.5f);
-    private readonly Vector3 _spawnP2 = new Vector3(0f, 0f, 2.5f);
+    private Vector3 _spawnP2 => new Vector3(0f, botSpawnY, 2.5f);
 
     [Header("Shop Phase")]
     [SyncVar] public bool isShopPhase = false;
@@ -1326,14 +1334,21 @@ public class RhythmRoundManager : NetworkBehaviour
             bool isHeavy = (atk == "UnbreakablePunch" || atk == "Hook" || atk == "Overclock");
             if (cSpike > 0 && offset <= DefenseWindow(defender, "Clutch", 0.24f) && isHeavy)
             {
-                // Perfect clutch — nullify and reflect
+                // Perfect clutch — nullify and reflect DOUBLE the heavy hit's damage.
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Parry");
                 PlayHitParticle(defender.transform.position);
                 int baseDmg = GetBaseDamage(atk, attacker);
-                int clutchReflect = Mathf.RoundToInt(ApplyTraitMultiplier(Mathf.RoundToInt(baseDmg * 0.5f)) * CardUpgradeMult(defender, def));
+                int clutchReflect = Mathf.RoundToInt(ApplyTraitMultiplier(Mathf.RoundToInt(baseDmg * 2f)) * CardUpgradeMult(defender, def));
                 Vector3 clutchDir = (attacker.transform.position - defender.transform.position).normalized;
-                attacker.TakeDamage(clutchReflect, clutchDir);
+                attacker.TakeDamage(clutchReflect, clutchDir, isOpponentDamage: true);
                 tradeReason = "CLUTCH! Perfect counter";
+
+                // Clutch Lv3 perk: a perfect clutch also heals you 8%.
+                if (GetCardLevel(defender, "Clutch") >= 3)
+                {
+                    defender.CurrentPercentage = Mathf.Max(0f, defender.CurrentPercentage - 8f);
+                    tradeReason += " + HEAL";
+                }
                 return -1;
             }
             else if (cSpike > 0 && offset <= DefenseWindow(defender, "Clutch", 0.44f) && isHeavy)
@@ -1373,6 +1388,11 @@ public class RhythmRoundManager : NetworkBehaviour
                 moveSuccessful = true;
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Dash");
                 PlayHitParticle(defender.transform.position);
+
+                // Dodge Lv3 perk: slipping a Strike sets up a whiff-punish — your next attack is charged.
+                var dodgeCard = GetCardData(def);
+                if (dodgeCard != null && dodgeCard.perk == CardPerk.DodgeEvade && dodgeCard.PerkActiveAt(GetCardLevel(defender, def)))
+                    defender.BlockChargeReady = true;
             }
         }
 
@@ -1455,16 +1475,11 @@ public class RhythmRoundManager : NetworkBehaviour
         int atkLvl  = GetCardLevel(attacker, atk);
         bool perkOn = atkCard != null && atkCard.PerkActiveAt(atkLvl);
 
-        // Boom self-cost (always active): pay 5% HP to throw
+        // Boom self-cost: pay 5% HP to throw (Lv3 perk: reduced to 2%).
         if (atk == "UnbreakablePunch")
-            attacker.TakeDamage(Mathf.Max(1, Mathf.RoundToInt(attacker.CurrentPercentage * 0.05f)));
-
-        // Overclock: self-damage (10% normal, 6% at Lv3)
-        if (atk == "Overclock")
         {
-            float selfRatio = (atkLvl >= 3) ? 0.06f : 0.10f;
-            int selfDmg = ApplyTraitMultiplier(Mathf.RoundToInt(finalDmg * selfRatio), attacker);
-            attacker.TakeDamage(selfDmg);
+            float boomRatio = (atkLvl >= 3) ? 0.02f : 0.05f;
+            attacker.TakeDamage(Mathf.Max(1, Mathf.RoundToInt(attacker.CurrentPercentage * boomRatio)));
         }
 
         // CounterBonus (Cross Lv3 / Uppercut Lv3): +20% if opponent attacked last beat
@@ -1591,6 +1606,8 @@ public class RhythmRoundManager : NetworkBehaviour
                 if (atk == "UnbreakablePunch" || atk == "Overclock") _heavyHitThisBeat = true;
                 if (attacker.connectionToClient != null) attacker.TargetPlaySuccessSound("Attack");
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Hurt");
+                attacker.GloveStrikeFlash(); // gloves flare white-hot on a landed hit
+                attacker.SpawnSwordImpact(defender.transform.position + Vector3.up); // sword slash burst (no-op for glove fighters)
 
                 // ── POST-HIT PERK EFFECTS ──────────────────────────────────
                 if (perkOn)
@@ -2858,23 +2875,63 @@ public class RhythmRoundManager : NetworkBehaviour
     }
 
     private Color GetStateColor(int state) { if (state == 1) return Color.green; if (state == -1) return Color.red; return Color.white; }
-    // Replace only the EnsureBotExists function
+    // Which bot prefab should be fighting this round.
+    private GameObject DesiredBotPrefab()
+    {
+        if (botPrefabSecondary != null && currentRoundNumber > botSwapAfterRound)
+            return botPrefabSecondary;
+        return botPrefab;
+    }
+
+    // Count humans currently in the match (non-bot players).
+    private int CountHumans()
+    {
+        int n = 0;
+        foreach (var p in GameManager.players)
+            if (p != null && p.GetComponent<BotController>() == null) n++;
+        return n;
+    }
+
     [Server]
     private void EnsureBotExists()
     {
-        if (GameManager.players.Count == 1 && _activeBot == null)
+        // Solo only: exactly one human and no second human.
+        if (CountHumans() != 1) return;
+
+        GameObject desired = DesiredBotPrefab();
+        if (desired == null) return;
+
+        // If the wrong bot is in for this round, retire it so the correct one spawns.
+        if (_activeBot != null && _activeBotPrefab != desired)
         {
-            Vector3 spawnPos = new Vector3(0, 0, 5);
-            _activeBot = Instantiate(botPrefab, spawnPos, Quaternion.identity);
+            var oldCtrl = _activeBot.GetComponent<PlayerController>();
+            if (oldCtrl != null) GameManager.players.Remove(oldCtrl); // remove now to avoid a transient 3-player list
+            NetworkServer.Destroy(_activeBot);
+            _activeBot = null;
+            _activeBotPrefab = null;
+        }
 
-            // Ensure bot has PlayerInventory for shop system
-            if (_activeBot.GetComponent<PlayerInventory>() == null)
-                _activeBot.AddComponent<PlayerInventory>();
+        if (_activeBot != null) return; // correct bot already present
 
-            NetworkServer.Spawn(_activeBot);
+        Vector3 spawnPos = new Vector3(0, botSpawnY, 5);
+        _activeBot = Instantiate(desired, spawnPos, Quaternion.identity);
 
-            // Use the new public wrapper to signal the bot is ready
-            _activeBot.GetComponent<PlayerController>().SetReady(true);
+        if (_activeBot.GetComponent<PlayerInventory>() == null)
+            _activeBot.AddComponent<PlayerInventory>();
+
+        NetworkServer.Spawn(_activeBot);
+        var botPc = _activeBot.GetComponent<PlayerController>();
+        botPc.SetReady(true);
+        botPc.DesiredDistance = botStandDistance; // force the standing gap regardless of prefab value
+        _activeBotPrefab = desired;
+
+        // Give a freshly-spawned bot the starter deck so it can fight (e.g. after a mid-match swap).
+        var inv = _activeBot.GetComponent<PlayerInventory>();
+        if (inv != null && inv.ownedCombatCards.Count == 0)
+        {
+            foreach (var id in StarterDeck)
+                if (!inv.ownedCombatCards.Contains(id)) inv.ownedCombatCards.Add(id);
+            inv.EquipCombatCards(new List<string>(inv.ownedCombatCards));
         }
     }
 

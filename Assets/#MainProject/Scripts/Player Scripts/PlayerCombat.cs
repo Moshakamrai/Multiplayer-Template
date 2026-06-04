@@ -227,10 +227,177 @@ public class PlayerCombat : NetworkBehaviour
         StaggerNextBeat     = false;
     }
 
+    private GloveBeatGlow _gloveGlow;
+    private SwordArcTrail _swordArc;
+
+    [Header("Sword Impact VFX (sword characters only — leave empty for glove fighters)")]
+    public GameObject swordImpactVfx;
+
+    [Header("Defense VFX (pre-placed in scene/prefab — toggled on/off, not spawned)")]
+    [Tooltip("Activated while a BLOCK family card is playing (Block, Dodge). Auto-off on hit or timeout.")]
+    public GameObject blockVfx;
+    [Tooltip("Activated while a PARRY family card is playing (Reflect, Reverse, Clutch). Auto-off on hit or timeout.")]
+    public GameObject parryVfx;
+    [Tooltip("Fallback: how long the VFX stays on if no Animation Event turns it off.")]
+    public float defenseVfxDuration = 0.6f;
+
+    private Coroutine _blockVfxRoutine;
+    private Coroutine _parryVfxRoutine;
+
+    // Detects card family and fires the matching VFX after a 0.2s delay.
+    private void TriggerDefenseVfx(string trigger)
+    {
+        switch (trigger)
+        {
+            case "Block": case "Left": case "Right":
+                if (blockVfx != null)
+                {
+                    if (_blockVfxRoutine != null) StopCoroutine(_blockVfxRoutine);
+                    _blockVfxRoutine = StartCoroutine(DelayedVfxOn(blockVfx, 0.2f, true));
+                }
+                break;
+            case "ParryIntent": case "Reverse": case "Clutch": case "Mirror":
+                if (parryVfx != null)
+                {
+                    if (_parryVfxRoutine != null) StopCoroutine(_parryVfxRoutine);
+                    _parryVfxRoutine = StartCoroutine(DelayedVfxOn(parryVfx, 0.2f, false));
+                }
+                break;
+        }
+    }
+
+    private IEnumerator DelayedVfxOn(GameObject vfx, float delay, bool isBlock)
+    {
+        yield return new WaitForSeconds(delay);
+        if (vfx == null) yield break;
+        vfx.SetActive(true);
+        yield return new WaitForSeconds(defenseVfxDuration);
+        if (vfx != null) vfx.SetActive(false);
+        if (isBlock) _blockVfxRoutine = null;
+        else         _parryVfxRoutine = null;
+    }
+
+    private IEnumerator VfxAutoOff(GameObject vfx, float duration)
+    {
+        yield return new WaitForSeconds(duration);
+        if (vfx != null) vfx.SetActive(false);
+    }
+
+    public void SetBlockVfx(bool on)  // kept for DefenseAnimationEvent
+    {
+        if (blockVfx == null) return;
+        if (_blockVfxRoutine != null) { StopCoroutine(_blockVfxRoutine); _blockVfxRoutine = null; }
+        blockVfx.SetActive(on);
+        if (on) _blockVfxRoutine = StartCoroutine(VfxAutoOff(blockVfx, defenseVfxDuration));
+    }
+
+    public void SetParryVfx(bool on)  // kept for DefenseAnimationEvent
+    {
+        if (parryVfx == null) return;
+        if (_parryVfxRoutine != null) { StopCoroutine(_parryVfxRoutine); _parryVfxRoutine = null; }
+        parryVfx.SetActive(on);
+        if (on) _parryVfxRoutine = StartCoroutine(VfxAutoOff(parryVfx, defenseVfxDuration));
+    }
+
+    // Called from TakeDamage — immediately kill both defense VFX on hit.
+    private void CancelDefenseVfx()
+    {
+        if (_blockVfxRoutine != null) { StopCoroutine(_blockVfxRoutine); _blockVfxRoutine = null; }
+        if (_parryVfxRoutine != null) { StopCoroutine(_parryVfxRoutine); _parryVfxRoutine = null; }
+        if (blockVfx != null) blockVfx.SetActive(false);
+        if (parryVfx != null) parryVfx.SetActive(false);
+    }
+
+    [Header("Sword Slash Projectile (sword characters only)")]
+    public GameObject slashProjectilePrefab;     // a slash VFX; add SlashProjectile.cs to it to make it fly
+    public Transform  slashSpawnPoint;           // optional; defaults to chest-height, slightly forward
+    [Tooltip("Delay before the slash spawns — raise this so it fires LATER in the swing (when the blade actually cuts), not at the start of the anim.")]
+    public float slashSpawnDelay = 0.25f;
+    [Tooltip("ON = the slash is fired by an Animation Event (SlashAnimationEvent.Slash) at the exact frame, not by the timed code path. Turn this on once you've added events to your swing clips.")]
+    public bool slashViaAnimationEvent = false;
+    [Tooltip("One-time correction for however your slash art is oriented (applied on top of the auto blade angle).")]
+    public Vector3 slashRotationOffset = Vector3.zero;
+
+    // Timed code path: waits slashSpawnDelay then spawns. (Skipped when slashViaAnimationEvent is on.)
+    private void ThrowSlash(string trigger)
+    {
+        if (!CardManager.IsAttackTrigger(trigger)) return;
+        StartCoroutine(SlashRoutine());
+    }
+
+    private IEnumerator SlashRoutine()
+    {
+        if (slashSpawnDelay > 0f) yield return new WaitForSeconds(slashSpawnDelay);
+        SpawnSlashNow();
+    }
+
+    // Spawn the slash VFX immediately, facing the opponent with the blade angle. PUBLIC so an
+    // Animation Event (via SlashAnimationEvent.Slash) can fire it at the exact swing frame.
+    public void SpawnSlashNow()
+    {
+        Vector3 fwd = transform.forward; fwd.y = 0f;
+        if (fwd.sqrMagnitude < 0.0001f) fwd = Vector3.forward;
+        fwd.Normalize();
+
+        // Auto-angle: align the slash's "up" axis to the actual blade direction this frame.
+        Vector3 up = Vector3.up;
+        if (_swordArc != null && _swordArc.bladeBase != null && _swordArc.bladeTip != null)
+        {
+            Vector3 bladeDir = _swordArc.bladeTip.position - _swordArc.bladeBase.position;
+            if (bladeDir.sqrMagnitude > 0.0001f) up = bladeDir.normalized;
+        }
+
+        Quaternion rot = Quaternion.LookRotation(fwd, up) * Quaternion.Euler(slashRotationOffset);
+        Vector3 origin = slashSpawnPoint != null
+            ? slashSpawnPoint.position
+            : transform.position + Vector3.up * 1.2f + fwd * 0.6f;
+
+        GameObject go;
+        if (slashProjectilePrefab != null)
+        {
+            go = Instantiate(slashProjectilePrefab, origin, rot);
+        }
+        else
+        {
+            // Fallback bright sphere if no VFX prefab is assigned yet (so something always shows).
+            go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            var col = go.GetComponent<Collider>(); if (col != null) Destroy(col);
+            go.transform.SetPositionAndRotation(origin, rot);
+            go.transform.localScale = Vector3.one * 0.5f;
+            var mr = go.GetComponent<MeshRenderer>();
+            var sh = Shader.Find("Unlit/Color");
+            if (sh != null) { var m = new Material(sh); m.color = new Color(0.2f, 1f, 1f); mr.material = m; }
+            mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        }
+
+        if (go.GetComponent<SlashProjectile>() == null)
+        {
+            var sp = go.AddComponent<SlashProjectile>();
+            sp.speed = 7f;
+            sp.lifetime = 1.0f;
+        }
+    }
+
     private void Start()
     {
         _vcm = GetComponent<VoiceCommandManager>();
         _cardManager = GetComponent<CardManager>();
+        _gloveGlow = GetComponent<GloveBeatGlow>();
+        _swordArc  = GetComponent<SwordArcTrail>();
+    }
+
+    // ── Glove juice hooks (server triggers, all clients flash) ──────────────
+    [Server] public void GloveStrikeFlash() => RpcGloveStrike();
+    [ClientRpc] private void RpcGloveStrike() { if (_gloveGlow != null) _gloveGlow.FlashStrike(); }
+    [ClientRpc] private void RpcGloveHurt()   { if (_gloveGlow != null) _gloveGlow.FlashHurt(); }
+
+    // ── Sword impact VFX (server triggers a hit-point burst on all clients) ──
+    [Server] public void SpawnSwordImpact(Vector3 pos) { if (swordImpactVfx != null) RpcSwordImpact(pos); }
+    [ClientRpc] private void RpcSwordImpact(Vector3 pos)
+    {
+        if (swordImpactVfx == null) return;
+        var fx = Instantiate(swordImpactVfx, pos, Quaternion.identity);
+        Destroy(fx, 2f);
     }
 
     public void VoiceAttackJab() { if (isLocalPlayer && !IsDead) _attackQueue.Enqueue("Jab"); }
@@ -470,7 +637,7 @@ public class PlayerCombat : NetworkBehaviour
         lastVocalSpikeVolume = vol;
         IsParryActive = true;
 
-        if (animator != null) animator.Play("Parry");
+        if (animator != null) animator.Play("ParryIntent");
 
         TargetAddEnergy(1);
         TargetShakeCamera(connectionToClient, 0.2f, 0.28f);
@@ -493,7 +660,7 @@ public class PlayerCombat : NetworkBehaviour
         if (animator != null)
         {
             // Snapping to the pose in 0.02s for that 'crunchy' pose-to-pose feel
-            animator.Play("Parry");
+            animator.Play("ParryIntent");
         }
 
         // Return 1 Energy as a reward for the tight timing
@@ -530,10 +697,33 @@ public class PlayerCombat : NetworkBehaviour
         lastVocalSpikeVolume = 0f;
     }
 
+    // Maps a logical move trigger to the Animator state/trigger name.
+    // The whole Parry family shares ONE animation ("ParryIntent"). Everything else uses its own name.
+    private string AnimName(string trigger)
+    {
+        switch (trigger)
+        {
+            case "ParryIntent":
+            case "Reverse":
+            case "Clutch":
+            case "Mirror":
+                return "ParryIntent";
+            default:
+                return trigger;
+        }
+    }
+
     private IEnumerator PerformAttack(string trigger)
     {
         isAttacking = true;
-        if (isLocalPlayer && animator != null) animator.Play(trigger, 0, 0f);
+        if (isLocalPlayer && animator != null) animator.Play(AnimName(trigger), 0, 0f);
+        // Your own blade arc + slash VFX (local view) on offensive swings.
+        if (isLocalPlayer && CardManager.IsAttackTrigger(trigger))
+        {
+            if (_swordArc != null) _swordArc.StartSwing();
+            if (!slashViaAnimationEvent) ThrowSlash(trigger);
+        }
+        TriggerDefenseVfx(trigger); // block/parry VFX (0.2s into the anim)
         int damageToSet = trigger switch
         {
             "Jab"              => 10,
@@ -548,7 +738,10 @@ public class PlayerCombat : NetworkBehaviour
             "Reverse"          => 0,
             _                  => 0
         };
-        CmdTriggerAttack(trigger, damageToSet);
+        // The bot is server-owned (no client authority), so it can't call a [Command]. On the
+        // server, run the attack logic directly; only a remote client player goes through the Command.
+        if (isServer) ServerDoAttack(trigger, damageToSet);
+        else if (isLocalPlayer) CmdTriggerAttack(trigger, damageToSet);
         yield return new WaitForSeconds(0.1f);
     }
 
@@ -662,20 +855,9 @@ public class PlayerCombat : NetworkBehaviour
     {
         if (!string.IsNullOrEmpty(attack))
         {
-            // Map the internal logical triggers to the actual Animator state names
-            string animToPlay = attack;
-
-            if (attack == "ParryIntent")        animToPlay = "Parry";
-            else if (attack == "UnbreakablePunch") animToPlay = "Uppercut";
-            // New cards: most use their trigger name directly as animator state
-            // If your animator doesn't have these states yet, they'll gracefully fall through
-            // Animator states needed: Grapple, Fake, Clutch, Uppercut, Sweep, Focus, Taunt, Overclock, Reverse, Trap, Cage, Mirror
-
+            // Map the logical trigger to its Animator state name (see AnimName).
             if (animator != null)
-            {
-                // Play the mapped animation state
-                animator.Play(animToPlay, 0, 0f);
-            }
+                animator.Play(AnimName(attack), 0, 0f);
 
             if (isLocalPlayer || (isServer && connectionToClient == null))
             {
@@ -690,8 +872,37 @@ public class PlayerCombat : NetworkBehaviour
     }
 
     [TargetRpc] public void TargetAddEnergy(int amount) { if (isLocalPlayer) GetComponent<PlayerEnergy>().AddBonusEnergy(amount); }
-    [Command] void CmdTriggerAttack(string t, int damage) { weaponGloveLeft.GetComponent<HitboxProperties>().currentDamage = damage; weaponGloveRight.GetComponent<HitboxProperties>().currentDamage = damage; RpcTriggerAttack(t); }
-    [ClientRpc] void RpcTriggerAttack(string t) { if (isLocalPlayer) return; if (animator != null) animator.SetTrigger(t); }
+    [Command] void CmdTriggerAttack(string t, int damage) => ServerDoAttack(t, damage);
+
+    // Server-side attack: set hitbox damage and fire the visual Rpc. Safe to call directly from the
+    // bot (server-owned). Null-checks the gloves so sword characters (no glove hitboxes) don't throw.
+    [Server]
+    void ServerDoAttack(string t, int damage)
+    {
+        if (weaponGloveLeft != null)
+        {
+            var h = weaponGloveLeft.GetComponent<HitboxProperties>();
+            if (h != null) h.currentDamage = damage;
+        }
+        if (weaponGloveRight != null)
+        {
+            var h = weaponGloveRight.GetComponent<HitboxProperties>();
+            if (h != null) h.currentDamage = damage;
+        }
+        RpcTriggerAttack(t);
+    }
+    [ClientRpc] void RpcTriggerAttack(string t)
+    {
+        if (isLocalPlayer) return;
+        if (animator != null) animator.SetTrigger(AnimName(t));
+        // Opponent/bot blade arc + slash VFX (this is the copy the human watches).
+        if (CardManager.IsAttackTrigger(t))
+        {
+            if (_swordArc != null) _swordArc.StartSwing();
+            if (!slashViaAnimationEvent) ThrowSlash(t);
+        }
+        TriggerDefenseVfx(t); // block/parry VFX (0.2s into the anim)
+    }
 
     [Server]
     public void TakeDamage(int damage, Vector3 knockbackDir = default, bool isOpponentDamage = false)
@@ -702,8 +913,10 @@ public class PlayerCombat : NetworkBehaviour
         // Stagger at every 50% damage threshold crossed (50, 100, 150, ...)
         if (isServer && Mathf.FloorToInt(CurrentPercentage / 50f) > Mathf.FloorToInt(oldPct / 50f))
             TriggerStagger(2);
+        CancelDefenseVfx(); // kill any active block/parry VFX the moment a hit lands
         RpcTriggerHurt("Hurt " + Random.Range(1, 5), 0f, damage);
         RpcShowDamageNumber(damage, isOpponentDamage);
+        RpcGloveHurt();
         if (knockbackDir != default) RpcNudgeBack(knockbackDir);
     }
 

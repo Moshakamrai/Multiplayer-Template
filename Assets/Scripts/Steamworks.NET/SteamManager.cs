@@ -5,12 +5,12 @@
 //
 // Version: 1.0.13
 
-#if !(UNITY_STANDALONE_WIN || UNITY_STANDALONE_LINUX || UNITY_STANDALONE_OSX || STEAMWORKS_WIN || STEAMWORKS_LIN_OSX)
+#if !(UNITY_STANDALONE_WIN || UNITY_STANDALONE_LINUX || UNITY_STANDALONE_OSX || STEAMWORKS_WIN || STEAMWORKS_LIN_OSX || UNITY_ANDROID)
 #define DISABLESTEAMWORKS
 #endif
 
 using UnityEngine;
-#if !DISABLESTEAMWORKS
+#if !DISABLESTEAMWORKS && !UNITY_ANDROID
 using System.Collections;
 using Steamworks;
 #endif
@@ -21,7 +21,7 @@ using Steamworks;
 //
 [DisallowMultipleComponent]
 public class SteamManager : MonoBehaviour {
-#if !DISABLESTEAMWORKS
+#if !DISABLESTEAMWORKS && !UNITY_ANDROID
 	protected static bool s_EverInitialized = false;
 
 	protected static SteamManager s_instance;

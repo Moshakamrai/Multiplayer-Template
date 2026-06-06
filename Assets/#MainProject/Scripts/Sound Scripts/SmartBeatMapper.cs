@@ -25,6 +25,11 @@ public class SmartBeatMapper : MonoBehaviour
     private List<float> _quantizedBeats = new List<float>();
     private bool        _isRecording    = false;
 
+    // Virtual screen dims — real screen on desktop, fixed 1920x1080 on Android
+    // (scaled via MobileGUI) so buttons stay tappable on phones. Set in OnGUI.
+    private float       _vw, _vh;
+    private Matrix4x4   _guiPrev;
+
     // ── Visualizer ────────────────────────────────────────────────────────
     private float       _tapFlashTimer  = 0f;
     private const float FLASH_DURATION  = 0.15f;
@@ -92,6 +97,7 @@ public class SmartBeatMapper : MonoBehaviour
 
         if (!_isRecording || audioSource == null || !audioSource.isPlaying) return;
 
+#if ENABLE_LEGACY_INPUT_MANAGER
         if (Input.GetKeyDown(KeyCode.Space))
         {
             float t = audioSource.time;
@@ -102,6 +108,7 @@ public class SmartBeatMapper : MonoBehaviour
 
             Debug.Log($"Raw Tap: {t:F3}s | Beat offset: {_lastTapOffset * 1000f:+0.0;-0.0}ms");
         }
+#endif
 
         audioSource.GetSpectrumData(_spectrumData, 0, FFTWindow.BlackmanHarris);
     }
@@ -197,19 +204,24 @@ public class SmartBeatMapper : MonoBehaviour
             _vizTex.Apply();
         }
 
+        // Scale the whole mapper UI for phones (no-op on desktop).
+        _guiPrev = MobileGUI.Begin(out _vw, out _vh);
+
         DrawVisualizer();
         DrawInfoPanel();
         DrawControlPanel();
         DrawHowToPanel();
         DrawLoadPanel();
         DrawBackButton();
+
+        MobileGUI.End(_guiPrev);
     }
 
     // ── Control panel (center-top) ────────────────────────────────────────
     private void DrawControlPanel()
     {
         float pw = 440f, py = 20f;
-        float px = Screen.width / 2f - pw / 2f;
+        float px = _vw / 2f - pw / 2f;
 
         GUI.Label(new Rect(px, py, pw, 36f), "BEAT MAPPER",
             Style(26, FontStyle.Bold, Color.yellow, TextAnchor.MiddleCenter));
@@ -257,7 +269,7 @@ public class SmartBeatMapper : MonoBehaviour
     private void DrawHowToPanel()
     {
         float pw = 440f;
-        float px = Screen.width / 2f - pw / 2f;
+        float px = _vw / 2f - pw / 2f;
         float py = 215f;
         float lh = 24f;
         float y  = py;
@@ -370,10 +382,10 @@ public class SmartBeatMapper : MonoBehaviour
     private void DrawVisualizer()
     {
         const int BARS = 32;
-        float vizW   = Screen.width * 0.45f;
+        float vizW   = _vw * 0.45f;
         float vizH   = 80f;
-        float startX = Screen.width / 2f - vizW / 2f;
-        float startY = Screen.height - vizH - 30f;
+        float startX = _vw / 2f - vizW / 2f;
+        float startY = _vh - vizH - 30f;
         float barW   = vizW / BARS - 2f;
 
         bool  flash  = _tapFlashTimer > 0f;
@@ -401,7 +413,7 @@ public class SmartBeatMapper : MonoBehaviour
     // ── Back button (bottom-left) ─────────────────────────────────────────
     private void DrawBackButton()
     {
-        if (GUI.Button(new Rect(20f, Screen.height - 55f, 170f, 42f), "← BACK TO MENU"))
+        if (GUI.Button(new Rect(20f, _vh - 55f, 170f, 42f), "← BACK TO MENU"))
         {
             if (_isRecording) { audioSource.Stop(); _isRecording = false; }
             SceneManager.LoadScene("Menu");
@@ -435,7 +447,7 @@ public class SmartBeatMapper : MonoBehaviour
     private void DrawLoadPanel()
     {
         float pw = 360f;
-        float px = Screen.width - pw - 20f;
+        float px = _vw - pw - 20f;
         float py = 20f;
         float lh = 24f;
         float y  = py;

@@ -79,7 +79,9 @@ Shader "Hovl/Particles/Distortion"
 
 				fixed4 frag ( v2f i  ) : SV_Target
 				{
-					#ifdef SOFTPARTICLES_ON
+					// Soft-particle depth fade is skipped under single-pass stereo (VR) because
+					// SAMPLE_DEPTH_TEXTURE_PROJ expands to a sampler that isn't declared there.
+					#if defined(SOFTPARTICLES_ON) && !defined(STEREO_MULTIVIEW_ON) && !defined(UNITY_SINGLE_PASS_STEREO)
 						float sceneZ = LinearEyeDepth (SAMPLE_DEPTH_TEXTURE_PROJ(_CameraDepthTexture, UNITY_PROJ_COORD(i.projPos)));
 						float partZ = i.projPos.z;
 						float fade = saturate (_InvFade * (sceneZ-partZ));
@@ -98,7 +100,7 @@ Shader "Hovl/Particles/Distortion"
 				ENDCG 
 			}
 		}	
-	}	
+	}
 }
 /*ASEBEGIN
 Version=15401

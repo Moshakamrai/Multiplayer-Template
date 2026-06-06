@@ -5,6 +5,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using UnityEngine.SceneManagement;
+using UnityEngine.XR;
 
 public enum RoundType { SlowRhythm, FastCombo, CustomTrack }
 
@@ -66,7 +67,7 @@ public class RhythmRoundManager : NetworkBehaviour
     [Tooltip("Rounds 1..N use botPrefab; rounds after this use botPrefabSecondary.")]
     public int botSwapAfterRound = 2;
     [Tooltip("How far the bot stands from the player (sword bot wants more reach).")]
-    public float botStandDistance = 3.5f;
+    public float botStandDistance = 6.0f;
     [Tooltip("Spawn height offset for the bot. Raise this if the bot's legs sink into the floor on spawn.")]
     public float botSpawnY = 1.0f;
     private GameObject _activeBot;
@@ -107,6 +108,16 @@ public class RhythmRoundManager : NetworkBehaviour
 
     [Header("Round Picker")]
     [SyncVar] public bool isRoundPickerActive = false;
+    private float _roundPickerTimer = 0f;
+    private const float ROUND_PICKER_AUTO_SELECT = 20f;
+    private bool _prevPickerB = false; // edge-detect the VR B-button pick
+
+    // True while the right controller's B button is held (VR picker shortcut).
+    private static bool ReadRightB()
+    {
+        InputDevice rh = InputDevices.GetDeviceAtXRNode(XRNode.RightHand);
+        return rh.isValid && rh.TryGetFeatureValue(CommonUsages.secondaryButton, out bool v) && v;
+    }
 
     private readonly string[] _shopCardPool = { "Jab", "Cross", "Hook", "Block", "Left", "Right" };
     private List<string> _p1ShopSelection = new List<string>();
@@ -395,6 +406,7 @@ public class RhythmRoundManager : NetworkBehaviour
     public void ShowRoundPicker()
     {
         isRoundPickerActive = true;
+        _roundPickerTimer = ROUND_PICKER_AUTO_SELECT;
     }
 
     [Server]
@@ -874,6 +886,29 @@ public class RhythmRoundManager : NetworkBehaviour
 
     private void Update()
     {
+        // --- ROUND PICKER AUTO-SELECT ---
+        // Runs BEFORE the round-active early-return and independently of OnGUI, so it
+        // still fires in VR where the IMGUI picker is suppressed.
+        if (isServer && isRoundPickerActive)
+        {
+            _roundPickerTimer -= Time.deltaTime;
+
+            // VR: press B (right controller) to pick the first rhythm option immediately.
+            // Solo host reads its own controller here. Edge-triggered so one press = one select.
+            bool bNow = VRCameraDriver.VRActive && ReadRightB();
+            if (bNow && !_prevPickerB && !_usedRoundTypes.Contains(RoundType.SlowRhythm))
+                SelectRoundType(RoundType.SlowRhythm);
+            _prevPickerB = bNow;
+
+            if (_roundPickerTimer <= 0f)
+            {
+                if (!_usedRoundTypes.Contains(RoundType.SlowRhythm))
+                    SelectRoundType(RoundType.SlowRhythm);
+                else if (!_usedRoundTypes.Contains(RoundType.FastCombo))
+                    SelectRoundType(RoundType.FastCombo);
+            }
+        }
+
         if (!isRoundActive || _startTime == 0) return;
         if (_tiebreakerPaused) return;
 
@@ -2363,19 +2398,33 @@ public class RhythmRoundManager : NetworkBehaviour
     {
         if (_whiteTex == null) { _whiteTex = new Texture2D(1, 1); _whiteTex.SetPixel(0, 0, Color.white); _whiteTex.Apply(); }
 
+        // (Auto-select countdown is ticked in Update() so it works even when this
+        // OnGUI picker is hidden — e.g. in VR.)
+
+        // Scale for mobile so cards are finger-sized (no-op on desktop)
+        var guiPrev = MobileGUI.Begin(out float vw, out float vh);
+
         // Dark overlay
         GUI.color = new Color(0.02f, 0.02f, 0.04f, 0.98f);
-        GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), _whiteTex);
+        GUI.DrawTexture(new Rect(0, 0, vw, vh), _whiteTex);
         GUI.color = Color.white;
 
         // Title
         GUIStyle titleStyle = new GUIStyle(GUI.skin.label) { fontSize = 38, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
         titleStyle.normal.textColor = new Color(1f, 0.85f, 0.2f);
-        GUI.Label(new Rect(0, 20, Screen.width, 50), "PICK THE ROUND", titleStyle);
+        GUI.Label(new Rect(0, 20, vw, 50), "PICK THE ROUND", titleStyle);
 
-        float cardW = 180f, cardH = 130f;
-        float gap = 24f;
-        float startY = 100f;
+        // Countdown label
+        if (isServer && _roundPickerTimer > 0f)
+        {
+            GUIStyle timerStyle = new GUIStyle(GUI.skin.label) { fontSize = 22, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+            timerStyle.normal.textColor = _roundPickerTimer <= 3f ? new Color(1f, 0.3f, 0.3f) : new Color(0.6f, 0.6f, 0.6f);
+            GUI.Label(new Rect(0, 62, vw, 30), $"Auto-selects in {Mathf.CeilToInt(_roundPickerTimer)}s", timerStyle);
+        }
+
+        float cardW = 280f, cardH = 200f;
+        float gap = 32f;
+        float startY = 110f;
 
         GUIStyle cardTitleStyle = new GUIStyle(GUI.skin.label) { fontSize = 18, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
         GUIStyle descStyle  = new GUIStyle(GUI.skin.label) { fontSize = 11, alignment = TextAnchor.MiddleCenter, wordWrap = true };
@@ -2394,7 +2443,7 @@ public class RhythmRoundManager : NetworkBehaviour
 
         int totalCards = 2 + allMapNames.Count;
         float totalW   = totalCards * cardW + (totalCards - 1) * gap;
-        float startX   = Screen.width / 2f - totalW / 2f;
+        float startX   = vw / 2f - totalW / 2f;
 
         // SLOW ROUND CARD (dimmed if already used)
         bool slowUsed = _usedRoundTypes.Contains(RoundType.SlowRhythm);
@@ -2431,6 +2480,8 @@ public class RhythmRoundManager : NetworkBehaviour
                 DrawModeCard(customX, startY, cardW, cardH, mapName.ToUpper(), "Custom map", mapColor,
                     () => { if (!mapUsed && isServer) SelectRoundType(RoundType.CustomTrack, mapName); }, cardTitleStyle, descStyle);
         }
+
+        MobileGUI.End(guiPrev);
     }
 
     private void DrawModeCard(float x, float y, float w, float h, string title, string desc, Color color, System.Action onClick, GUIStyle titleStyle, GUIStyle descStyle)
@@ -2505,6 +2556,10 @@ public class RhythmRoundManager : NetworkBehaviour
 
    private void OnGUI()
     {
+        // VR: screen-space IMGUI splits across eyes under multi-pass. Hidden until
+        // the world-space VR HUD is built (Step 3).
+        if (VRCameraDriver.VRActive) return;
+
         if (TiebreakerManager.Instance != null && TiebreakerManager.Instance.IsTiebreakerActive) return;
 
         // --- SHOP PHASE OVERLAY ---
@@ -2922,7 +2977,8 @@ public class RhythmRoundManager : NetworkBehaviour
         NetworkServer.Spawn(_activeBot);
         var botPc = _activeBot.GetComponent<PlayerController>();
         botPc.SetReady(true);
-        botPc.DesiredDistance = botStandDistance; // force the standing gap regardless of prefab value
+        // Force at least 6m so the bot never crowds the player (overrides any stale Inspector value).
+        botPc.DesiredDistance = Mathf.Max(botStandDistance, 6f);
         _activeBotPrefab = desired;
 
         // Give a freshly-spawned bot the starter deck so it can fight (e.g. after a mid-match swap).

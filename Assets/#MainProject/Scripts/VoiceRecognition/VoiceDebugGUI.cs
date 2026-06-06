@@ -102,7 +102,9 @@ public class VoiceDebugGUI : MonoBehaviour
 
     void Update()
     {
+#if ENABLE_LEGACY_INPUT_MANAGER
         if (Input.GetKeyDown(ToggleKey)) ShowDebug = !ShowDebug;
+#endif
     }
 
     void OnGUI()

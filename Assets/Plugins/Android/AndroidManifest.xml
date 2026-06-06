@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Quest 3 VR requirements -->
+    <uses-feature android:name="android.hardware.vr.headtracking" android:required="true" android:version="1" />
+
+    <application android:icon="@mipmap/app_icon"
+                 android:label="@string/app_name"
+                 android:allowBackup="true">
+
+        <activity android:name="com.unity3d.player.UnityPlayerActivity"
+                  android:theme="@style/UnityThemeSelector"
+                  android:screenOrientation="landscape"
+                  android:launchMode="singleTask"
+                  android:configChanges="mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|orientation|screenLayout|uiMode|screenSize|smallestScreenSize|fontScale|layoutDirection|density"
+                  android:hardwareAccelerated="false"
+                  android:exported="true">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <!-- Quest VR category — without this the app launches in 2D panel mode -->
+                <category android:name="com.oculus.intent.category.VR" />
+            </intent-filter>
+
+            <meta-data android:name="unityplayer.UnityActivity" android:value="true" />
+            <!-- Tell Quest which devices are supported -->
+            <meta-data android:name="com.oculus.supportedDevices" android:value="quest|quest2|questpro|quest3" />
+            <!-- Required: marks this as a VR-only app, not a 2D panel app -->
+            <meta-data android:name="com.samsung.android.vr.application.mode" android:value="vr_only" />
+        </activity>
+    </application>
+</manifest>

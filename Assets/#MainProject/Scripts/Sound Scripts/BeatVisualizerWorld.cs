@@ -20,15 +20,25 @@ public class BeatVisualizerWorld : MonoBehaviour
     public BeatMap beatMap;
 
     [Header("Bar Layout")]
-    [Range(8, 64)] public int barCount = 24;
+    [Range(8, 256)] public int barCount = 20;
     [Tooltip("Distance between bar centers along the row (Z axis).")]
-    public float barSpacing = 0.5f;
+    public float barSpacing = 0.1f;
     [Tooltip("Base width and depth of each bar cube. Height is driven by audio.")]
-    public Vector2 barFootprint = new Vector2(0.22f, 0.22f);
+    public Vector2 barFootprint = new Vector2(0.05f, 0.05f);
     [Tooltip("Maximum height a bar can reach.")]
-    public float maxBarHeight = 4f;
+    public float maxBarHeight = 0.8f;
     [Tooltip("Minimum height so bars are always visible.")]
-    public float minBarHeight = 0.05f;
+    public float minBarHeight = 0.04f;
+
+    [Header("Waveform Look (Picture-1 style)")]
+    [Tooltip("ON: bars grow symmetrically up AND down from a center line — the classic " +
+             "soundwave strip. OFF: bars rise from the floor like an equalizer.")]
+    public bool waveformMode = true;
+    [Tooltip("Height of the waveform's horizontal center line (waveform mode only).")]
+    public float waveCenterY = 1.5f;
+    [Tooltip("Blends each bar toward its neighbours so the wave flows smoothly " +
+             "instead of jumping. 0 = raw spectrum, 1 = very smooth.")]
+    [Range(0f, 1f)] public float neighbourSmoothing = 0.55f;
 
     [Header("Positioning")]
     [Tooltip("X distance from this GameObject's origin to each bar row.")]
@@ -63,6 +73,7 @@ public class BeatVisualizerWorld : MonoBehaviour
     // ── Runtime ───────────────────────────────────────────────────────────
     private float[]   _spectrum;
     private float[]   _bars;
+    private float[]   _barsScratch; // neighbour-smoothing work buffer
 
     private Transform[]  _leftT,  _rightT;
     private Renderer[]   _leftR,  _rightR;
@@ -79,9 +90,10 @@ public class BeatVisualizerWorld : MonoBehaviour
     // ─────────────────────────────────────────────────────────────────────
     void Start()
     {
-        _spectrum = new float[512];
-        _bars     = new float[barCount];
-        _mpb      = new MaterialPropertyBlock();
+        _spectrum    = new float[512];
+        _bars        = new float[barCount];
+        _barsScratch = new float[barCount];
+        _mpb         = new MaterialPropertyBlock();
 
         if (targetAudio == null)
             targetAudio = GetComponent<AudioSource>();
@@ -155,6 +167,7 @@ public class BeatVisualizerWorld : MonoBehaviour
         targetAudio.GetSpectrumData(_spectrum, 0, FFTWindow.BlackmanHarris);
 
         UpdateBars();
+        SmoothBarsSpatially();
         DetectAmbientBeat();
         TickBeatMapSpikes();
         ApplyToScene();
@@ -182,6 +195,23 @@ public class BeatVisualizerWorld : MonoBehaviour
             float target = Mathf.Clamp01(peak * amplitudeScale);
             float speed  = target > _bars[i] ? riseSpeed : fallSpeed;
             _bars[i]     = Mathf.Lerp(_bars[i], target, Time.deltaTime * speed);
+        }
+    }
+
+    // Blends each bar toward the average of its neighbours so the heights form a
+    // flowing wave envelope (picture-1 look) instead of jagged, independent spikes.
+    void SmoothBarsSpatially()
+    {
+        if (neighbourSmoothing <= 0f) return;
+
+        System.Array.Copy(_bars, _barsScratch, barCount);
+        for (int i = 0; i < barCount; i++)
+        {
+            float l = _barsScratch[Mathf.Max(0, i - 1)];
+            float c = _barsScratch[i];
+            float r = _barsScratch[Mathf.Min(barCount - 1, i + 1)];
+            float blurred = (l + c + r) / 3f;
+            _bars[i] = Mathf.Lerp(c, blurred, neighbourSmoothing);
         }
     }
 
@@ -231,8 +261,14 @@ public class BeatVisualizerWorld : MonoBehaviour
 
     void ApplyBar(Transform t, Renderer r, Vector3 basePos, float height, Color col, Color emission)
     {
-        // Bottom-anchor: cube pivot is center, so shift Y up by half height
-        t.localPosition = basePos + new Vector3(0f, height * 0.5f, 0f);
+        if (waveformMode)
+            // Center-anchor: cube center sits on the wave line, so the bar grows
+            // equally up AND down — the symmetric soundwave strip from picture 1.
+            t.localPosition = new Vector3(basePos.x, waveCenterY, basePos.z);
+        else
+            // Bottom-anchor: cube pivot is center, so shift Y up by half height.
+            t.localPosition = basePos + new Vector3(0f, height * 0.5f, 0f);
+
         t.localScale = new Vector3(barFootprint.x, height, barFootprint.y);
 
         // MaterialPropertyBlock avoids creating per-instance material copies

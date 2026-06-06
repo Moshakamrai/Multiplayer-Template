@@ -436,7 +436,10 @@ public class PlayerCombat : NetworkBehaviour
 
     private void CheckLocalParryTiming()
     {
-        if (vp == null || _vcm == null || RhythmRoundManager.Instance == null) return;
+        if (RhythmRoundManager.Instance == null) return;
+        // Flat builds need the mic (voice processor + command manager). VR uses trigger+motion,
+        // so it only needs those when NOT in VR.
+        if (!VRCameraDriver.VRActive && (vp == null || _vcm == null)) return;
 
         var   rmm          = RhythmRoundManager.Instance;
         float currentTime  = rmm.GetCurrentTrackTime();
@@ -505,12 +508,21 @@ public class PlayerCombat : NetworkBehaviour
         bool inShoutWindow = timeUntilImpact > 0f && timeUntilImpact <= effectiveWindow;
         if (!inShoutWindow) return;
 
-        // ── First spike only: once locked, ignore further volume until next beat cycle ─────
+        // ── First spike only: once locked, ignore further input until next beat cycle ──────
         if (_spikeLockedThisBeat) return;
 
-        float currentVol = vp.CurrentRawVolume;
-        float threshold  = _vcm.parryVolumeThreshold;
-        if (currentVol < threshold) return;
+        // INPUT SOURCE: in VR the spike fires on a TRIGGER press, with the hand's swing speed
+        // as its "volume" (power). On flat builds it fires on a loud-enough SHOUT, as before.
+        float currentVol;
+        if (VRCameraDriver.VRActive)
+        {
+            if (!VRHands.ConsumePunch(out currentVol)) return;
+        }
+        else
+        {
+            currentVol = vp.CurrentRawVolume;
+            if (currentVol < _vcm.parryVolumeThreshold) return;
+        }
 
         // ── Register the timing spike ─────────────────────────────────────────────────────
         _spikeLockedThisBeat = true;

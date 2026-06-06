@@ -306,6 +306,7 @@ public class TutorialManager : MonoBehaviour
     {
         bool introActive = (CurrentStage == Stage.TimingOnly      && _s2_introActive)
                         || (CurrentStage == Stage.CommandsTiming  && _s3_introActive);
+#if ENABLE_LEGACY_INPUT_MANAGER
         if (Input.GetKeyDown(KeyCode.Space))
         {
             if (introActive)                                                          AdvanceIntro();
@@ -316,6 +317,7 @@ public class TutorialManager : MonoBehaviour
         }
         if (Input.GetKeyDown(KeyCode.P))
             SkipCurrentStage();
+#endif
 
         switch (CurrentStage)
         {

@@ -18,7 +18,7 @@ public class PlayerController : NetworkBehaviour
     public float dashCooldown = 0.25f;
 
     [Header("Equidistance Settings")]
-    public float DesiredDistance = 2.5f;
+    public float DesiredDistance = 5.0f;
     public float SpacingSpeed = 2.0f;
     [SyncVar] private bool _isSpacingActive = false;
 
@@ -199,8 +199,8 @@ public class PlayerController : NetworkBehaviour
             UpdateLookRotationCmd(_rotationYLocal);
         }
 
-        // Only rotate the camera holder if it is actually assigned in the inspector (Reference Fix)
-        if (cameraPosition != null)
+        // In VR, VRCameraDriver overwrites this in LateUpdate — skip to avoid fighting it.
+        if (cameraPosition != null && !VRCameraDriver.VRActive)
         {
             cameraPosition.localRotation = Quaternion.Euler(_rotationYLocal, 0, 0);
         }
@@ -224,14 +224,31 @@ public class PlayerController : NetworkBehaviour
         bool isBot = GetComponent<BotController>() != null;
         if (isBot && opponent != null && !_isDashing && !_combat.isAttacking && !_combat.IsHurting)
         {
-            float currentDist = Vector3.Distance(transform.position, opponent.transform.position);
-            if (Mathf.Abs(currentDist - DesiredDistance) > 0.2f)
+            if (VRCameraDriver.VRActive)
             {
-                Vector3 dirToOpponent = opponent.transform.position - transform.position;
-                dirToOpponent.y = 0;
-                dirToOpponent.Normalize();
-                float moveDir = (currentDist > DesiredDistance) ? 1f : -1f;
-                autoSpacingVelocity = dirToOpponent * moveDir * SpacingSpeed;
+                // VR mode: bot always mirrors player X and stays DesiredDistance away on Z.
+                // Snap immediately (no drift) so the player always faces the bot head-on.
+                Vector3 botTarget = new Vector3(
+                    opponent.transform.position.x,
+                    transform.position.y,
+                    opponent.transform.position.z + DesiredDistance
+                );
+                Vector3 toTarget = botTarget - transform.position;
+                toTarget.y = 0;
+                if (toTarget.magnitude > 0.05f)
+                    autoSpacingVelocity = toTarget.normalized * SpacingSpeed * 2f;
+            }
+            else
+            {
+                float currentDist = Vector3.Distance(transform.position, opponent.transform.position);
+                if (Mathf.Abs(currentDist - DesiredDistance) > 0.2f)
+                {
+                    Vector3 dirToOpponent = opponent.transform.position - transform.position;
+                    dirToOpponent.y = 0;
+                    dirToOpponent.Normalize();
+                    float moveDir = (currentDist > DesiredDistance) ? 1f : -1f;
+                    autoSpacingVelocity = dirToOpponent * moveDir * SpacingSpeed;
+                }
             }
         }
 
@@ -250,7 +267,13 @@ public class PlayerController : NetworkBehaviour
         _velocityY += Physics.gravity.y * Time.deltaTime;
 
         // Only get human input if this is the local player
-        Vector3 inputMovement = isLocalPlayer ? (GameManager.Move.y * transform.forward + GameManager.Move.x * transform.right) : Vector3.zero;
+        Vector3 inputMovement;
+        if (isLocalPlayer && VRCameraDriver.VRActive)
+            // VR: strafe only (left/right on transform.right). No forward/back so the
+            // player can't move on Z. Gravity (handled below via _velocityY) keeps Y grounded.
+            inputMovement = GameManager.Move.x * transform.right;
+        else
+            inputMovement = isLocalPlayer ? (GameManager.Move.y * transform.forward + GameManager.Move.x * transform.right) : Vector3.zero;
 
         Vector3 targetVelocity = inputMovement * GameManager.Speed;
         targetVelocity += autoSpacingVelocity;

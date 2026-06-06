@@ -1,9 +1,12 @@
 using System.Linq;
 using Mirror;
+#if !UNITY_ANDROID
 using Steamworks;
+#endif
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UIElements;
+using UnityEngine.XR;
 
 namespace UI
 {
@@ -56,12 +59,18 @@ namespace UI
 
             // Auto-detect Steam — override the Inspector toggle so it's never
             // wrong when the game is launched without Steam running.
+#if !UNITY_ANDROID
             UseSteam = UseSteam && SteamManager.Initialized;
+#else
+            UseSteam = false;
+#endif
             ApplySteamStatus();
 
+#if !UNITY_ANDROID
             if (UseSteam && steamLobby != null)
                 _hostButton.clicked += steamLobby.HostSteamLobby;
             else
+#endif
                 _hostButton.clicked += HostGame;
 
             _joinButton.clicked += JoinGame;
@@ -78,14 +87,43 @@ namespace UI
             _addressTextField.RegisterValueChangedCallback(AddressChanged);
         }
 
+        // ── VR quick-start ────────────────────────────────────────────────
+        // No mouse in VR yet, so pressing A / trigger on the right Touch
+        // controller starts the game (solo / LAN host). This is a stopgap
+        // until the world-space laser-pointer UI is built.
+        private bool _vrPrevPressed;
+
+        private void Update()
+        {
+            // Detect the headset directly — the Menu scene has no player object,
+            // so we can't rely on VRCameraDriver here. Poll the right controller;
+            // on a flat (non-XR) build these devices are simply invalid and nothing fires.
+            InputDevice rh = InputDevices.GetDeviceAtXRNode(XRNode.RightHand);
+            bool pressed = false;
+            if (rh.isValid)
+            {
+                rh.TryGetFeatureValue(CommonUsages.primaryButton, out bool aButton);
+                rh.TryGetFeatureValue(CommonUsages.triggerButton, out bool trigger);
+                pressed = aButton || trigger;
+            }
+
+            // Rising edge only — one press = one start.
+            if (pressed && !_vrPrevPressed)
+                HostGame();
+            _vrPrevPressed = pressed;
+        }
+
         private void OnDestroy()
         {
             try
             {
                 if (_hostButton != null)
                 {
+#if !UNITY_ANDROID
                     if (UseSteam && steamLobby != null) _hostButton.clicked -= steamLobby.HostSteamLobby;
-                    else _hostButton.clicked -= HostGame;
+                    else
+#endif
+                        _hostButton.clicked -= HostGame;
                 }
 
                 if (_joinButton != null)
@@ -115,7 +153,9 @@ namespace UI
         // if it's on the Menu UI object it will be destroyed on scene load.
         private void SwapToOfflineTransport()
         {
+#if !UNITY_ANDROID
             if (SteamManager.Initialized) return;
+#endif
 
             GameObject nmGO = NetworkManager.singleton.gameObject;
 
@@ -171,19 +211,25 @@ namespace UI
         {
             if (_steamStatusLabel != null)
             {
+#if !UNITY_ANDROID
                 if (SteamManager.Initialized)
                 {
                     _steamStatusLabel.text = "● Steam Online";
                     _steamStatusLabel.style.color = new StyleColor(new Color(0.2f, 0.8f, 0.3f));
                 }
                 else
+#endif
                 {
                     _steamStatusLabel.text = "● Steam Offline — Solo / LAN only";
                     _steamStatusLabel.style.color = new StyleColor(new Color(1f, 0.5f, 0.2f));
                 }
             }
 
+#if !UNITY_ANDROID
             if (!SteamManager.Initialized && _joinButton != null)
+#else
+            if (_joinButton != null)
+#endif
                 _joinButton.text = "Join (LAN)";
         }
 

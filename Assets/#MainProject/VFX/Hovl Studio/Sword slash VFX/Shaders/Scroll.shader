@@ -117,7 +117,12 @@ Shader "Hovl/Particles/Scroll"
 				{
 					float lp = 1;
 					#ifdef SOFTPARTICLES_ON
-						float sceneZ = LinearEyeDepth (SAMPLE_DEPTH_TEXTURE_PROJ(_CameraDepthTexture, UNITY_PROJ_COORD(i.projPos)));
+						float sceneZ;
+						#if defined(STEREO_MULTIVIEW_ON) || defined(UNITY_SINGLE_PASS_STEREO)
+							sceneZ = i.projPos.z + 100000.0; // VR single-pass: skip depth sample, no soft fade
+						#else
+							sceneZ = LinearEyeDepth (SAMPLE_DEPTH_TEXTURE_PROJ(_CameraDepthTexture, UNITY_PROJ_COORD(i.projPos)));
+						#endif
 						float partZ = i.projPos.z;
 						float fade = saturate (_InvFade * (sceneZ-partZ));
 						lp *= lerp(1, fade, _Usedepth);

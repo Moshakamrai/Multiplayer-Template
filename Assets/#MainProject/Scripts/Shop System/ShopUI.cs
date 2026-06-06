@@ -29,11 +29,20 @@ public class ShopUI : MonoBehaviour
     private string _tooltipTitle = "";
     private bool _hasTooltip = false;
 
+    // Virtual screen dims — equal to the real screen on desktop, or a fixed
+    // 1920x1080 reference on Android (scaled up via MobileGUI) so buttons stay
+    // a tappable size on high-DPI phones. Set at the top of OnGUI.
+    private float _vw, _vh;
+    private Matrix4x4 _guiPrev;
+
     private void Awake() { if (Instance == null) Instance = this; }
 
     private void OnGUI()
     {
         if (ShopPhaseManager.Instance == null || !ShopPhaseManager.Instance.isShopPhase) return;
+
+        // Scale the whole shop for phones (no-op on desktop).
+        _guiPrev = MobileGUI.Begin(out _vw, out _vh);
 
         // Reset hover state each frame
         _hasTooltip = false;
@@ -48,20 +57,20 @@ public class ShopUI : MonoBehaviour
 
         // Dark neon background
         GUI.color = new Color(0.01f, 0.02f, 0.06f, 1f);
-        GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), _whiteTex);
+        GUI.DrawTexture(new Rect(0, 0, _vw, _vh), _whiteTex);
         GUI.color = Color.white;
 
         // Calculate layout
-        float leftW = Screen.width * LEFT_SIDEBAR_W;
-        float shopW = Screen.width * SHOP_W;
-        float rightW = Screen.width * RIGHT_SIDEBAR_W;
+        float leftW = _vw * LEFT_SIDEBAR_W;
+        float shopW = _vw * SHOP_W;
+        float rightW = _vw * RIGHT_SIDEBAR_W;
 
         float leftX = MARGIN;
         float shopX = leftX + leftW + MARGIN;
         float rightX = shopX + shopW + MARGIN;
 
         float contentY = TOP_H + MARGIN;
-        float contentH = Screen.height - contentY - 90f;
+        float contentH = _vh - contentY - 90f;
 
         // ── HEADER ──
         DrawHeader(spm, localInv);
@@ -77,21 +86,23 @@ public class ShopUI : MonoBehaviour
         // ── HOVER TOOLTIP (drawn last, on top) ──
         if (_hasTooltip)
             DrawTooltip();
+
+        MobileGUI.End(_guiPrev);
     }
 
     private void DrawHeader(ShopPhaseManager spm, PlayerInventory inv)
     {
         // Title with neon glow effect
         GUI.color = new Color(0f, 1f, 0.8f, 0.15f);
-        GUI.DrawTexture(new Rect(0, 5, Screen.width, 55), _whiteTex);
+        GUI.DrawTexture(new Rect(0, 5, _vw, 55), _whiteTex);
         GUI.color = Color.white;
 
-        CyberpunkGUIUtils.DrawGlowText(new Rect(0, 8, Screen.width, 45), "⚡ POST-ROUND SHOP ⚡",
+        CyberpunkGUIUtils.DrawGlowText(new Rect(0, 8, _vw, 45), "⚡ POST-ROUND SHOP ⚡",
             CyberpunkGUIUtils.NEON_CYAN, _titleStyle, CyberpunkGUIUtils.NEON_CYAN);
 
         // Top bar with info
         float barY = 60f;
-        float thirdW = Screen.width / 3f;
+        float thirdW = _vw / 3f;
 
         // Timer
         Color timerColor = spm.shopTimeRemaining <= 15f ? new Color(1f, 0.2f, 0.2f) : CyberpunkGUIUtils.NEON_CYAN;
@@ -651,8 +662,8 @@ public class ShopUI : MonoBehaviour
 
         float tooltipX = _tooltipPos.x + 22f;
         float tooltipY = _tooltipPos.y + 22f;
-        if (tooltipX + tooltipW > Screen.width)  tooltipX = Screen.width  - tooltipW - 10f;
-        if (tooltipY + tooltipH > Screen.height) tooltipY = Screen.height - tooltipH - 10f;
+        if (tooltipX + tooltipW > _vw)  tooltipX = _vw  - tooltipW - 10f;
+        if (tooltipY + tooltipH > _vh) tooltipY = _vh - tooltipH - 10f;
 
         // ── Background ────────────────────────────────────────────────────────
         GUI.color = new Color(0.03f, 0.04f, 0.11f, 0.97f);
@@ -937,8 +948,8 @@ public class ShopUI : MonoBehaviour
     {
         float btnW = 280f;
         float btnH = 56f;
-        float btnX = Screen.width / 2f - btnW / 2f;
-        float btnY = Screen.height - 70f;
+        float btnX = _vw / 2f - btnW / 2f;
+        float btnY = _vh - 70f;
 
         GUI.color = new Color(0f, 1f, 0.6f, 0.2f);
         GUI.DrawTexture(new Rect(btnX - 2, btnY - 2, btnW + 4, btnH + 4), _whiteTex);

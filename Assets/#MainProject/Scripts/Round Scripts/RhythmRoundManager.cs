@@ -804,8 +804,18 @@ public class RhythmRoundManager : NetworkBehaviour
         }
 
         ResetPlayersForNextRound();
-        // Post-round TFT shop with credits
-        ShopPhaseManager.Instance?.StartShopPhase(currentRoundNumber);
+
+        if (VRCameraDriver.VRActive)
+        {
+            // VR: the shop is screen-space IMGUI (can't render in stereo), so skip it and go
+            // straight to the next rhythm round picker (press B or wait 20s to start).
+            ShowRoundPicker();
+        }
+        else
+        {
+            // Post-round TFT shop with credits
+            ShopPhaseManager.Instance?.StartShopPhase(currentRoundNumber);
+        }
     }
 
     [Server]

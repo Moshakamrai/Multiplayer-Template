@@ -757,6 +757,11 @@ public class PlayerCombat : NetworkBehaviour
         yield return new WaitForSeconds(0.1f);
     }
 
+    // Latest timing feedback for the local player — read by VRWorldHud to show it in world space.
+    public static string VRTimingText = "";
+    public static Color  VRTimingColor = Color.white;
+    public static float  VRTimingTime = -999f;
+
     [TargetRpc]
     public void TargetShowTimingFeedback(string rating)
     {
@@ -766,6 +771,11 @@ public class PlayerCombat : NetworkBehaviour
         if (rating == "EXCELLENT") { _timingColor = Color.cyan;  CommentaryManager.Instance?.Trigger(CommentaryEvent.Excellent); }
         else if (rating == "GOOD") { _timingColor = Color.green; CommentaryManager.Instance?.Trigger(CommentaryEvent.Good); }
         else                       { _timingColor = Color.red;   CommentaryManager.Instance?.Trigger(CommentaryEvent.BadTiming); }
+
+        // Mirror to the VR world-space HUD.
+        VRTimingText = rating;
+        VRTimingColor = _timingColor;
+        VRTimingTime = Time.time;
     }
     public void QueueRhythmMove(string attackTrigger, Vector3 dashDir)
     {

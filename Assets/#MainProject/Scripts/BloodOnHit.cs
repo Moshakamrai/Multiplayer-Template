@@ -12,7 +12,7 @@ public class BloodOnHit : MonoBehaviour
 
     [Header("Spawn Settings")]
     public float HeightOffset = 1.4f;
-    public float EffectScale = 2.0f;
+    public float EffectScale = 3.5f;
 
     PlayerCombat _combat;
     float _lastPercentage;

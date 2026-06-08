@@ -276,6 +276,27 @@ public class GameManager : NetworkManager
         }
     }
 
+    // Human players always spawn at RhythmRoundManager.playerStartPosition (ignores Round Robin).
+    // The bot is spawned separately by RhythmRoundManager at its botStartPosition. We read the
+    // start point at runtime (not a serialized ref) because this manager is DontDestroyOnLoad and
+    // the start positions live in the Lobby scene.
+    public override void OnServerAddPlayer(NetworkConnectionToClient conn)
+    {
+        Transform start = RhythmRoundManager.Instance != null
+            ? RhythmRoundManager.Instance.playerStartPosition
+            : null;
+
+        if (start != null)
+        {
+            GameObject player = Instantiate(playerPrefab, start.position, start.rotation);
+            NetworkServer.AddPlayerForConnection(conn, player);
+        }
+        else
+        {
+            base.OnServerAddPlayer(conn); // fallback: default Round Robin
+        }
+    }
+
    public override void Awake()
 {
     // 1. Singleton Check: Essential because you have this in every scene!

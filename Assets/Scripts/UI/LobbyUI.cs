@@ -44,8 +44,9 @@ namespace UI
             // Display the correct message.
             _displayMessageLabel.text = GameManager.DisplayMessage;
             
-            // Determine if ready to start.
-            _readyStatusLabel.text = ReadyToStart();
+            // Determine if ready to start. In the arena (RhythmRoundManager present) we
+            // hide this — the bottom-center spot now shows the player's health bar instead.
+            _readyStatusLabel.text = RhythmRoundManager.Instance != null ? "" : ReadyToStart();
         }
 
         /// <summary>

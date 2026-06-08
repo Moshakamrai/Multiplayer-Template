@@ -762,6 +762,8 @@ public class PlayerCombat : NetworkBehaviour
     public static Color  VRTimingColor = Color.white;
     public static float  VRTimingTime = -999f;
 
+    private PowerMeterReactor _powerMeter;
+
     [TargetRpc]
     public void TargetShowTimingFeedback(string rating)
     {
@@ -776,6 +778,10 @@ public class PlayerCombat : NetworkBehaviour
         VRTimingText = rating;
         VRTimingColor = _timingColor;
         VRTimingTime = Time.time;
+
+        // Drive the cyberpunk power cone from the real on-beat shout grade.
+        if (_powerMeter == null) _powerMeter = GetComponentInChildren<PowerMeterReactor>(true);
+        if (_powerMeter != null) _powerMeter.RegisterGrade(rating);
     }
     public void QueueRhythmMove(string attackTrigger, Vector3 dashDir)
     {
@@ -977,7 +983,7 @@ public class PlayerCombat : NetworkBehaviour
         {
             // Camera shake on hit with damage scaling
             float shakeDur = damage > 15 ? 0.4f : damage > 8 ? 0.3f : 0.2f;
-            float shakeMag = damage > 15 ? 1.5f : damage > 8 ? 1.0f : 0.6f;
+            float shakeMag = damage > 15 ? 0.7f : damage > 8 ? 0.45f : 0.28f;
             CameraShake.Instance?.Shake(shakeDur, shakeMag);
 
             _hurtFlashFade = Mathf.Max(_hurtFlashFade, Mathf.Min(1f, damage / 20f));
@@ -1213,7 +1219,8 @@ public class PlayerCombat : NetworkBehaviour
                 CyberpunkGUIUtils.DrawGlowText(new Rect(posX, posY, barWidth, barHeight), $"{oppName}: {oppCombat.CurrentPercentage:F0}%",
                     CyberpunkGUIUtils.NEON_CYAN, nameStyle, CyberpunkGUIUtils.NEON_CYAN);
 
-                // --- OPPONENT CARDS PANEL (Top Left) ---
+                // --- OPPONENT CARDS PANEL (Top Left) --- (hidden for cleaner HUD)
+#if false
                 if (!string.IsNullOrEmpty(oppCombat.availableCardsString))
                 {
                     var oppCards = new List<string>(oppCombat.availableCardsString.Split('|'));
@@ -1270,7 +1277,35 @@ public class PlayerCombat : NetworkBehaviour
                     }
                     GUI.color = Color.white;
                 }
+#endif
             }
+        }
+
+        // --- LOCAL PLAYER HEALTH BAR (Bottom Center) — same style as the opponent bar ---
+        {
+            float barWidth  = 400f;
+            float barHeight = 60f;
+            float posX = Screen.width / 2f - barWidth / 2f;
+            float posY = Screen.height - barHeight - 30f;
+
+            GUI.color = new Color(0.1f, 0.1f, 0.1f, 1f);
+            GUI.DrawTexture(new Rect(posX, posY, barWidth, barHeight), _whiteTexture);
+
+            float pctPercent = Mathf.Clamp01(CurrentPercentage / 100f);
+            GUI.color = GetPercentageColor(CurrentPercentage);
+            GUI.DrawTexture(new Rect(posX + 5, posY + 5, (barWidth - 10) * pctPercent, barHeight - 10), _whiteTexture);
+
+            GUI.color = Color.white;
+            GUIStyle myNameStyle = new GUIStyle(GUI.skin.label)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                fontStyle = FontStyle.Bold,
+                fontSize  = 24
+            };
+            string myName = GetComponent<PlayerController>().PlayerName;
+            if (string.IsNullOrEmpty(myName)) myName = "YOU";
+            CyberpunkGUIUtils.DrawGlowText(new Rect(posX, posY, barWidth, barHeight), $"{myName}: {CurrentPercentage:F0}%",
+                CyberpunkGUIUtils.NEON_CYAN, myNameStyle, CyberpunkGUIUtils.NEON_CYAN);
         }
 
         // --- 2. MIC THRESHOLD (Right Bottom Corner) ---

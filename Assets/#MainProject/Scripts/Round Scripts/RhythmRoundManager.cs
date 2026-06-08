@@ -98,8 +98,16 @@ public class RhythmRoundManager : NetworkBehaviour
     private bool _isEndingRound = false;
     private bool _pendingCustomAudioPlay = false;
 
-    private readonly Vector3 _spawnP1 = new Vector3(0f, 0f, -2.5f);
-    private Vector3 _spawnP2 => new Vector3(0f, botSpawnY, 2.5f);
+    [Header("Fixed Spawn Points (assign the scene's Start Position objects)")]
+    [Tooltip("The human player's fixed home — assign 'Start Position'.")]
+    public Transform playerStartPosition;
+    [Tooltip("The bot's fixed home — assign 'Start Position (24)'.")]
+    public Transform botStartPosition;
+
+    // Human + bot home spots. Use the assigned Start Position Transforms; fall back to the old
+    // fixed coords if unassigned. Drive round setup, the bot spawn, AND the LateUpdate home-lock.
+    private Vector3 _spawnP1 => playerStartPosition != null ? playerStartPosition.position : new Vector3(0f, 0f, -2.5f);
+    private Vector3 _spawnP2 => botStartPosition    != null ? botStartPosition.position    : new Vector3(0f, botSpawnY, 2.5f);
 
     [Header("Shop Phase")]
     [SyncVar] public bool isShopPhase = false;
@@ -107,6 +115,21 @@ public class RhythmRoundManager : NetworkBehaviour
 
     [Header("Round Picker")]
     [SyncVar] public bool isRoundPickerActive = false;
+
+    [Header("Round Picker Art")]
+    [Tooltip("Artwork for the music buttons, in order: [0]=Slow, [1]=Fast, [2+]=custom maps. " +
+             "Drag your Level Background art here.")]
+    public Texture2D[] buttonArtworks;
+    [Tooltip("Cyberpunk display names shown under each button's art, matched by the same index.")]
+    public string[] buttonNames = {
+        "NEON PULSE", "CHROME RIOT", "SYNTH BREAKER", "VOLT SURGE",
+        "GHOST PROTOCOL", "DATA STORM", "NIGHT DRIVE", "CYBER STRIKE"
+    };
+
+    private Texture2D ArtForButton(int i)
+        => (buttonArtworks != null && i >= 0 && i < buttonArtworks.Length) ? buttonArtworks[i] : null;
+    private string NameForButton(int i)
+        => (buttonNames != null && buttonNames.Length > 0) ? buttonNames[i % buttonNames.Length] : "";
 
     private readonly string[] _shopCardPool = { "Jab", "Cross", "Hook", "Block", "Left", "Right" };
     private List<string> _p1ShopSelection = new List<string>();
@@ -413,7 +436,9 @@ public class RhythmRoundManager : NetworkBehaviour
             case RoundType.FastCombo: StartFastRound(); break;
             case RoundType.CustomTrack:
                 if (!string.IsNullOrEmpty(customMapName))
-                    LoadAndPlayMap(customMapName, null);
+                    // Pass the bundled clip when we have one (builds); falls back to the saved
+                    // file path only if no clip is assigned (editor-only).
+                    LoadAndPlayMap(customMapName, GetClipForMap(customMapName));
                 else
                     StartSlowRound();
                 break;
@@ -521,8 +546,7 @@ public class RhythmRoundManager : NetworkBehaviour
         if (isRoundActive) return;
         currentType = RoundType.CustomTrack;
 
-        string saveKey = "CustomMap_" + BeatAnalyzer.Instance.audioSource.clip.name;
-        if (!PlayerPrefs.HasKey(saveKey)) return;
+        if (!MapExists(BeatAnalyzer.Instance.audioSource.clip.name)) return;
 
         // Uses our new helper to build the timeline
         LoadCustomMapData();
@@ -820,6 +844,7 @@ public class RhythmRoundManager : NetworkBehaviour
 
             Vector3 spawnPos = (idx == 0) ? _spawnP1 : _spawnP2;
             player.transform.position = spawnPos;
+            player.GetComponent<PlayerController>().SetHome(spawnPos); // anchor: ease back here if it drifts
 
             PlayerController opponent = player.GetComponent<PlayerController>().GetOpponent();
             if (opponent != null)
@@ -838,6 +863,7 @@ public class RhythmRoundManager : NetworkBehaviour
             PlayerCombat botCombat = _activeBot.GetComponent<PlayerCombat>();
             if (botCombat != null) botCombat.ResetRoundStats();
             _activeBot.transform.position = _spawnP2;
+            _activeBot.GetComponent<PlayerController>().SetHome(_spawnP2); // bot anchor → fixed, equal distance
 
             PlayerController botController = _activeBot.GetComponent<PlayerController>();
             PlayerController human = null;
@@ -964,15 +990,40 @@ public class RhythmRoundManager : NetworkBehaviour
         }
     }
 
+    // ── Custom-map data sources ────────────────────────────────────────────────────────
+    // Beat data lives in PlayerPrefs while you map in the editor, but PlayerPrefs is EMPTY in
+    // a fresh build. So we fall back to baked TextAssets under Resources/BeatMaps/<name>.txt,
+    // which DO ship with builds. Use the editor menu "Tools/Beat Maps/Export..." to bake them.
+    private string GetMapTapData(string mapName)
+    {
+        if (string.IsNullOrEmpty(mapName)) return "";
+        string key = "CustomMap_" + mapName;
+        if (PlayerPrefs.HasKey(key)) return PlayerPrefs.GetString(key);     // live editor mapping
+        var baked = Resources.Load<TextAsset>("BeatMaps/" + mapName);       // shipped in builds
+        return baked != null ? baked.text : "";
+    }
+
+    private bool MapExists(string mapName) => !string.IsNullOrEmpty(GetMapTapData(mapName));
+
+    // The bundled AudioClip for a map (from the inspector availableTracks or runtime-loaded).
+    private AudioClip GetClipForMap(string mapName)
+    {
+        if (availableTracks != null)
+            foreach (var t in availableTracks)
+                if (t != null && t.name == mapName) return t;
+        if (_runtimeClips.TryGetValue(mapName, out var c)) return c;
+        return null;
+    }
+
     [Server]
     private void LoadCustomMapData()
     {
-        string saveKey = "CustomMap_" + BeatAnalyzer.Instance.audioSource.clip.name;
-        if (!PlayerPrefs.HasKey(saveKey)) return;
+        string mapName = BeatAnalyzer.Instance.audioSource.clip.name;
+        string rawData = GetMapTapData(mapName);
+        if (string.IsNullOrEmpty(rawData)) return;
 
         _upcomingImpacts.Clear();
         _clusterSizes.Clear();
-        string rawData = PlayerPrefs.GetString(saveKey);
         string[] rawTimes = rawData.Split('|');
 
         List<float> loadedTaps = new List<float>();
@@ -2359,6 +2410,9 @@ public class RhythmRoundManager : NetworkBehaviour
 
     void OnRoundStateChanged(bool oldVal, bool newVal) { if (BeatAnalyzer.Instance != null && BeatAnalyzer.Instance.audioSource != null && currentType != RoundType.CustomTrack) { if (newVal) BeatAnalyzer.Instance.audioSource.Play(); else BeatAnalyzer.Instance.audioSource.Stop(); } }
 
+    // Smooth per-card hover amount (0..1), keyed by card name. Eased each Repaint.
+    private readonly Dictionary<string, float> _cardHover = new Dictionary<string, float>();
+
     private void DrawRoundPicker()
     {
         if (_whiteTex == null) { _whiteTex = new Texture2D(1, 1); _whiteTex.SetPixel(0, 0, Color.white); _whiteTex.Apply(); }
@@ -2373,118 +2427,149 @@ public class RhythmRoundManager : NetworkBehaviour
         titleStyle.normal.textColor = new Color(1f, 0.85f, 0.2f);
         GUI.Label(new Rect(0, 20, Screen.width, 50), "PICK THE ROUND", titleStyle);
 
-        float cardW = 180f, cardH = 130f;
-        float gap = 24f;
-        float startY = 100f;
+        // Bigger cards, laid out in a centered grid (max 3 columns, wrapping to new rows).
+        float cardW = 300f, cardH = 215f;
+        float gap = 34f, gapY = 34f;
+        float startY = 110f;
+        const int MAX_COLS = 3;
 
-        GUIStyle cardTitleStyle = new GUIStyle(GUI.skin.label) { fontSize = 18, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
-        GUIStyle descStyle  = new GUIStyle(GUI.skin.label) { fontSize = 11, alignment = TextAnchor.MiddleCenter, wordWrap = true };
+        GUIStyle cardNameStyle = new GUIStyle(GUI.skin.label) { fontSize = 24, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
 
-        // Collect custom maps
+        // Collect custom maps. Sources: PlayerPrefs registry (live editor maps) + every
+        // inspector AudioClip whose beat-data exists (PlayerPrefs OR baked Resources = builds).
         var allMapNames = new List<string>();
         string registry = PlayerPrefs.GetString("CustomMapRegistry", "");
         if (!string.IsNullOrEmpty(registry))
             foreach (string n in registry.Split('|'))
-                if (!string.IsNullOrEmpty(n) && PlayerPrefs.HasKey("CustomMap_" + n) && !allMapNames.Contains(n))
+                if (!string.IsNullOrEmpty(n) && MapExists(n) && !allMapNames.Contains(n))
                     allMapNames.Add(n);
         if (availableTracks != null)
             foreach (AudioClip t in availableTracks)
-                if (t != null && PlayerPrefs.HasKey("CustomMap_" + t.name) && !allMapNames.Contains(t.name))
+                if (t != null && MapExists(t.name) && !allMapNames.Contains(t.name))
                     allMapNames.Add(t.name);
 
-        int totalCards = 2 + allMapNames.Count;
-        float totalW   = totalCards * cardW + (totalCards - 1) * gap;
-        float startX   = Screen.width / 2f - totalW / 2f;
+        // Build the full button list (Slow, Fast, then each playable custom map).
+        var cards = new List<(string name, Texture2D art, Color color, System.Action onClick)>();
 
-        // SLOW ROUND CARD (dimmed if already used)
         bool slowUsed = _usedRoundTypes.Contains(RoundType.SlowRhythm);
-        DrawModeCard(startX, startY, cardW, cardH, "SLOW RHYTHM", "Single beat\nrhythm combat", slowUsed ? Color.gray : Color.cyan,
-            () => { if (!slowUsed && isServer) SelectRoundType(RoundType.SlowRhythm); }, cardTitleStyle, descStyle);
+        cards.Add((NameForButton(0), ArtForButton(0), slowUsed ? Color.gray : new Color(0.2f, 0.9f, 1f),
+            () => { if (!slowUsed && isServer) SelectRoundType(RoundType.SlowRhythm); }));
 
-        // FAST ROUND CARD (dimmed if already used)
         bool fastUsed = _usedRoundTypes.Contains(RoundType.FastCombo);
-        DrawModeCard(startX + cardW + gap, startY, cardW, cardH, "FAST COMBO", "Cluster attack\nsequences", fastUsed ? Color.gray : Color.magenta,
-            () => { if (!fastUsed && isServer) SelectRoundType(RoundType.FastCombo); }, cardTitleStyle, descStyle);
+        cards.Add((NameForButton(1), ArtForButton(1), fastUsed ? Color.gray : new Color(1f, 0.3f, 0.8f),
+            () => { if (!fastUsed && isServer) SelectRoundType(RoundType.FastCombo); }));
 
-        // CUSTOM MAPS
         for (int idx = 0; idx < allMapNames.Count; idx++)
         {
             string mapName = allMapNames[idx];
-            float customX  = startX + (idx + 2) * (cardW + gap);
-
-            AudioClip clip = null;
-            if (availableTracks != null)
-                foreach (AudioClip t in availableTracks)
-                    if (t != null && t.name == mapName) { clip = t; break; }
-            if (clip == null && _runtimeClips.ContainsKey(mapName))
-                clip = _runtimeClips[mapName];
-
+            AudioClip clip = GetClipForMap(mapName);
             bool hasPath = PlayerPrefs.HasKey("CustomMapPath_" + mapName);
             bool loading = _isLoadingClip && _loadingClipName == mapName;
-
             bool mapUsed = _usedCustomMaps.Contains(mapName);
-            Color mapColor = mapUsed ? Color.gray : Color.green;
+            int btn = idx + 2;
 
             if (loading)
-                DrawModeCard(customX, startY, cardW, cardH, "LOADING...", mapName, Color.yellow, () => { }, cardTitleStyle, descStyle);
+                cards.Add(("LOADING...", ArtForButton(btn), Color.yellow, () => { }));
             else if (clip != null || hasPath)
-                DrawModeCard(customX, startY, cardW, cardH, mapName.ToUpper(), "Custom map", mapColor,
-                    () => { if (!mapUsed && isServer) SelectRoundType(RoundType.CustomTrack, mapName); }, cardTitleStyle, descStyle);
+                cards.Add((NameForButton(btn), ArtForButton(btn), mapUsed ? Color.gray : new Color(0.3f, 1f, 0.5f),
+                    () => { if (!mapUsed && isServer) SelectRoundType(RoundType.CustomTrack, mapName); }));
+        }
+
+        // Place them in a grid: up to MAX_COLS per row, each row horizontally centered.
+        int total = cards.Count;
+        for (int i = 0; i < total; i++)
+        {
+            int row = i / MAX_COLS;
+            int col = i % MAX_COLS;
+            int colsThisRow = Mathf.Min(MAX_COLS, total - row * MAX_COLS);
+            float rowW = colsThisRow * cardW + (colsThisRow - 1) * gap;
+            float x = Screen.width / 2f - rowW / 2f + col * (cardW + gap);
+            float y = startY + row * (cardH + gapY);
+            DrawModeCard(x, y, cardW, cardH, cards[i].name, cards[i].art, cards[i].color, cards[i].onClick, cardNameStyle);
         }
     }
 
-    private void DrawModeCard(float x, float y, float w, float h, string title, string desc, Color color, System.Action onClick, GUIStyle titleStyle, GUIStyle descStyle)
+    // Artwork fills the card; a cyberpunk name sits on a dark strip underneath it.
+    private void DrawModeCard(float x, float y, float w, float h, string name, Texture2D art, Color color, System.Action onClick, GUIStyle nameStyle)
     {
         Rect cardRect = new Rect(x, y, w, h);
-        const float borderThick = 6f;
-        const float cornerSize = 12f;
-        const float padding = 14f;
+        bool interactable = color != Color.gray; // used/locked rounds are gray — no hover juice
 
-        // Background with subtle gradient appearance
-        GUI.color = new Color(0.08f, 0.08f, 0.12f, 0.98f);
-        GUI.DrawTexture(cardRect, _whiteTex);
+        // ── Smooth hover amount (eased once per Repaint so it doesn't double-step) ──
+        bool hovered = interactable && cardRect.Contains(Event.current.mousePosition);
+        float hv = _cardHover.TryGetValue(name, out var stored) ? stored : 0f;
+        if (Event.current.type == EventType.Repaint)
+        {
+            hv = Mathf.MoveTowards(hv, hovered ? 1f : 0f, Time.unscaledDeltaTime * 9f);
+            _cardHover[name] = hv;
+        }
 
-        // Thick colored border
-        GUI.color = color;
-        GUI.DrawTexture(new Rect(x, y, w, borderThick), _whiteTex); // top
-        GUI.DrawTexture(new Rect(x, y + h - borderThick, w, borderThick), _whiteTex); // bottom
-        GUI.DrawTexture(new Rect(x, y, borderThick, h), _whiteTex); // left
-        GUI.DrawTexture(new Rect(x + w - borderThick, y, borderThick, h), _whiteTex); // right
+        // Lift + scale the whole card toward the cursor.
+        Matrix4x4 prevMatrix = GUI.matrix;
+        if (hv > 0.001f)
+        {
+            float s = 1f + hv * 0.06f;
+            GUIUtility.ScaleAroundPivot(new Vector2(s, s), new Vector2(x + w / 2f, y + h / 2f));
+        }
 
-        // Corner brackets for visual flair
-        Color cornerColor = new Color(color.r, color.g, color.b, 0.7f);
-        GUI.color = cornerColor;
-        // Top-left corner
-        GUI.DrawTexture(new Rect(x + 4f, y + 4f, cornerSize, 2f), _whiteTex);
-        GUI.DrawTexture(new Rect(x + 4f, y + 4f, 2f, cornerSize), _whiteTex);
-        // Top-right corner
-        GUI.DrawTexture(new Rect(x + w - cornerSize - 4f, y + 4f, cornerSize, 2f), _whiteTex);
-        GUI.DrawTexture(new Rect(x + w - 6f, y + 4f, 2f, cornerSize), _whiteTex);
-        // Bottom-left corner
-        GUI.DrawTexture(new Rect(x + 4f, y + h - 6f, cornerSize, 2f), _whiteTex);
-        GUI.DrawTexture(new Rect(x + 4f, y + h - cornerSize - 4f, 2f, cornerSize), _whiteTex);
-        // Bottom-right corner
-        GUI.DrawTexture(new Rect(x + w - cornerSize - 4f, y + h - 6f, cornerSize, 2f), _whiteTex);
-        GUI.DrawTexture(new Rect(x + w - 6f, y + h - cornerSize - 4f, 2f, cornerSize), _whiteTex);
+        float nameStripH = h * 0.22f;
+        Rect artRect = new Rect(x, y, w, h - nameStripH);
 
-        // Title with glow effect (duplicate offset slightly for glow) - plenty of space to avoid clipping
-        float titleY = y + padding;
-        float titleHeight = h * 0.35f;
-        GUI.color = new Color(color.r * 0.5f, color.g * 0.5f, color.b * 0.5f, 0.4f);
-        GUI.Label(new Rect(x + 2f, titleY + 1f, w - 4f, titleHeight), title, titleStyle);
-        GUI.color = color;
-        GUI.Label(new Rect(x + 1f, titleY, w - 2f, titleHeight), title, titleStyle);
+        // ── Hover glow + neon border (drawn behind the art so it haloes the card) ──
+        if (hv > 0.001f)
+        {
+            GUI.color = new Color(color.r, color.g, color.b, 0.22f * hv); // soft outer halo
+            float go = 8f * hv;
+            GUI.DrawTexture(new Rect(x - go, y - go, w + go * 2f, h + go * 2f), _whiteTex);
 
-        // Description - give it plenty of vertical space
-        float descY = y + (h * 0.40f);
-        float descHeight = h - descY + y - padding;
-        descStyle.normal.textColor = new Color(0.85f, 0.85f, 0.9f, 0.95f);
-        GUI.Label(new Rect(x + padding, descY, w - (padding * 2f), descHeight), desc, descStyle);
+            GUI.color = new Color(color.r, color.g, color.b, 0.95f * hv);  // bright frame
+            float bt = 2.5f;
+            GUI.DrawTexture(new Rect(x - bt, y - bt, w + bt * 2f, bt), _whiteTex);      // top
+            GUI.DrawTexture(new Rect(x - bt, y + h, w + bt * 2f, bt), _whiteTex);       // bottom
+            GUI.DrawTexture(new Rect(x - bt, y - bt, bt, h + bt * 2f), _whiteTex);      // left
+            GUI.DrawTexture(new Rect(x + w, y - bt, bt, h + bt * 2f), _whiteTex);       // right
+        }
 
-        // Click detection
-        if (GUI.Button(cardRect, "", GUI.skin.box)) onClick?.Invoke();
+        // Artwork (cropped to fill). Falls back to a dark panel if no art is assigned.
+        GUI.color = Color.white;
+        if (art != null) GUI.DrawTexture(artRect, art, ScaleMode.ScaleAndCrop);
+        else { GUI.color = new Color(0.08f, 0.08f, 0.12f, 0.98f); GUI.DrawTexture(artRect, _whiteTex); }
+
+        // Brighten the art on hover.
+        if (hv > 0.001f)
+        {
+            GUI.color = new Color(1f, 1f, 1f, 0.10f * hv);
+            GUI.DrawTexture(artRect, _whiteTex);
+        }
+
+        // Subtle dark gradient at the bottom of the art so the name strip blends in (no hard line).
+        GUI.color = new Color(0.02f, 0.03f, 0.06f, 0.55f);
+        GUI.DrawTexture(new Rect(x, y + h - nameStripH - 24f, w, 24f), _whiteTex);
+
+        // Dark name strip under the art.
+        GUI.color = new Color(0.03f, 0.04f, 0.08f, 0.97f);
+        GUI.DrawTexture(new Rect(x, y + h - nameStripH, w, nameStripH), _whiteTex);
+
+        // Single neon accent line where the art meets the strip — brightens/thickens on hover.
+        Color accent = Color.Lerp(color, Color.white, hv * 0.5f);
+        GUI.color = accent;
+        GUI.DrawTexture(new Rect(x, y + h - nameStripH, w, 3f + 2f * hv), _whiteTex);
+        // Faint outer glow of that accent (1px above, dimmer) for a soft neon feel.
+        GUI.color = new Color(color.r, color.g, color.b, 0.25f + 0.5f * hv);
+        GUI.DrawTexture(new Rect(x, y + h - nameStripH - 2f, w, 2f), _whiteTex);
+
+        // Cyberpunk name (glow + main) centred on the strip.
+        Rect nameRect = new Rect(x, y + h - nameStripH, w, nameStripH);
+        GUI.color = new Color(color.r * 0.5f, color.g * 0.5f, color.b * 0.5f, 0.5f);
+        GUI.Label(new Rect(nameRect.x + 2f, nameRect.y + 1f, nameRect.width, nameRect.height), name, nameStyle);
+        GUI.color = accent;
+        GUI.Label(nameRect, name, nameStyle);
+
+        // Click detection — invisible hit area (no boxy GUI.skin.box frame).
+        if (GUI.Button(cardRect, GUIContent.none, GUIStyle.none)) onClick?.Invoke();
 
         GUI.color = Color.white;
+        GUI.matrix = prevMatrix;
     }
 
     private void LoadAndPlayMap(string mapName, AudioClip clip)
@@ -2542,6 +2627,8 @@ public class RhythmRoundManager : NetworkBehaviour
             GUILayout.EndArea();
         }
 
+        // --- HUD (match status, THINK-TIME timer, combat-log feed) hidden for a cleaner scene ---
+#if false
         // --- 2. MATCH STATUS (Right side, just above MIC LEVEL box) ---
         // MIC LEVEL sits at x=Screen.width-420, y=Screen.height-120, w=400, h=100.
         // Stack the match panel directly above it with the same right alignment.
@@ -2666,6 +2753,7 @@ public class RhythmRoundManager : NetworkBehaviour
                 ey += entryH;
             }
         }
+#endif
         // --- MATCH OVER OVERLAY ---
         if (isMatchOver)
         {
@@ -2913,7 +3001,7 @@ public class RhythmRoundManager : NetworkBehaviour
 
         if (_activeBot != null) return; // correct bot already present
 
-        Vector3 spawnPos = new Vector3(0, botSpawnY, 5);
+        Vector3 spawnPos = _spawnP2; // bot's fixed home (botStartPosition)
         _activeBot = Instantiate(desired, spawnPos, Quaternion.identity);
 
         if (_activeBot.GetComponent<PlayerInventory>() == null)

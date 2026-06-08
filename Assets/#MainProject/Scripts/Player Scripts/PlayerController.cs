@@ -22,6 +22,27 @@ public class PlayerController : NetworkBehaviour
     public float SpacingSpeed = 2.0f;
     [SyncVar] private bool _isSpacingActive = false;
 
+    [Header("Home Anchoring")]
+    [SyncVar] private Vector3 _homePosition;
+    [SyncVar] private bool    _hasHome = false;
+
+    [Header("Dodge Move VFX (pre-placed in the player prefab — toggled on/off, not spawned)")]
+    public GameObject moveLeftVfx;
+    public GameObject moveRightVfx;
+    [Tooltip("How long a dodge VFX stays on after a left/right dash.")]
+    public float moveVfxDuration = 0.4f;
+    private Coroutine _moveVfxRoutine;
+
+    // Server stamps each fighter's fixed home (its spawn spot) at round setup. Both the
+    // human and the bot ease back to it when idle, so neither drifts via knockback / hurt
+    // / dodges and the gap between them stays correct. (SyncVar so the local human reads it.)
+    [Server]
+    public void SetHome(Vector3 pos)
+    {
+        _homePosition = pos;
+        _hasHome = true;
+    }
+
     private Queue<Vector3> _dashQueue = new Queue<Vector3>();
     private bool _isDashing;
     private float _lastDashTime;
@@ -110,6 +131,28 @@ public class PlayerController : NetworkBehaviour
         }
     }
 
+    // Hard-anchor each fighter to its spawn spot — applied AFTER animation root motion every
+    // frame, so the body can NEVER drift (no snap, because nothing ever accumulates):
+    //   • BOT    — fully pinned (X + Z). It never moves, so the gap stays exactly constant.
+    //   • PLAYER — Z locked to spawn (no forward/back drift); X is free so sidestep dodges work.
+    // Vertical (Y / gravity) is always left untouched.
+    private void LateUpdate()
+    {
+        bool isBotOnServer = isServer && !isLocalPlayer;
+        if (!(isLocalPlayer || isBotOnServer)) return;
+        if (!_hasHome) return;
+
+        var rmm = RhythmRoundManager.Instance;
+        if (rmm == null || !rmm.isRoundActive) return;
+
+        Vector3 pos = transform.position;
+        bool isBot = GetComponent<BotController>() != null;
+
+        transform.position = isBot
+            ? new Vector3(_homePosition.x, pos.y, _homePosition.z)  // bot: locked in place
+            : new Vector3(pos.x,          pos.y, _homePosition.z);  // player: Z locked, X free
+    }
+
     [Command]
     public void CmdRhythmDash(Vector3 dir)
     {
@@ -139,6 +182,29 @@ public class PlayerController : NetworkBehaviour
             if (dir == Vector3.left) _combat.animator.Play("MoveLeft");
             else if (dir == Vector3.right) _combat.animator.Play("MoveRight");
         }
+
+        if (dir == Vector3.left)       PlayMoveVfx(moveLeftVfx);
+        else if (dir == Vector3.right) PlayMoveVfx(moveRightVfx);
+    }
+
+    // Toggle a pre-placed dodge VFX on, then auto-off after moveVfxDuration. Mirrors the
+    // defense-VFX pattern in PlayerCombat. Runs everywhere ApplyDash does (local + RPC).
+    private void PlayMoveVfx(GameObject vfx)
+    {
+        if (vfx == null) return;
+        if (_moveVfxRoutine != null) StopCoroutine(_moveVfxRoutine);
+        // Make sure the other side's VFX isn't left lit if you dodge the opposite way quickly.
+        if (moveLeftVfx != null)  moveLeftVfx.SetActive(false);
+        if (moveRightVfx != null) moveRightVfx.SetActive(false);
+        _moveVfxRoutine = StartCoroutine(MoveVfxRoutine(vfx));
+    }
+
+    private IEnumerator MoveVfxRoutine(GameObject vfx)
+    {
+        vfx.SetActive(true);
+        yield return new WaitForSeconds(moveVfxDuration);
+        if (vfx != null) vfx.SetActive(false);
+        _moveVfxRoutine = null;
     }
 
     public void ApplyDashExternal(Vector3 dir) { ApplyDash(dir); }
@@ -219,21 +285,9 @@ public class PlayerController : NetworkBehaviour
             playerCollider.enabled = true;
         }
 
-        // 4. Auto-Spacing Logic — ONLY the bot closes distance; the player stays put.
+        // 4. Home anchoring is handled continuously in LateUpdate (after animation root
+        //    motion), so the body can't drift via hurt/attack clips. Nothing to add here.
         Vector3 autoSpacingVelocity = Vector3.zero;
-        bool isBot = GetComponent<BotController>() != null;
-        if (isBot && opponent != null && !_isDashing && !_combat.isAttacking && !_combat.IsHurting)
-        {
-            float currentDist = Vector3.Distance(transform.position, opponent.transform.position);
-            if (Mathf.Abs(currentDist - DesiredDistance) > 0.2f)
-            {
-                Vector3 dirToOpponent = opponent.transform.position - transform.position;
-                dirToOpponent.y = 0;
-                dirToOpponent.Normalize();
-                float moveDir = (currentDist > DesiredDistance) ? 1f : -1f;
-                autoSpacingVelocity = dirToOpponent * moveDir * SpacingSpeed;
-            }
-        }
 
         // 5. Visual Cleanup
         if (isLocalPlayer)
@@ -249,12 +303,10 @@ public class PlayerController : NetworkBehaviour
         // 6. Final Movement Calculation
         _velocityY += Physics.gravity.y * Time.deltaTime;
 
-        // Only get human input if this is the local player
-        Vector3 inputMovement = isLocalPlayer ? (GameManager.Move.y * transform.forward + GameManager.Move.x * transform.right) : Vector3.zero;
-
-        Vector3 targetVelocity = inputMovement * GameManager.Speed;
-        targetVelocity += autoSpacingVelocity;
-        targetVelocity.y = _velocityY;
+        // WASD movement removed — fighters hold position; only voice dodges (dashes) move them
+        // on X, and home pinning (player Z-lock / bot full-lock) is handled in LateUpdate.
+        Vector3 targetVelocity = autoSpacingVelocity; // currently zero
+        targetVelocity.y = _velocityY;                // keep gravity so they stay grounded
 
         _characterController.Move(targetVelocity * Time.deltaTime);
     }

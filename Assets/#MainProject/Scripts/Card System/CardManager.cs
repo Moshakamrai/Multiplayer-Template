@@ -569,6 +569,7 @@ public class CardManager : NetworkBehaviour
 
     private void OnGUI()
     {
+        if (VRCameraDriver.VRActive) return; // VR shows the hand via the promoted world-space canvas
         if (!isLocalPlayer) return;
         if (cardLibrary == null || cardLibrary.Count == 0) return;
         if (RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isShopPhase) return;

@@ -28,9 +28,9 @@ public class VRPerformance : MonoBehaviour
 
         if (!_globalApplied)
         {
-            // Render fewer pixels than the panel's native resolution. 0.8 = 64% of the
-            // pixels — a big GPU saving for a small sharpness cost. Tune 0.7–0.9.
-            XRSettings.renderViewportScale = 0.8f;
+            // Render fewer pixels than the panel's native resolution. 0.9 = 81% of the
+            // pixels — sharper than 0.8 while still saving GPU. Tune 0.7–1.0.
+            XRSettings.renderViewportScale = 0.9f;
 
             // The VR compositor owns frame timing; vSync here just wastes work.
             QualitySettings.vSyncCount = 0;
@@ -44,12 +44,14 @@ public class VRPerformance : MonoBehaviour
             Debug.Log("[VRPerformance] Mobile-VR settings applied.");
         }
 
-        // Strip the expensive post-process stack (Bloom etc.) off the active camera.
+        // Keep post-processing ON in VR so Bloom (the neon floor glow, power cone, etc.) renders
+        // like the PC build. This costs GPU — if you target a standalone headset (Quest) and need
+        // the frames back, flip this to false.
         Camera cam = Camera.main;
         if (cam != null && cam != _lastCam)
         {
             var data = cam.GetComponent<UniversalAdditionalCameraData>();
-            if (data != null) data.renderPostProcessing = false;
+            if (data != null) data.renderPostProcessing = true;
             _lastCam = cam;
         }
     }

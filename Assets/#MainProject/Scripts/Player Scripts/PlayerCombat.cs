@@ -1046,6 +1046,7 @@ public class PlayerCombat : NetworkBehaviour
 
     private void OnGUI()
     {
+        if (VRCameraDriver.VRActive) return; // VR uses VRWorldHud for health/timing
         if (!isLocalPlayer) return;
         if (TiebreakerManager.Instance != null && TiebreakerManager.Instance.IsTiebreakerActive) return;
         if (RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isShopPhase) return;

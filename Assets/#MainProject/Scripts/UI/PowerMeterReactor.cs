@@ -28,6 +28,9 @@ public class PowerMeterReactor : MonoBehaviour
     [Tooltip("The group holding the Fill + Border (and ideally the meter's Canvas). Disabled on REMOTE clones so their Overlay canvas never covers your screen. Leave empty to disable just this GameObject.")]
     [SerializeField] private GameObject meterGroup;
 
+    // The group VR docking should move (the whole cone). Falls back to this object.
+    public Transform MeterRoot => meterGroup != null ? meterGroup.transform : transform;
+
     [Header("Fill per grade (the on-beat shout rating)")]
     [Tooltip("BAD / off-beat shout.")]
     public float badFill = 0.25f;

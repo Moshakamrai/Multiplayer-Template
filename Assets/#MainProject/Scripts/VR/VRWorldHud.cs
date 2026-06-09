@@ -33,6 +33,10 @@ public class VRWorldHud : MonoBehaviour
 
     private Canvas _cardCanvas;       // the player's hand, promoted to world-space
     private float _cardRetry;         // periodic re-search until the hand canvas exists
+    private Canvas _powerCanvas;      // the power-meter cone, promoted to world-space
+    private PowerMeterReactor _powerReactor;
+    private bool _powerSharesCard;    // true if the cone lives on the same canvas as the hand
+    private float _powerRetry;
     private bool _built;
 
     private void Update()
@@ -55,6 +59,17 @@ public class VRWorldHud : MonoBehaviour
         else
         {
             DockCardCanvas();
+        }
+
+        // Same treatment for the power-meter cone (an Overlay canvas otherwise hidden in VR).
+        if (_powerCanvas == null)
+        {
+            _powerRetry -= Time.unscaledDeltaTime;
+            if (_powerRetry <= 0f) { _powerRetry = 1f; PromotePowerCanvas(cam); }
+        }
+        else
+        {
+            DockPowerCanvas();
         }
 
         UpdateHealth();
@@ -209,15 +224,69 @@ public class VRWorldHud : MonoBehaviour
         Debug.Log("[VRWorldHud] No card canvas found (name needs 'card'/'hand'/'playercanvas').");
     }
 
-    // Dock the player's hand canvas just below the HUD, facing the player, every frame.
+    // Where the hand sits relative to the gaze HUD (HUD-local: +X = your right, +Y = up).
+    // Tweak these two to taste — moved to the right and lowered into comfortable view.
+    private static readonly Vector3 CARD_OFFSET = new Vector3(0.55f, 1.05f, 0f);
+    private const float CARD_SCALE = 0.0026f;
+
+    // Dock the player's hand canvas to the lower-right of the HUD, facing the player, every frame.
     // Kept parented to the player so it's cleaned up with them; we drive world pose directly.
     private void DockCardCanvas()
     {
         var t = _cardCanvas.transform;
-        // On the 2m HUD plane (Z=0), pushed high into the upper view, and a bit bigger.
-        t.position = _root.TransformPoint(new Vector3(0f, 0.85f, 0f));
+        t.position = _root.TransformPoint(CARD_OFFSET);
         t.rotation = _root.rotation;
-        t.localScale = Vector3.one * 0.0024f;
+        t.localScale = Vector3.one * CARD_SCALE;
+    }
+
+    // Where the power cone sits relative to the HUD (HUD-local). Off to your RIGHT, tall.
+    private static readonly Vector3 POWER_OFFSET = new Vector3(0.85f, 0f, 0f);
+    private const float POWER_SCALE = 0.0016f;
+
+    // Find the local power-meter cone and make sure it renders in VR (world-space).
+    private void PromotePowerCanvas(Camera cam)
+    {
+        var reactor = FindObjectOfType<PowerMeterReactor>(true);
+        if (reactor == null) return;
+        _powerReactor = reactor;
+
+        var c = reactor.GetComponentInParent<Canvas>();
+        if (c == null) return;
+        _powerCanvas = c;
+        _powerSharesCard = (c == _cardCanvas);
+
+        if (!_powerSharesCard) // its own canvas → promote it; shared canvas is already world-space
+        {
+            c.renderMode = RenderMode.WorldSpace;
+            c.worldCamera = cam;
+            c.enabled = true; // un-hide if the suppressor already disabled it
+            var scaler = c.GetComponent<CanvasScaler>() ?? c.gameObject.AddComponent<CanvasScaler>();
+            scaler.dynamicPixelsPerUnit = 4f;
+            scaler.referencePixelsPerUnit = 100f;
+        }
+        Debug.Log($"[VRWorldHud] Power meter on '{c.name}' (sharesHandCanvas={_powerSharesCard}) — docking left.");
+    }
+
+    private void DockPowerCanvas()
+    {
+        if (_powerSharesCard)
+        {
+            // Shares the hand canvas: we can't move the whole canvas (that's the cards), so we
+            // reposition just the cone's group in world space. Size inherits the hand canvas scale.
+            var t = _powerReactor != null ? _powerReactor.MeterRoot : null;
+            if (t != null)
+            {
+                t.position = _root.TransformPoint(POWER_OFFSET);
+                t.rotation = _root.rotation;
+            }
+        }
+        else
+        {
+            var t = _powerCanvas.transform;
+            t.position = _root.TransformPoint(POWER_OFFSET);
+            t.rotation = _root.rotation;
+            t.localScale = Vector3.one * POWER_SCALE;
+        }
     }
 
     private void GetCombatants(out PlayerCombat self, out PlayerCombat opp)

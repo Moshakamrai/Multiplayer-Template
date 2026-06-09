@@ -2564,8 +2564,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   leftGlove: {fileID: 3375781535240649837}
   rightGlove: {fileID: 6410129354583715210}
-  gloveRotationOffset: {x: 0, y: 180, z: 0}
   reach: 1
+  minPunchSpeed: 1
+  maxPunchSpeed: 5
   disableAnimator: 0
 --- !u!1 &8782005603362053964
 GameObject:

@@ -829,17 +829,8 @@ public class RhythmRoundManager : NetworkBehaviour
 
         ResetPlayersForNextRound();
 
-        if (VRCameraDriver.VRActive)
-        {
-            // VR: the shop is screen-space IMGUI (can't render in stereo), so skip it and go
-            // straight to the next rhythm round picker (press B or wait 20s to start).
-            ShowRoundPicker();
-        }
-        else
-        {
-            // Post-round TFT shop with credits
-            ShopPhaseManager.Instance?.StartShopPhase(currentRoundNumber);
-        }
+        // Post-round shop with credits. VR shows it as a world-space panel (VRMenus); flat as IMGUI.
+        ShopPhaseManager.Instance?.StartShopPhase(currentRoundNumber);
     }
 
     [Server]
@@ -3087,6 +3078,41 @@ public class RhythmRoundManager : NetworkBehaviour
                 if (!inv.ownedCombatCards.Contains(id)) inv.ownedCombatCards.Add(id);
             inv.EquipCombatCards(new List<string>(inv.ownedCombatCards));
         }
+    }
+
+    // One round-picker option, shared by the flat IMGUI picker and the VR world-space panel.
+    public struct RoundOption { public string label; public bool used; public System.Action select; }
+
+    // Build the current round choices (Slow, Fast, then each playable custom map) for the VR menu.
+    public List<RoundOption> GetRoundOptionsForVR()
+    {
+        var list = new List<RoundOption>();
+
+        bool slowUsed = _usedRoundTypes.Contains(RoundType.SlowRhythm);
+        list.Add(new RoundOption { label = NameForButton(0), used = slowUsed,
+            select = () => { if (!slowUsed && isServer) SelectRoundType(RoundType.SlowRhythm); } });
+
+        bool fastUsed = _usedRoundTypes.Contains(RoundType.FastCombo);
+        list.Add(new RoundOption { label = NameForButton(1), used = fastUsed,
+            select = () => { if (!fastUsed && isServer) SelectRoundType(RoundType.FastCombo); } });
+
+        var allMapNames = new List<string>();
+        string registry = PlayerPrefs.GetString("CustomMapRegistry", "");
+        if (!string.IsNullOrEmpty(registry))
+            foreach (string n in registry.Split('|'))
+                if (!string.IsNullOrEmpty(n) && MapExists(n) && !allMapNames.Contains(n)) allMapNames.Add(n);
+        if (availableTracks != null)
+            foreach (AudioClip t in availableTracks)
+                if (t != null && MapExists(t.name) && !allMapNames.Contains(t.name)) allMapNames.Add(t.name);
+
+        for (int i = 0; i < allMapNames.Count; i++)
+        {
+            string mapName = allMapNames[i];
+            bool mapUsed = _usedCustomMaps.Contains(mapName);
+            list.Add(new RoundOption { label = NameForButton(i + 2), used = mapUsed,
+                select = () => { if (!mapUsed && isServer) SelectRoundType(RoundType.CustomTrack, mapName); } });
+        }
+        return list;
     }
 
     // Add these to RhythmRoundManager.cs

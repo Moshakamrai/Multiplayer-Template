@@ -39,6 +39,7 @@ public class ShopUI : MonoBehaviour
 
     private void OnGUI()
     {
+        if (VRCameraDriver.VRActive) return; // VR uses the world-space shop panel (VRMenus)
         if (ShopPhaseManager.Instance == null || !ShopPhaseManager.Instance.isShopPhase) return;
 
         // Scale the whole shop for phones (no-op on desktop).

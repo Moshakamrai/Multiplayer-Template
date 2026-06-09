@@ -1127,8 +1127,8 @@ public class RhythmRoundManager : NetworkBehaviour
             float p1Off = p1.lastVocalSpikeTime > 0f ? Mathf.Abs(beatTime - p1.lastVocalSpikeTime) : float.MaxValue;
             float p2Off = p2.lastVocalSpikeTime > 0f ? Mathf.Abs(beatTime - p2.lastVocalSpikeTime) : float.MaxValue;
 
-            int dmgFrom1 = p1.lastVocalSpikeTime > 0f ? ComputeComboDamage(m1.attack, p1Off) : 0;
-            int dmgFrom2 = p2.lastVocalSpikeTime > 0f ? ComputeComboDamage(m2.attack, p2Off) : 0;
+            int dmgFrom1 = p1.lastVocalSpikeTime > 0f ? ComputeComboDamage(m1.attack, p1Off, p1.lastVocalSpikeVolume) : 0;
+            int dmgFrom2 = p2.lastVocalSpikeTime > 0f ? ComputeComboDamage(m2.attack, p2Off, p2.lastVocalSpikeVolume) : 0;
 
             if (p1Off < p2Off && dmgFrom1 > 0)
             {
@@ -1524,7 +1524,10 @@ public class RhythmRoundManager : NetworkBehaviour
         // Timing multiplier: EXCELLENT +25%, GOOD base, BAD −50%
         finalDmg = Mathf.RoundToInt(finalDmg * GetTimingMultiplier(attacker));
 
-        // Volume bonus: louder shout = up to +25%
+        // Volume / Power bonus: combined input (VR swing + mic shout) = up to +50% damage
+        //   0.0–0.4  = no bonus (weak input)
+        //   0.4–1.0  = up to +25% (normal punch or shout)
+        //   1.0–1.25 = up to +50% (punch + shout combined)
         float atkSpike = attacker.lastVocalSpikeTime;
         if (atkSpike > 0f && attacker.lastVocalSpikeVolume > 0f)
         {
@@ -1532,8 +1535,11 @@ public class RhythmRoundManager : NetworkBehaviour
             float vol = attacker.lastVocalSpikeVolume;
             if (vol > volThreshold)
             {
-                float t = Mathf.Clamp01((vol - volThreshold) / (1f - volThreshold));
-                finalDmg = Mathf.RoundToInt(finalDmg * Mathf.Lerp(1f, 1.25f, t));
+                // Normalize: 0 at threshold → 1 at max (1.25)
+                float t = Mathf.Clamp01((vol - volThreshold) / (1.25f - volThreshold));
+                // Bonus curve: 1.0x at threshold → 1.25x at 1.0 → 1.50x at 1.25
+                float bonusMult = Mathf.Lerp(1f, 1.50f, t);
+                finalDmg = Mathf.RoundToInt(finalDmg * bonusMult);
             }
         }
 
@@ -2345,7 +2351,7 @@ public class RhythmRoundManager : NetworkBehaviour
         }
     }
 
-    private int ComputeComboDamage(string move, float timingOffset)
+    private int ComputeComboDamage(string move, float timingOffset, float powerVol = 0f)
     {
         int baseDmg = move switch
         {
@@ -2368,8 +2374,17 @@ public class RhythmRoundManager : NetworkBehaviour
             "Mirror"           => 10,
             _                  => 8
         };
-        float mult = timingOffset <= 0.10f ? 1.25f : timingOffset <= 0.30f ? 1.0f : 0.5f;
-        return Mathf.Max(1, Mathf.RoundToInt(baseDmg * mult));
+        float timingMult = timingOffset <= 0.10f ? 1.25f : timingOffset <= 0.30f ? 1.0f : 0.5f;
+
+        // Power bonus: same curve as single-mode (up to +50% for punch + shout combined)
+        float powerMult = 1f;
+        if (powerVol > 0.4f)
+        {
+            float t = Mathf.Clamp01((powerVol - 0.4f) / (1.25f - 0.4f));
+            powerMult = Mathf.Lerp(1f, 1.50f, t);
+        }
+
+        return Mathf.Max(1, Mathf.RoundToInt(baseDmg * timingMult * powerMult));
     }
 
     [Server]
@@ -3081,7 +3096,7 @@ public class RhythmRoundManager : NetworkBehaviour
     }
 
     // One round-picker option, shared by the flat IMGUI picker and the VR world-space panel.
-    public struct RoundOption { public string label; public bool used; public System.Action select; }
+    public struct RoundOption { public string label; public Texture2D artwork; public Color color; public bool used; public System.Action select; }
 
     // Build the current round choices (Slow, Fast, then each playable custom map) for the VR menu.
     public List<RoundOption> GetRoundOptionsForVR()
@@ -3089,12 +3104,24 @@ public class RhythmRoundManager : NetworkBehaviour
         var list = new List<RoundOption>();
 
         bool slowUsed = _usedRoundTypes.Contains(RoundType.SlowRhythm);
-        list.Add(new RoundOption { label = NameForButton(0), used = slowUsed,
-            select = () => { if (!slowUsed && isServer) SelectRoundType(RoundType.SlowRhythm); } });
+        list.Add(new RoundOption
+        {
+            label = NameForButton(0),
+            artwork = ArtForButton(0),
+            color = slowUsed ? Color.gray : new Color(0.2f, 0.9f, 1f),
+            used = slowUsed,
+            select = () => { if (!slowUsed && isServer) SelectRoundType(RoundType.SlowRhythm); }
+        });
 
         bool fastUsed = _usedRoundTypes.Contains(RoundType.FastCombo);
-        list.Add(new RoundOption { label = NameForButton(1), used = fastUsed,
-            select = () => { if (!fastUsed && isServer) SelectRoundType(RoundType.FastCombo); } });
+        list.Add(new RoundOption
+        {
+            label = NameForButton(1),
+            artwork = ArtForButton(1),
+            color = fastUsed ? Color.gray : new Color(1f, 0.3f, 0.8f),
+            used = fastUsed,
+            select = () => { if (!fastUsed && isServer) SelectRoundType(RoundType.FastCombo); }
+        });
 
         var allMapNames = new List<string>();
         string registry = PlayerPrefs.GetString("CustomMapRegistry", "");
@@ -3109,8 +3136,15 @@ public class RhythmRoundManager : NetworkBehaviour
         {
             string mapName = allMapNames[i];
             bool mapUsed = _usedCustomMaps.Contains(mapName);
-            list.Add(new RoundOption { label = NameForButton(i + 2), used = mapUsed,
-                select = () => { if (!mapUsed && isServer) SelectRoundType(RoundType.CustomTrack, mapName); } });
+            int btn = i + 2;
+            list.Add(new RoundOption
+            {
+                label = NameForButton(btn),
+                artwork = ArtForButton(btn),
+                color = mapUsed ? Color.gray : new Color(0.3f, 1f, 0.5f),
+                used = mapUsed,
+                select = () => { if (!mapUsed && isServer) SelectRoundType(RoundType.CustomTrack, mapName); }
+            });
         }
         return list;
     }

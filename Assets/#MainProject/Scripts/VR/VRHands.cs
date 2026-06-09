@@ -61,24 +61,24 @@ public class VRHands : MonoBehaviour
     private Vector3 _rotOffsetR;
     private bool _rotInit;
 
-    // --- Punch input (motion speed + trigger), consumed by PlayerCombat in VR ---
-    // A trigger press latches a "punch" with the swinging hand's speed as its power (0.4..1).
+    // --- Punch input (pure swing motion), consumed by PlayerCombat in VR ---
+    // A fast hand swing latches a "punch" with that hand's speed as its power (0.4..1).
+    // No trigger needed — just swing hard near the beat.
     // PlayerCombat.CheckLocalParryTiming consumes it on the beat, in place of the mic volume.
     private static bool _punchPending;
     private static float _punchPower;
     private static float _punchSetTime;
-    private const float PUNCH_EXPIRY = 0.12f; // a press only counts for ~120ms
+    private const float PUNCH_EXPIRY = 0.12f; // a swing only counts for ~120ms
+    private const float SWING_COOLDOWN = 0.25f; // minimum seconds between swings
 
     private Vector3 _prevLPos, _prevRPos;
     private bool _havedPrevPos;
-    private bool _prevLTrig, _prevRTrig;
 
-    // Charge state: while a trigger is held we track the peak swing speed of that hand.
-    private bool _chargingL, _chargingR;
-    private float _peakSpeedL, _peakSpeedR;
+    // Per-hand cooldown to prevent double-firing on the same swing motion
+    private float _lastSwingTimeL, _lastSwingTimeR;
 
     /// Called by PlayerCombat instead of reading mic volume when in VR.
-    /// Returns true (once) if a trigger-punch is waiting, with its power (0.4..1 from hand speed).
+    /// Returns true (once) if a swing is waiting, with its power (0.4..1 from hand speed).
     public static bool ConsumePunch(out float power)
     {
         if (_punchPending && Time.time - _punchSetTime <= PUNCH_EXPIRY)
@@ -87,7 +87,7 @@ public class VRHands : MonoBehaviour
             _punchPending = false;
             return true;
         }
-        _punchPending = false; // expire stale presses
+        _punchPending = false; // expire stale swings
         power = 0f;
         return false;
     }
@@ -159,8 +159,8 @@ public class VRHands : MonoBehaviour
         return anchorGo.transform;
     }
 
-    /// Tracks each controller's speed and fires a punch on a trigger press (rising edge),
-    /// using that hand's current speed as the punch power.
+    /// Tracks each controller's speed and fires a punch on a fast swing — NO trigger needed.
+    /// Uses that hand's current speed as the punch power.
     private void UpdatePunchInput()
     {
         float dt = Time.deltaTime;
@@ -180,24 +180,21 @@ public class VRHands : MonoBehaviour
         }
         _prevLPos = lpos; _prevRPos = rpos; _havedPrevPos = true;
 
-        // CHARGE & RELEASE:
-        //   PRESS trigger  -> start charging (begin tracking how fast you swing)
-        //   HOLD + swing   -> we remember the PEAK speed of the swing  (= damage power)
-        //   RELEASE on beat-> throws the punch; the release moment is the timing input (= multiplier)
-        bool ltrig = ReadBtn(lh, CommonUsages.triggerButton);
-        bool rtrig = ReadBtn(rh, CommonUsages.triggerButton);
+        float now = Time.time;
 
-        // LEFT hand
-        if (ltrig && !_prevLTrig) { _chargingL = true; _peakSpeedL = 0f; }
-        if (_chargingL) _peakSpeedL = Mathf.Max(_peakSpeedL, lspeed);
-        if (!ltrig && _prevLTrig && _chargingL) { RegisterPunch(_peakSpeedL); _chargingL = false; }
+        // LEFT hand — fire on fast swing, with cooldown
+        if (lspeed >= minPunchSpeed && now - _lastSwingTimeL >= SWING_COOLDOWN)
+        {
+            _lastSwingTimeL = now;
+            RegisterPunch(lspeed);
+        }
 
-        // RIGHT hand
-        if (rtrig && !_prevRTrig) { _chargingR = true; _peakSpeedR = 0f; }
-        if (_chargingR) _peakSpeedR = Mathf.Max(_peakSpeedR, rspeed);
-        if (!rtrig && _prevRTrig && _chargingR) { RegisterPunch(_peakSpeedR); _chargingR = false; }
-
-        _prevLTrig = ltrig; _prevRTrig = rtrig;
+        // RIGHT hand — fire on fast swing, with cooldown
+        if (rspeed >= minPunchSpeed && now - _lastSwingTimeR >= SWING_COOLDOWN)
+        {
+            _lastSwingTimeR = now;
+            RegisterPunch(rspeed);
+        }
     }
 
     private void RegisterPunch(float speed)

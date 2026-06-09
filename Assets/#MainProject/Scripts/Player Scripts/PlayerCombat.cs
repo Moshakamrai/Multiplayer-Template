@@ -437,16 +437,12 @@ public class PlayerCombat : NetworkBehaviour
     private void CheckLocalParryTiming()
     {
         if (RhythmRoundManager.Instance == null) return;
-        // Flat builds need the mic (voice processor + command manager). VR uses trigger+motion,
-        // so it only needs those when NOT in VR.
-        if (!VRCameraDriver.VRActive && (vp == null || _vcm == null)) return;
 
         var   rmm          = RhythmRoundManager.Instance;
         float currentTime  = rmm.GetCurrentTrackTime();
         float beatFireTime = rmm.lastBeatFireTime;
 
         // ── Dead zone: silence spike detection for BEAT_DEAD_ZONE seconds after each beat ──
-        // This prevents a shout from the current action bleeding into the next timing window.
         if (beatFireTime > 0f && currentTime - beatFireTime < BEAT_DEAD_ZONE) return;
 
         // ── Reset first-spike gate when a new beat cycle begins ───────────────────────────
@@ -481,28 +477,21 @@ public class PlayerCombat : NetworkBehaviour
         float timeUntilImpact = nextBeat - currentTime;
 
         // Under-pressure players get a tighter shout window (max 40% reduction at full pressure)
-        // Plus additional reduction based on damage percentage (every 50% = -4% window, max -20%)
         float percentageReduction = GetShoutWindowReduction(CurrentPercentage);
         float effectiveWindow = SHOUT_WINDOW * (1f - _pressureLevel * 0.4f - percentageReduction);
 
         // Trait/Vex card timing window modifiers
         float timingWindowMult = 1f;
-        // Quicktrigger trait: +0.1s timing window (easier for this player)
         if (!string.IsNullOrEmpty(activeTraitId) && activeTraitId == "quicktrigger")
-            timingWindowMult *= 1.20f; // +0.1s / 0.5s = 20% increase
-
-        // Heavy trait: +0.05s (easier for this player)
+            timingWindowMult *= 1.20f;
         if (!string.IsNullOrEmpty(activeTraitId) && activeTraitId == "heavy")
-            timingWindowMult *= 1.10f; // 0.05s / 0.5s = 10% increase
-
-        // Quicktrigger trait: +0.1s timing window
+            timingWindowMult *= 1.10f;
         if (activeTraitId == "quicktrigger")
             timingWindowMult *= 1.20f;
 
-        // Check opponent's Stunning trait (makes our window harder)
         PlayerCombat opponent = GetComponent<PlayerController>()?.GetOpponent()?.GetComponent<PlayerCombat>();
         if (opponent != null && !string.IsNullOrEmpty(opponent.activeTraitId) && opponent.activeTraitId == "stunning")
-            timingWindowMult *= 0.90f; // 0.05s reduction = ~10% tighter
+            timingWindowMult *= 0.90f;
 
         effectiveWindow *= timingWindowMult;
         bool inShoutWindow = timeUntilImpact > 0f && timeUntilImpact <= effectiveWindow;
@@ -511,17 +500,67 @@ public class PlayerCombat : NetworkBehaviour
         // ── First spike only: once locked, ignore further input until next beat cycle ──────
         if (_spikeLockedThisBeat) return;
 
-        // INPUT SOURCE: in VR the spike fires on a TRIGGER press, with the hand's swing speed
-        // as its "volume" (power). On flat builds it fires on a loud-enough SHOUT, as before.
-        float currentVol;
+        // ── INPUT SOURCES (both can contribute) ─────────────────────────────────────────────
+        // VR:   trigger release gives timing + swing power. Mic shout adds EXTRA volume bonus.
+        // Flat: mic shout is the ONLY source.
+        float punchVol = -1f;   // -1 = no punch consumed this frame
+        float shoutVol = -1f;   // -1 = no shout detected this frame
+        bool  gotInput = false;
+
+        // 1) VR punch (trigger release + swing speed)
         if (VRCameraDriver.VRActive)
         {
-            if (!VRHands.ConsumePunch(out currentVol)) return;
+            if (VRHands.ConsumePunch(out punchVol))
+                gotInput = true;
+        }
+
+        // 2) Mic shout — ALWAYS active in both VR and flat builds
+        if (vp != null && _vcm != null)
+        {
+            // CurrentFestivalVolume subtracts a configurable floor — in loud environments
+            // (festivals), raise the floor so crowd noise reads as 0. Vosk speech
+            // recognition still works on raw audio; this only affects timing spikes.
+            shoutVol = vp.CurrentFestivalVolume;
+            if (shoutVol >= _vcm.parryVolumeThreshold)
+                gotInput = true;
+        }
+
+        if (!gotInput) return;
+
+        // ── Combine inputs ──────────────────────────────────────────────────────────────────
+        // currentVol is what we send to the server as the "power" value.
+        // In VR with both:   blend punch power + shout volume (up to 1.25x cap)
+        // In VR punch only:  use punch power (0.4–1.0)
+        // In VR shout only:  use shout volume (0.0–1.0)
+        // In flat:           use shout volume (0.0–1.0)
+        float currentVol;
+        bool  usedShout = false;
+
+        if (VRCameraDriver.VRActive)
+        {
+            bool hasShout = (_vcm != null && shoutVol >= _vcm.parryVolumeThreshold);
+            if (punchVol >= 0f && hasShout)
+            {
+                // BOTH punch + shout → combine for up to 1.25x max (extra 25% over pure punch)
+                float shoutBonus = Mathf.Clamp01((shoutVol - _vcm.parryVolumeThreshold) /
+                                                  Mathf.Max(0.01f, 1f - _vcm.parryVolumeThreshold));
+                currentVol = Mathf.Min(1.25f, punchVol + shoutBonus * 0.25f);
+                usedShout = true;
+            }
+            else if (punchVol >= 0f)
+            {
+                currentVol = punchVol;
+            }
+            else
+            {
+                currentVol = shoutVol;
+                usedShout = true;
+            }
         }
         else
         {
-            currentVol = vp.CurrentRawVolume;
-            if (currentVol < _vcm.parryVolumeThreshold) return;
+            currentVol = shoutVol;
+            usedShout = true;
         }
 
         // ── Register the timing spike ─────────────────────────────────────────────────────
@@ -530,16 +569,14 @@ public class PlayerCombat : NetworkBehaviour
         if (!isChainMode && currentMove == "ParryIntent")
         {
             CmdConfirmEliteParry(currentTime, currentVol);
-            Debug.Log($"<color=green>VOCAL SUCCESS:</color> Elite Parry at {timeUntilImpact:F3}s until beat.");
-            // Keep the move as "ParryIntent" so the family reflect logic resolves it.
-            // (The old "ParryLocked" rename made it read as Support → interrupted by Strikes.)
+            Debug.Log($"<color=green>VOCAL SUCCESS:</color> Elite Parry at {timeUntilImpact:F3}s until beat. (vol={currentVol:F2} shout={usedShout})");
             _pendingAttackTrigger = "ParryIntent";
         }
         else
         {
             CmdRegisterVocalSpike(currentTime, currentVol);
             string label = isChainMode ? "CHAIN" : currentMove;
-            Debug.Log($"<color=cyan>SPIKE [{label}]:</color> t={currentTime:F3}s  Δbeat={timeUntilImpact:F3}s");
+            Debug.Log($"<color=cyan>SPIKE [{label}]:</color> t={currentTime:F3}s  Δbeat={timeUntilImpact:F3}s  vol={currentVol:F2} shout={usedShout}");
         }
     }
 
@@ -562,7 +599,7 @@ public class PlayerCombat : NetworkBehaviour
             _dynamicStaggerRate = Mathf.Clamp(1.0f / (totalWindow * 0.65f), 0.40f, 6.0f);
         }
 
-        float vol       = vp.CurrentRawVolume;
+        float vol       = vp.CurrentFestivalVolume;
         float trackTime = rmm.GetCurrentTrackTime();
         float lastBeat  = rmm.lastBeatFireTime;
         float nextBeat  = rmm.GetNextBeatTime();
@@ -779,9 +816,16 @@ public class PlayerCombat : NetworkBehaviour
         VRTimingColor = _timingColor;
         VRTimingTime = Time.time;
 
-        // Drive the cyberpunk power cone from the real on-beat shout grade.
+        // Drive the cyberpunk power cone from BOTH timing grade AND input power.
         if (_powerMeter == null) _powerMeter = GetComponentInChildren<PowerMeterReactor>(true);
-        if (_powerMeter != null) _powerMeter.RegisterGrade(rating);
+        if (_powerMeter != null)
+        {
+            _powerMeter.RegisterGrade(rating);
+            // Also push the combined power (VR swing + mic shout) to the meter.
+            // lastVocalSpikeVolume is synced server→client, so it's current here.
+            if (lastVocalSpikeVolume > 0f)
+                _powerMeter.RegisterPower(lastVocalSpikeVolume);
+        }
     }
     public void QueueRhythmMove(string attackTrigger, Vector3 dashDir)
     {
@@ -1148,11 +1192,12 @@ public class PlayerCombat : NetworkBehaviour
             }
 
             // Volume indicator (new visual element)
-            float vol = vp != null ? vp.CurrentRawVolume : 0f;
+            float rawVol = vp != null ? vp.CurrentRawVolume : 0f;
+            float festVol = vp != null ? vp.CurrentFestivalVolume : 0f;
             GUIStyle volStyle = new GUIStyle(GUI.skin.label)
-                { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 14 };
-            volStyle.normal.textColor = vol >= STAGGER_CHARGE_VOL_MIN ? new Color(0f, 1f, 0.5f) : new Color(1f, 0.6f, 0.2f);
-            GUI.Label(new Rect(sx, sy + 190f, sw, 25f), $"MIC: {vol:F2} (Min: {STAGGER_CHARGE_VOL_MIN:F2})", volStyle);
+                { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, fontSize = 12 };
+            volStyle.normal.textColor = festVol >= STAGGER_CHARGE_VOL_MIN ? new Color(0f, 1f, 0.5f) : new Color(1f, 0.6f, 0.2f);
+            GUI.Label(new Rect(sx, sy + 185f, sw, 20f), $"MIC: {rawVol:F2} | FEST: {festVol:F2} (Min: {STAGGER_CHARGE_VOL_MIN:F2})", volStyle);
 
             GUI.color = Color.white;
         }
@@ -1195,30 +1240,50 @@ public class PlayerCombat : NetworkBehaviour
             PlayerCombat oppCombat = opponent.GetComponent<PlayerCombat>();
             if (oppCombat != null)
             {
-                float barWidth = 400f;
-                float barHeight = 60f;
-                float posX = Screen.width / 2f - barWidth / 2f;
-                float posY = 20f;
+                // ── OPPONENT HEALTH BAR (Top Right) ──
+                float barWidth = 380f;
+                float barHeight = 52f;
+                float posX = Screen.width - barWidth - 24f;
+                float posY = 16f;
 
-                GUI.color = new Color(0.1f, 0.1f, 0.1f, 1f);
+                // Outer shadow/glow
+                GUI.color = new Color(1f, 0.15f, 0.15f, 0.15f);
+                GUI.DrawTexture(new Rect(posX - 4, posY - 4, barWidth + 8, barHeight + 8), _whiteTexture);
+
+                // Background
+                GUI.color = new Color(0.06f, 0.02f, 0.02f, 0.95f);
                 GUI.DrawTexture(new Rect(posX, posY, barWidth, barHeight), _whiteTexture);
+
+                // Border — red for enemy
+                GUI.color = new Color(1f, 0.2f, 0.2f, 0.6f);
+                GUI.DrawTexture(new Rect(posX, posY, barWidth, 2.5f), _whiteTexture);
+                GUI.DrawTexture(new Rect(posX, posY + barHeight - 2.5f, barWidth, 2.5f), _whiteTexture);
+                GUI.DrawTexture(new Rect(posX, posY, 2.5f, barHeight), _whiteTexture);
+                GUI.DrawTexture(new Rect(posX + barWidth - 2.5f, posY, 2.5f, barHeight), _whiteTexture);
 
                 float pctPercent = Mathf.Clamp01(oppCombat.CurrentPercentage / 100f);
                 Color barColor = GetPercentageColor(oppCombat.CurrentPercentage);
-                GUI.color = barColor;
-                GUI.DrawTexture(new Rect(posX + 5, posY + 5, (barWidth - 10) * pctPercent, barHeight - 10), _whiteTexture);
 
+                // Fill with gradient feel
+                GUI.color = barColor;
+                GUI.DrawTexture(new Rect(posX + 4, posY + 4, (barWidth - 8) * pctPercent, barHeight - 8), _whiteTexture);
+
+                // Fill glow overlay
+                GUI.color = new Color(barColor.r, barColor.g, barColor.b, 0.25f);
+                GUI.DrawTexture(new Rect(posX + 4, posY + 4, (barWidth - 8) * pctPercent, (barHeight - 8) * 0.5f), _whiteTexture);
+
+                // Label
                 GUI.color = Color.white;
                 GUIStyle nameStyle = new GUIStyle(GUI.skin.label)
                 {
-                    alignment = TextAnchor.MiddleCenter,
+                    alignment = TextAnchor.MiddleRight,
                     fontStyle = FontStyle.Bold,
-                    fontSize = 24 
+                    fontSize = 20
                 };
 
-                string oppName = string.IsNullOrEmpty(opponent.PlayerName) ? "BOT UNIT" : opponent.PlayerName;
-                CyberpunkGUIUtils.DrawGlowText(new Rect(posX, posY, barWidth, barHeight), $"{oppName}: {oppCombat.CurrentPercentage:F0}%",
-                    CyberpunkGUIUtils.NEON_CYAN, nameStyle, CyberpunkGUIUtils.NEON_CYAN);
+                string oppName = string.IsNullOrEmpty(opponent.PlayerName) ? "OPPONENT" : opponent.PlayerName;
+                CyberpunkGUIUtils.DrawGlowText(new Rect(posX + 12f, posY, barWidth - 24f, barHeight),
+                    $"{oppName}  |  {oppCombat.CurrentPercentage:F0}%", new Color(1f, 0.35f, 0.35f), nameStyle, new Color(1f, 0.15f, 0.15f));
 
                 // --- OPPONENT CARDS PANEL (Top Left) --- (hidden for cleaner HUD)
 #if false
@@ -1282,31 +1347,51 @@ public class PlayerCombat : NetworkBehaviour
             }
         }
 
-        // --- LOCAL PLAYER HEALTH BAR (Bottom Center) — same style as the opponent bar ---
+        // --- LOCAL PLAYER HEALTH BAR (Bottom Left) — distinct from opponent bar ---
         {
-            float barWidth  = 400f;
-            float barHeight = 60f;
-            float posX = Screen.width / 2f - barWidth / 2f;
-            float posY = Screen.height - barHeight - 30f;
+            float barWidth  = 380f;
+            float barHeight = 52f;
+            float posX = 24f;
+            float posY = Screen.height - barHeight - 20f;
 
-            GUI.color = new Color(0.1f, 0.1f, 0.1f, 1f);
+            // Outer shadow/glow
+            GUI.color = new Color(0.15f, 0.8f, 1f, 0.12f);
+            GUI.DrawTexture(new Rect(posX - 4, posY - 4, barWidth + 8, barHeight + 8), _whiteTexture);
+
+            // Background
+            GUI.color = new Color(0.02f, 0.05f, 0.08f, 0.95f);
             GUI.DrawTexture(new Rect(posX, posY, barWidth, barHeight), _whiteTexture);
 
-            float pctPercent = Mathf.Clamp01(CurrentPercentage / 100f);
-            GUI.color = GetPercentageColor(CurrentPercentage);
-            GUI.DrawTexture(new Rect(posX + 5, posY + 5, (barWidth - 10) * pctPercent, barHeight - 10), _whiteTexture);
+            // Border — cyan for player
+            GUI.color = new Color(0.15f, 0.8f, 1f, 0.6f);
+            GUI.DrawTexture(new Rect(posX, posY, barWidth, 2.5f), _whiteTexture);
+            GUI.DrawTexture(new Rect(posX, posY + barHeight - 2.5f, barWidth, 2.5f), _whiteTexture);
+            GUI.DrawTexture(new Rect(posX, posY, 2.5f, barHeight), _whiteTexture);
+            GUI.DrawTexture(new Rect(posX + barWidth - 2.5f, posY, 2.5f, barHeight), _whiteTexture);
 
+            float pctPercent = Mathf.Clamp01(CurrentPercentage / 100f);
+            Color barColor = GetPercentageColor(CurrentPercentage);
+
+            // Fill
+            GUI.color = barColor;
+            GUI.DrawTexture(new Rect(posX + 4, posY + 4, (barWidth - 8) * pctPercent, barHeight - 8), _whiteTexture);
+
+            // Fill glow overlay
+            GUI.color = new Color(barColor.r, barColor.g, barColor.b, 0.25f);
+            GUI.DrawTexture(new Rect(posX + 4, posY + 4, (barWidth - 8) * pctPercent, (barHeight - 8) * 0.5f), _whiteTexture);
+
+            // Label
             GUI.color = Color.white;
             GUIStyle myNameStyle = new GUIStyle(GUI.skin.label)
             {
-                alignment = TextAnchor.MiddleCenter,
+                alignment = TextAnchor.MiddleLeft,
                 fontStyle = FontStyle.Bold,
-                fontSize  = 24
+                fontSize  = 20
             };
             string myName = GetComponent<PlayerController>().PlayerName;
             if (string.IsNullOrEmpty(myName)) myName = "YOU";
-            CyberpunkGUIUtils.DrawGlowText(new Rect(posX, posY, barWidth, barHeight), $"{myName}: {CurrentPercentage:F0}%",
-                CyberpunkGUIUtils.NEON_CYAN, myNameStyle, CyberpunkGUIUtils.NEON_CYAN);
+            CyberpunkGUIUtils.DrawGlowText(new Rect(posX + 12f, posY, barWidth - 24f, barHeight),
+                $"{CurrentPercentage:F0}%  |  {myName}", new Color(0.2f, 0.9f, 1f), myNameStyle, new Color(0.1f, 0.6f, 0.9f));
         }
 
         // --- 2. MIC THRESHOLD (Right Bottom Corner) ---

@@ -138,9 +138,9 @@ public class VRWorldHud : MonoBehaviour
         crt.localScale = Vector3.one * 0.001f; // 1200px -> 1.2m wide
         crt.localPosition = Vector3.zero;
 
-        // Health bars: YOU (left), BOT (right), pushed to the very top of the view.
-        BuildBar(crt, new Vector2(-300, 400), out _selfFill, out _selfLabel);
-        BuildBar(crt, new Vector2( 300, 400), out _oppFill,  out _oppLabel);
+        // Health bars: YOU (left), BOT (right), pushed high up for visibility.
+        BuildBar(crt, new Vector2(-300, 380), out _selfFill, out _selfLabel);
+        BuildBar(crt, new Vector2( 300, 380), out _oppFill,  out _oppLabel);
 
         // Timing feedback text, centred (a bit above eye-line).
         _timingLabel = MakeText(crt, "", 80, new Vector2(0, 120), new Vector2(900, 140));
@@ -149,18 +149,29 @@ public class VRWorldHud : MonoBehaviour
 
     private void BuildBar(RectTransform parent, Vector2 pos, out Image fill, out Text label)
     {
-        var bg = MakeImage(parent, new Color(0.05f, 0.05f, 0.07f, 0.85f), pos, new Vector2(520, 64));
+        bool isSelf = pos.x < 0; // left bar = self, right bar = opponent
+        Color borderCol = isSelf ? new Color(0.15f, 0.8f, 1f, 0.7f) : new Color(1f, 0.2f, 0.2f, 0.7f);
+
+        // Background with colored border tint
+        var bg = MakeImage(parent, new Color(0.04f, 0.04f, 0.06f, 0.9f), pos, new Vector2(520, 64));
+
+        // Colored border lines
+        var topBorder = MakeImage((RectTransform)bg.transform, borderCol, new Vector2(0, 30), new Vector2(520, 3));
+        var botBorder = MakeImage((RectTransform)bg.transform, borderCol, new Vector2(0, -30), new Vector2(520, 3));
+        var leftBorder = MakeImage((RectTransform)bg.transform, borderCol, new Vector2(-258, 0), new Vector2(3, 64));
+        var rightBorder = MakeImage((RectTransform)bg.transform, borderCol, new Vector2(258, 0), new Vector2(3, 64));
 
         // Fill anchored to the LEFT edge so growing its width fills rightward.
-        fill = MakeImage((RectTransform)bg.transform, Color.green, Vector2.zero, new Vector2(0, 56));
+        fill = MakeImage((RectTransform)bg.transform, Color.green, Vector2.zero, new Vector2(0, 52));
         var frt = (RectTransform)fill.transform;
         frt.anchorMin = new Vector2(0f, 0.5f);
         frt.anchorMax = new Vector2(0f, 0.5f);
         frt.pivot     = new Vector2(0f, 0.5f);
-        frt.anchoredPosition = new Vector2(-BAR_FULL_W * 0.5f, 0f); // start at left inner edge
+        frt.anchoredPosition = new Vector2(-BAR_FULL_W * 0.5f + 4f, 0f); // start at left inner edge
 
-        label = MakeText((RectTransform)bg.transform, "", 30, Vector2.zero, new Vector2(520, 64));
+        label = MakeText((RectTransform)bg.transform, "", 28, Vector2.zero, new Vector2(500, 64));
         label.fontStyle = FontStyle.Bold;
+        label.color = isSelf ? new Color(0.2f, 0.9f, 1f) : new Color(1f, 0.4f, 0.4f);
     }
 
     private Image MakeImage(RectTransform parent, Color color, Vector2 pos, Vector2 size)
@@ -239,8 +250,8 @@ public class VRWorldHud : MonoBehaviour
         t.localScale = Vector3.one * CARD_SCALE;
     }
 
-    // Where the power cone sits relative to the HUD (HUD-local). Off to your RIGHT, tall.
-    private static readonly Vector3 POWER_OFFSET = new Vector3(0.85f, 0f, 0f);
+    // Where the power cone sits relative to the HUD (HUD-local). Off to your LEFT.
+    private static readonly Vector3 POWER_OFFSET = new Vector3(-0.85f, 0f, 0f);
     private const float POWER_SCALE = 0.0016f;
 
     // Find the local power-meter cone and make sure it renders in VR (world-space).

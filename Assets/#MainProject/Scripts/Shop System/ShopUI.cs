@@ -16,11 +16,11 @@ public class ShopUI : MonoBehaviour
     private GUIStyle _buttonStyle;
 
     // Layout constants
-    private const float LEFT_SIDEBAR_W = 0.20f;
-    private const float SHOP_W = 0.55f;
-    private const float RIGHT_SIDEBAR_W = 0.20f;
-    private const float MARGIN = 12f;
-    private const float TOP_H = 100f;
+    private const float LEFT_SIDEBAR_W = 0.22f;
+    private const float SHOP_W = 0.52f;
+    private const float RIGHT_SIDEBAR_W = 0.22f;
+    private const float MARGIN = 14f;
+    private const float TOP_H = 90f;
 
     // Hover tooltip state
     private string _hoveredCardId = "";
@@ -93,33 +93,74 @@ public class ShopUI : MonoBehaviour
 
     private void DrawHeader(ShopPhaseManager spm, PlayerInventory inv)
     {
-        // Title with neon glow effect
-        GUI.color = new Color(0f, 1f, 0.8f, 0.15f);
-        GUI.DrawTexture(new Rect(0, 5, _vw, 55), _whiteTex);
+        // Animated gradient header bar
+        float pulse = (Mathf.Sin(Time.time * 3f) + 1f) * 0.5f;
+        GUI.color = new Color(0f, 0.9f, 0.7f, 0.08f + pulse * 0.06f);
+        GUI.DrawTexture(new Rect(0, 0, _vw, 70), _whiteTex);
         GUI.color = Color.white;
 
-        CyberpunkGUIUtils.DrawGlowText(new Rect(0, 8, _vw, 45), "⚡ POST-ROUND SHOP ⚡",
+        // Title with stronger glow
+        CyberpunkGUIUtils.DrawGlowText(new Rect(0, 6, _vw, 42), "⚡  POST-ROUND SHOP  ⚡",
             CyberpunkGUIUtils.NEON_CYAN, _titleStyle, CyberpunkGUIUtils.NEON_CYAN);
 
-        // Top bar with info
-        float barY = 60f;
-        float thirdW = _vw / 3f;
+        // Decorative underline
+        GUI.color = new Color(0f, 1f, 0.8f, 0.4f + pulse * 0.3f);
+        GUI.DrawTexture(new Rect(_vw * 0.25f, 48, _vw * 0.5f, 2f), _whiteTex);
+        GUI.color = Color.white;
 
-        // Timer
-        Color timerColor = spm.shopTimeRemaining <= 15f ? new Color(1f, 0.2f, 0.2f) : CyberpunkGUIUtils.NEON_CYAN;
-        CyberpunkGUIUtils.DrawGlowText(new Rect(MARGIN, barY, thirdW - MARGIN * 2, 30), $"⏱  {Mathf.Max(0f, spm.shopTimeRemaining):F0}s",
-            timerColor, _timerStyle, timerColor);
+        // Top bar with info — three distinct pill-shaped panels
+        float barY = 54f;
+        float pillH = 30f;
+        float pillGap = 16f;
+        float totalPillW = _vw - MARGIN * 2f;
+        float pillW = (totalPillW - pillGap * 2f) / 3f;
 
-        // Credits (combat cards) + Trait Tokens (traits) — two separate economies
-        string creditsStr = inv != null ? $"💰 {inv.credits}   🟢 {inv.traitTokens} TK" : "💰 --";
-        GUIStyle creditStyle = new GUIStyle(_timerStyle);
-        CyberpunkGUIUtils.DrawGlowText(new Rect(thirdW - MARGIN, barY, thirdW + MARGIN * 2, 30), creditsStr,
-            CyberpunkGUIUtils.NEON_YELLOW, creditStyle, CyberpunkGUIUtils.NEON_YELLOW);
+        // Timer pill
+        Color timerColor = spm.shopTimeRemaining <= 15f ? new Color(1f, 0.2f, 0.2f) : new Color(0f, 0.85f, 1f);
+        DrawInfoPill(MARGIN, barY, pillW, pillH, $"⏱  {Mathf.Max(0f, spm.shopTimeRemaining):F0}s", timerColor,
+            spm.shopTimeRemaining <= 15f ? "TIME RUNNING OUT!" : "TIME REMAINING");
 
-        // Round
-        GUIStyle roundStyle = new GUIStyle(_timerStyle);
-        CyberpunkGUIUtils.DrawGlowText(new Rect(thirdW * 2f, barY, thirdW - MARGIN * 2, 30), $"ROUND {spm.currentShopRound}",
-            CyberpunkGUIUtils.NEON_MAGENTA, roundStyle, CyberpunkGUIUtils.NEON_MAGENTA);
+        // Currency pill
+        int credits = inv != null ? inv.credits : 0;
+        int tokens = inv != null ? inv.traitTokens : 0;
+        DrawInfoPill(MARGIN + pillW + pillGap, barY, pillW, pillH,
+            $"💰 {credits} CR  |  🟢 {tokens} TK", new Color(1f, 0.9f, 0.2f),
+            "COMBAT CREDITS  |  TRAIT TOKENS");
+
+        // Round pill
+        DrawInfoPill(MARGIN + (pillW + pillGap) * 2f, barY, pillW, pillH,
+            $"ROUND {spm.currentShopRound}", new Color(1f, 0.3f, 0.8f), "CURRENT ROUND");
+    }
+
+    private void DrawInfoPill(float x, float y, float w, float h, string mainText, Color accent, string subText)
+    {
+        // Pill background
+        GUI.color = new Color(accent.r * 0.12f, accent.g * 0.12f, accent.b * 0.12f, 0.85f);
+        GUI.DrawTexture(new Rect(x, y, w, h), _whiteTex);
+
+        // Pill border glow
+        GUI.color = new Color(accent.r, accent.g, accent.b, 0.5f);
+        GUI.DrawTexture(new Rect(x, y, w, 1.5f), _whiteTex);
+        GUI.DrawTexture(new Rect(x, y + h - 1.5f, w, 1.5f), _whiteTex);
+
+        // Main text
+        GUIStyle mainSt = new GUIStyle(GUI.skin.label)
+        {
+            fontSize = 15,
+            fontStyle = FontStyle.Bold,
+            alignment = TextAnchor.MiddleCenter
+        };
+        CyberpunkGUIUtils.DrawGlowText(new Rect(x, y, w, h), mainText, accent, mainSt, accent);
+
+        // Sub label (tiny, below the pill)
+        GUIStyle subSt = new GUIStyle(GUI.skin.label)
+        {
+            fontSize = 9,
+            alignment = TextAnchor.MiddleCenter
+        };
+        subSt.normal.textColor = new Color(accent.r, accent.g, accent.b, 0.5f);
+        GUI.color = Color.white;
+        GUI.Label(new Rect(x, y + h + 2f, w, 14f), subText, subSt);
     }
 
     private void DrawPlayerInventoryPanel(float x, float y, float w, float h, PlayerInventory inv)
@@ -185,8 +226,8 @@ public class ShopUI : MonoBehaviour
                 description = card.description;
                 cost = card.cost;
                 rarityColor = card.rarity == CardRarity.Basic ? new Color(0.6f, 0.6f, 0.6f) :
-                             card.rarity == CardRarity.Advanced ? new Color(0.2f, 0.5f, 1f) :
-                             new Color(1f, 0.75f, 0.1f);
+                             card.rarity == CardRarity.Advanced ? new Color(0.35f, 0.6f, 1f) :
+                             new Color(1f, 0.75f, 0.15f);
                 sideColor = GetFamilyColor(card.family);
                 famTag = GetFamilyName(card.family);
             }
@@ -204,29 +245,32 @@ public class ShopUI : MonoBehaviour
             }
         }
 
-        Rect cardRect = new Rect(x, y, w - (canRemove ? 50f : 0), h);
+        Rect cardRect = new Rect(x, y, w - (canRemove ? 52f : 0), h);
+        bool isHovered = cardRect.Contains(Event.current.mousePosition);
 
         // Card background with rarity
-        GUI.color = new Color(rarityColor.r * 0.25f, rarityColor.g * 0.25f, rarityColor.b * 0.25f);
+        GUI.color = isHovered
+            ? new Color(rarityColor.r * 0.35f, rarityColor.g * 0.35f, rarityColor.b * 0.35f)
+            : new Color(rarityColor.r * 0.2f, rarityColor.g * 0.2f, rarityColor.b * 0.2f);
         GUI.DrawTexture(cardRect, _whiteTex);
 
         // Family-colored left border
         GUI.color = sideColor;
-        GUI.DrawTexture(new Rect(x, y, 4f, h), _whiteTex);
+        GUI.DrawTexture(new Rect(x, y, isHovered ? 5f : 3f, h), _whiteTex);
 
         // Text
         GUI.color = Color.white;
-        GUI.Label(new Rect(x + 10f, y + 5f, cardRect.width - 70f, 20f), displayName.ToUpper(), _cardNameStyle);
+        GUI.Label(new Rect(x + 10f, y + 4f, cardRect.width - 70f, 20f), displayName.ToUpper(), _cardNameStyle);
 
         // Family tag (small, top-right) for combat cards
         if (!string.IsNullOrEmpty(famTag))
         {
             GUIStyle famSt = new GUIStyle(GUI.skin.label) { fontSize = 10, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleRight };
             famSt.normal.textColor = sideColor;
-            GUI.Label(new Rect(x + cardRect.width - 64f, y + 5f, 58f, 18f), famTag, famSt);
+            GUI.Label(new Rect(x + cardRect.width - 60f, y + 4f, 54f, 16f), famTag, famSt);
         }
-        _costStyle.normal.textColor = new Color(1f, 1f, 0f, 0.8f);
-        GUI.Label(new Rect(x + 8f, y + 26f, 50f, 16f), $"{cost} CR", _costStyle);
+        _costStyle.normal.textColor = new Color(1f, 1f, 0f, 0.7f);
+        GUI.Label(new Rect(x + 10f, y + 24f, 50f, 16f), $"◈ {cost}", _costStyle);
 
         // Hover
         if (cardRect.Contains(Event.current.mousePosition))
@@ -238,23 +282,26 @@ public class ShopUI : MonoBehaviour
             _hasTooltip = true;
         }
 
-        // Upgrade stars (combat cards only). In battle each type's slot draws at random from
-        // all the cards you own of that type, so there's no manual "active" pick here.
+        // Upgrade stars (combat cards only)
         if (category == "Combat")
         {
             var locInv = GameManager.localPlayer != null ? GameManager.localPlayer.GetComponent<PlayerInventory>() : null;
             int lvl = locInv != null ? locInv.GetLevel(cardId) : 1;
             GUIStyle starSt = new GUIStyle(GUI.skin.label) { fontSize = 13, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleLeft };
             starSt.normal.textColor = new Color(1f, 0.85f, 0.2f);
-            GUI.Label(new Rect(x + 62f, y + 26f, 80f, 16f), StarStr(lvl), starSt);
+            GUI.Label(new Rect(x + 56f, y + 24f, 80f, 16f), StarStr(lvl), starSt);
         }
 
         // Remove button
         if (canRemove)
         {
-            Rect removeRect = new Rect(x + w - 45f, y + (h - 24f) / 2f, 40f, 24f);
-            GUI.color = new Color(1f, 0.3f, 0.3f, 0.7f);
-            if (GUI.Button(removeRect, "REMOVE", new GUIStyle(GUI.skin.button) { fontSize = 10, fontStyle = FontStyle.Bold }))
+            Rect removeRect = new Rect(x + w - 48f, y + (h - 26f) / 2f, 44f, 26f);
+            GUI.color = new Color(1f, 0.25f, 0.25f, isHovered ? 0.8f : 0.5f);
+            GUI.DrawTexture(removeRect, _whiteTex);
+            GUI.color = new Color(1f, 0.5f, 0.5f, isHovered ? 1f : 0.7f);
+            GUIStyle rmSt = new GUIStyle(GUI.skin.label) { fontSize = 10, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+            GUI.Label(removeRect, "✕", rmSt);
+            if (GUI.Button(removeRect, "", GUIStyle.none))
             {
                 var localPc = GameManager.localPlayer?.GetComponent<PlayerCombat>();
                 if (localPc != null) localPc.CmdRemoveCard(cardId);
@@ -322,13 +369,23 @@ public class ShopUI : MonoBehaviour
 
     private void DrawEmptySlot(float x, float y, float w, float h)
     {
-        GUI.color = new Color(0.2f, 0.2f, 0.3f);
+        // Dashed-line style background
+        GUI.color = new Color(0.15f, 0.15f, 0.22f, 0.5f);
         GUI.DrawTexture(new Rect(x, y, w, h), _whiteTex);
-        GUI.color = new Color(0.55f, 0.55f, 0.6f);
-        GUIStyle soldSt = new GUIStyle(GUI.skin.label) { fontSize = 20, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
-        soldSt.normal.textColor = new Color(0.55f, 0.55f, 0.6f);
+
+        // Dotted border
+        GUI.color = new Color(0.35f, 0.35f, 0.45f, 0.4f);
+        float dash = 8f;
+        for (float dx = 0; dx < w; dx += dash * 2f)
+        {
+            GUI.DrawTexture(new Rect(x + dx, y, Mathf.Min(dash, w - dx), 1.5f), _whiteTex);
+            GUI.DrawTexture(new Rect(x + dx, y + h - 1.5f, Mathf.Min(dash, w - dx), 1.5f), _whiteTex);
+        }
+
+        GUIStyle soldSt = new GUIStyle(GUI.skin.label) { fontSize = 18, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+        soldSt.normal.textColor = new Color(0.4f, 0.4f, 0.5f, 0.6f);
         GUI.color = Color.white;
-        GUI.Label(new Rect(x, y, w, h), "SOLD OUT", soldSt);
+        GUI.Label(new Rect(x, y, w, h), "◆  SOLD OUT  ◆", soldSt);
     }
 
     private void DrawCombatCard(float x, float y, float w, float h, CombatCardData card, PlayerInventory inv, int slotIndex, ShopPhaseManager spm)
@@ -337,84 +394,108 @@ public class ShopUI : MonoBehaviour
         bool isHovered = fullCardRect.Contains(Event.current.mousePosition);
 
         Color famCol = GetFamilyColor(card.family);
+        Color rarityCol = card.rarity == CardRarity.Basic ? new Color(0.6f, 0.6f, 0.6f) :
+                         card.rarity == CardRarity.Advanced ? new Color(0.35f, 0.6f, 1f) :
+                         new Color(1f, 0.75f, 0.15f);
 
-        // Background
-        GUI.color = isHovered ? new Color(0.08f, 0.1f, 0.18f) : new Color(0.05f, 0.06f, 0.12f);
+        // Background with rarity tint
+        GUI.color = isHovered ? new Color(0.1f, 0.12f, 0.22f) : new Color(0.06f, 0.07f, 0.14f);
         GUI.DrawTexture(fullCardRect, _whiteTex);
 
-        // Family-colored left spine + full border (thicker on hover)
-        float spine = isHovered ? 6f : 4f;
+        // Rarity top stripe
+        GUI.color = rarityCol;
+        GUI.DrawTexture(new Rect(x, y, w, 3f), _whiteTex);
+
+        // Family-colored left spine (thicker on hover)
+        float spine = isHovered ? 8f : 5f;
         GUI.color = famCol;
         GUI.DrawTexture(new Rect(x, y, spine, h), _whiteTex);
-        float b = isHovered ? 3f : 1.5f;
-        GUI.color = new Color(famCol.r, famCol.g, famCol.b, isHovered ? 0.95f : 0.55f);
-        GUI.DrawTexture(new Rect(x, y, w, b), _whiteTex);
-        GUI.DrawTexture(new Rect(x, y + h - b, w, b), _whiteTex);
-        GUI.DrawTexture(new Rect(x + w - b, y, b, h), _whiteTex);
 
-        float pad = 14f;
+        // Glow border on hover
+        if (isHovered)
+        {
+            GUI.color = new Color(famCol.r, famCol.g, famCol.b, 0.6f);
+            GUI.DrawTexture(new Rect(x, y, w, 2.5f), _whiteTex);
+            GUI.DrawTexture(new Rect(x, y + h - 2.5f, w, 2.5f), _whiteTex);
+            GUI.DrawTexture(new Rect(x + w - 2.5f, y, 2.5f, h), _whiteTex);
+        }
+
+        float pad = 12f;
         float textX = x + spine + pad;
         float textW = w - spine - pad * 2;
 
-        // Family badge (top-right) — the class indicator
+        // Family badge (top-right)
         string famName = GetFamilyName(card.family);
-        GUIStyle badgeSt = new GUIStyle(GUI.skin.label) { fontSize = 13, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
-        float badgeW = 88f, badgeH = 24f;
+        GUIStyle badgeSt = new GUIStyle(GUI.skin.label) { fontSize = 12, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+        float badgeW = 80f, badgeH = 22f;
         float badgeX = x + w - badgeW - pad;
-        GUI.color = new Color(famCol.r * 0.28f, famCol.g * 0.28f, famCol.b * 0.28f, 0.95f);
+        GUI.color = new Color(famCol.r * 0.2f, famCol.g * 0.2f, famCol.b * 0.2f, 0.9f);
         GUI.DrawTexture(new Rect(badgeX, y + pad, badgeW, badgeH), _whiteTex);
         GUI.color = famCol;
-        GUI.DrawTexture(new Rect(badgeX, y + pad, badgeW, 2f), _whiteTex);
-        GUI.DrawTexture(new Rect(badgeX, y + pad + badgeH - 2f, badgeW, 2f), _whiteTex);
+        GUI.DrawTexture(new Rect(badgeX, y + pad, badgeW, 1.5f), _whiteTex);
+        GUI.DrawTexture(new Rect(badgeX, y + pad + badgeH - 1.5f, badgeW, 1.5f), _whiteTex);
         badgeSt.normal.textColor = famCol;
         GUI.color = Color.white;
         GUI.Label(new Rect(badgeX, y + pad, badgeW, badgeH), famName, badgeSt);
 
-        // Card name (big)
-        GUIStyle nameStyle = new GUIStyle(_cardNameStyle) { fontSize = 24 };
-        Color nameColor = isHovered ? new Color(1f, 1f, 0.5f) : Color.white;
-        CyberpunkGUIUtils.DrawGlowText(new Rect(textX, y + pad, textW - badgeW - 6f, 30f), card.displayName.ToUpper(), nameColor, nameStyle, famCol);
+        // Rarity label (small, above family badge)
+        GUIStyle raritySt = new GUIStyle(GUI.skin.label) { fontSize = 10, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleRight };
+        raritySt.normal.textColor = rarityCol;
+        GUI.Label(new Rect(badgeX - 60f, y + pad - 2f, 58f, 16f), card.rarity.ToString().ToUpper(), raritySt);
 
-        // Description (bigger, readable)
-        GUIStyle bodySt = new GUIStyle(_descStyle) { fontSize = 15, wordWrap = true };
-        bodySt.normal.textColor = isHovered ? new Color(1f, 1f, 1f, 0.98f) : new Color(0.88f, 0.9f, 0.95f, 0.9f);
-        GUI.Label(new Rect(textX, y + pad + 34f, textW, h - pad * 2 - 60f), card.description, bodySt);
+        // Card name with glow
+        GUIStyle nameStyle = new GUIStyle(_cardNameStyle) { fontSize = 22 };
+        Color nameColor = isHovered ? new Color(1f, 1f, 0.6f) : Color.white;
+        CyberpunkGUIUtils.DrawGlowText(new Rect(textX, y + pad + 2f, textW - badgeW - 6f, 28f), card.displayName.ToUpper(), nameColor, nameStyle, famCol);
 
-        // Cost (big, bottom-left)
-        GUIStyle costStyle = new GUIStyle(_costStyle) { fontSize = 20 };
-        CyberpunkGUIUtils.DrawGlowText(new Rect(textX, y + h - 34f, 110f, 26f), $"{card.cost} CR", CyberpunkGUIUtils.NEON_YELLOW, costStyle, CyberpunkGUIUtils.NEON_YELLOW);
+        // Description
+        GUIStyle bodySt = new GUIStyle(_descStyle) { fontSize = 14, wordWrap = true };
+        bodySt.normal.textColor = isHovered ? new Color(1f, 1f, 1f, 0.95f) : new Color(0.85f, 0.88f, 0.92f, 0.85f);
+        GUI.Label(new Rect(textX, y + pad + 30f, textW, h - pad * 2 - 56f), card.description, bodySt);
 
-        // Buy / Upgrade button — a duplicate purchase upgrades an owned card.
+        // Bottom row: cost + stars + button
+        float bottomY = y + h - 38f;
+
+        // Cost with coin icon
+        GUIStyle costStyle = new GUIStyle(_costStyle) { fontSize = 18 };
+        CyberpunkGUIUtils.DrawGlowText(new Rect(textX, bottomY, 100f, 24f), $"◈ {card.cost}", CyberpunkGUIUtils.NEON_YELLOW, costStyle, CyberpunkGUIUtils.NEON_YELLOW);
+
+        // Buy / Upgrade / Maxed / Can't afford button
         bool owned = inv != null && inv.ownedCombatCards.Contains(card.cardId);
         int ownedLvl = owned ? inv.GetLevel(card.cardId) : 0;
         bool maxed = owned && inv.IsMaxLevel(card.cardId);
         bool canAfford = inv != null && inv.credits >= card.cost;
-        float bw = 120f, bh = 34f;
-        Rect btnRect = new Rect(x + w - bw - pad, y + h - bh - 8f, bw, bh);
-        GUIStyle bigBtn = new GUIStyle(GUI.skin.button) { fontSize = 16, fontStyle = FontStyle.Bold };
+        float bw = 110f, bh = 32f;
+        Rect btnRect = new Rect(x + w - bw - pad, bottomY - 2f, bw, bh);
+        GUIStyle bigBtn = new GUIStyle(GUI.skin.button) { fontSize = 15, fontStyle = FontStyle.Bold };
 
-        // Owned level shown as stars next to the button
+        // Stars shown inline next to cost
         if (owned)
         {
-            GUIStyle starSt = new GUIStyle(GUI.skin.label) { fontSize = 16, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleRight };
+            GUIStyle starSt = new GUIStyle(GUI.skin.label) { fontSize = 14, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleLeft };
             starSt.normal.textColor = new Color(1f, 0.85f, 0.2f);
-            GUI.Label(new Rect(x + w - bw - pad - 92f, y + h - bh - 8f, 88f, bh), StarStr(ownedLvl), starSt);
+            GUI.Label(new Rect(textX + 80f, bottomY, 80f, 24f), StarStr(ownedLvl), starSt);
         }
 
         if (maxed)
         {
-            GUI.color = new Color(0.5f, 0.5f, 0.5f, 0.55f);
-            GUI.Button(btnRect, "MAX", bigBtn);
+            GUI.color = new Color(1f, 0.75f, 0.2f, 0.25f);
+            GUI.DrawTexture(btnRect, _whiteTex);
+            GUI.color = new Color(1f, 0.75f, 0.2f, 0.7f);
+            GUI.Label(btnRect, "★ MAX ★", new GUIStyle(GUI.skin.label) { fontSize = 15, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter });
         }
         else if (!canAfford)
         {
-            GUI.color = new Color(0.6f, 0.25f, 0.25f, 0.7f);
-            GUI.Button(btnRect, $"NEED {card.cost}", bigBtn);
+            GUI.color = new Color(0.5f, 0.15f, 0.15f, 0.6f);
+            GUI.DrawTexture(btnRect, _whiteTex);
+            GUI.color = new Color(1f, 0.4f, 0.4f, 0.6f);
+            GUI.Label(btnRect, $"NEED {card.cost}", new GUIStyle(GUI.skin.label) { fontSize = 13, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter });
         }
         else
         {
-            GUI.color = isHovered ? new Color(0.2f, 0.95f, 0.45f, 0.95f) : new Color(0.15f, 0.7f, 0.3f, 0.85f);
-            if (GUI.Button(btnRect, owned ? "UPGRADE" : "BUY", bigBtn))
+            Color btnCol = isHovered ? new Color(0.25f, 1f, 0.5f, 0.95f) : new Color(0.15f, 0.75f, 0.35f, 0.85f);
+            GUI.color = btnCol;
+            if (GUI.Button(btnRect, owned ? "UPGRADE ◈" : "BUY ◈", bigBtn))
             {
                 var localPc = GameManager.localPlayer?.GetComponent<PlayerCombat>();
                 if (localPc != null) localPc.CmdBuyCombatCard(slotIndex);
@@ -429,15 +510,14 @@ public class ShopUI : MonoBehaviour
             _tooltipPos    = Event.current.mousePosition;
             _tooltipTitle  = card.displayName;
 
-            // Show upgrade preview when hovered: Lv1/Lv2/Lv3 damage + timing + perk
             if (owned)
             {
                 string lv1 = $"Lv1 — {card.baseDamage}dmg  |  {card.timingWindow:F2}s window";
                 string lv2 = $"Lv2 — {card.lv2Damage}dmg  |  {(card.timingWindow + card.lv2TimingBonus):F2}s window";
                 string lv3 = $"Lv3 — {card.lv3Damage}dmg  |  {(card.timingWindow + card.lv3TimingBonus):F2}s window";
                 string perkLine = string.IsNullOrEmpty(card.perkDescription) ? "" : $"\nPERK: {card.perkDescription}";
-                string arrow = ownedLvl == 1 ? $"  ← you are here\n{lv2}\n{lv3}" :
-                               ownedLvl == 2 ? $"\n{lv2}  ← you are here\n{lv3}" :
+                string arrow = ownedLvl == 1 ? $"  ← YOU ARE HERE\n{lv2}\n{lv3}" :
+                               ownedLvl == 2 ? $"\n{lv2}  ← YOU ARE HERE\n{lv3}" :
                                                $"\n{lv2}\n{lv3}  ← MAXED";
                 _tooltipText = $"{lv1}{arrow}{perkLine}";
             }
@@ -458,72 +538,95 @@ public class ShopUI : MonoBehaviour
         Rect fullCardRect = new Rect(x, y, w, h);
         bool isHovered = fullCardRect.Contains(Event.current.mousePosition);
         bool alreadyEquipped = inv != null && inv.equippedTraitId == card.traitId;
+        Color traitCol = new Color(0.3f, 0.95f, 0.5f);
+        Color equipCol = new Color(1f, 0.8f, 0.15f);
 
         // Background
-        GUI.color = isHovered ? new Color(0.04f, 0.14f, 0.08f) : new Color(0.03f, 0.08f, 0.05f);
+        GUI.color = isHovered ? new Color(0.05f, 0.14f, 0.08f) : new Color(0.03f, 0.08f, 0.05f);
         GUI.DrawTexture(fullCardRect, _whiteTex);
 
-        // Border — green glow for traits
+        // Top stripe — gold if equipped, green if not
+        Color stripeCol = alreadyEquipped ? equipCol : traitCol;
+        GUI.color = stripeCol;
+        GUI.DrawTexture(new Rect(x, y, w, 3f), _whiteTex);
+
+        // Left spine
+        GUI.DrawTexture(new Rect(x, y, isHovered ? 6f : 4f, h), _whiteTex);
+
+        // Glow border on hover
         if (isHovered)
         {
-            GUI.color = new Color(0.25f, 1f, 0.5f, 0.8f);
-            GUI.DrawTexture(new Rect(x - 2, y - 2, w + 4, 4f), _whiteTex);
-            GUI.DrawTexture(new Rect(x - 2, y + h - 2, w + 4, 4f), _whiteTex);
-            GUI.DrawTexture(new Rect(x - 2, y, 4f, h), _whiteTex);
-            GUI.DrawTexture(new Rect(x + w - 2, y, 4f, h), _whiteTex);
-        }
-        else
-        {
-            GUI.color = alreadyEquipped ? new Color(1f, 0.8f, 0.1f) : new Color(0.25f, 0.9f, 0.4f);
+            GUI.color = new Color(traitCol.r, traitCol.g, traitCol.b, 0.5f);
             GUI.DrawTexture(new Rect(x, y, w, 2f), _whiteTex);
             GUI.DrawTexture(new Rect(x, y + h - 2f, w, 2f), _whiteTex);
+            GUI.DrawTexture(new Rect(x + w - 2f, y, 2f, h), _whiteTex);
         }
 
-        // PASSIVE badge
-        GUI.color = new Color(0.1f, 0.4f, 0.2f, 0.8f);
-        GUI.DrawTexture(new Rect(x + w - 68f, y + 4f, 60f, 16f), _whiteTex);
-        GUIStyle badgeStyle = new GUIStyle(GUI.skin.label) { fontSize = 9, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
-        badgeStyle.normal.textColor = new Color(0.3f, 1f, 0.5f);
+        float pad = 12f;
+        float textX = x + pad + 4f;
+        float textW = w - pad * 2 - 4f;
+
+        // PASSIVE badge (top-right)
+        GUI.color = new Color(0.1f, 0.35f, 0.18f, 0.85f);
+        GUI.DrawTexture(new Rect(x + w - 72f, y + pad, 58f, 18f), _whiteTex);
+        GUIStyle badgeStyle = new GUIStyle(GUI.skin.label) { fontSize = 10, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+        badgeStyle.normal.textColor = traitCol;
         GUI.color = Color.white;
-        GUI.Label(new Rect(x + w - 68f, y + 4f, 60f, 16f), "PASSIVE", badgeStyle);
+        GUI.Label(new Rect(x + w - 72f, y + pad, 58f, 18f), "PASSIVE", badgeStyle);
 
-        float pad = 14f;
-        float textX = x + pad;
-        float textW = w - pad * 2;
-
-        // Card name (big)
-        GUIStyle nameStyle = new GUIStyle(_cardNameStyle) { fontSize = 22 };
-        Color nameColor = isHovered ? new Color(0.4f, 1f, 0.6f) : Color.white;
-        CyberpunkGUIUtils.DrawGlowText(new Rect(textX, y + pad, textW - 72f, 28f), card.displayName.ToUpper(), nameColor, nameStyle, new Color(0.25f, 0.9f, 0.4f));
-
-        // Effect text (bigger, readable)
-        GUIStyle effSt = new GUIStyle(_descStyle) { fontSize = 15, wordWrap = true };
-        effSt.normal.textColor = isHovered ? new Color(1f, 1f, 1f, 0.98f) : new Color(0.85f, 0.97f, 0.88f, 0.92f);
-        GUI.Label(new Rect(textX, y + pad + 32f, textW, h - pad * 2 - 56f), card.effect, effSt);
-
-        // Cost (big) — traits cost Trait Tokens (TK), not credits
-        GUIStyle costStyle = new GUIStyle(_costStyle) { fontSize = 20 };
-        CyberpunkGUIUtils.DrawGlowText(new Rect(textX, y + h - 34f, 130f, 26f), $"{card.cost} TK", new Color(0.6f, 1f, 0.5f), costStyle, new Color(0.6f, 1f, 0.5f));
-
-        // Buy / Equipped / Can't-afford state
-        bool canAfford = inv != null && inv.traitTokens >= card.cost;
-        float bw = 120f, bh = 34f;
-        Rect btnRect = new Rect(x + w - bw - pad, y + h - bh - 8f, bw, bh);
-        GUIStyle bigBtn = new GUIStyle(GUI.skin.button) { fontSize = 16, fontStyle = FontStyle.Bold };
+        // Equipped badge (if active)
         if (alreadyEquipped)
         {
-            GUI.color = new Color(1f, 0.8f, 0.1f, 0.75f);
-            GUI.Button(btnRect, "EQUIPPED", bigBtn);
+            GUI.color = new Color(equipCol.r * 0.2f, equipCol.g * 0.2f, equipCol.b * 0.1f, 0.9f);
+            GUI.DrawTexture(new Rect(x + w - 72f, y + pad + 22f, 58f, 18f), _whiteTex);
+            GUIStyle eqSt = new GUIStyle(GUI.skin.label) { fontSize = 10, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+            eqSt.normal.textColor = equipCol;
+            GUI.color = Color.white;
+            GUI.Label(new Rect(x + w - 72f, y + pad + 22f, 58f, 18f), "ACTIVE", eqSt);
+        }
+
+        // Card name
+        GUIStyle nameStyle = new GUIStyle(_cardNameStyle) { fontSize = 20 };
+        Color nameColor = isHovered ? new Color(0.5f, 1f, 0.65f) : Color.white;
+        CyberpunkGUIUtils.DrawGlowText(new Rect(textX, y + pad + 2f, textW - 80f, 26f), card.displayName.ToUpper(), nameColor, nameStyle, traitCol);
+
+        // Effect text
+        GUIStyle effSt = new GUIStyle(_descStyle) { fontSize = 14, wordWrap = true };
+        effSt.normal.textColor = isHovered ? new Color(1f, 1f, 1f, 0.95f) : new Color(0.85f, 0.95f, 0.88f, 0.88f);
+        GUI.Label(new Rect(textX, y + pad + 28f, textW, h - pad * 2 - 54f), card.effect, effSt);
+
+        // Bottom row
+        float bottomY = y + h - 36f;
+
+        // Cost
+        GUIStyle costStyle = new GUIStyle(_costStyle) { fontSize = 18 };
+        CyberpunkGUIUtils.DrawGlowText(new Rect(textX, bottomY, 120f, 24f), $"◈ {card.cost} TK", new Color(0.5f, 1f, 0.45f), costStyle, new Color(0.5f, 1f, 0.45f));
+
+        // Button
+        bool canAfford = inv != null && inv.traitTokens >= card.cost;
+        float bw = 110f, bh = 30f;
+        Rect btnRect = new Rect(x + w - bw - pad, bottomY - 2f, bw, bh);
+        GUIStyle bigBtn = new GUIStyle(GUI.skin.button) { fontSize = 15, fontStyle = FontStyle.Bold };
+
+        if (alreadyEquipped)
+        {
+            GUI.color = new Color(equipCol.r, equipCol.g, equipCol.b, 0.2f);
+            GUI.DrawTexture(btnRect, _whiteTex);
+            GUI.color = new Color(equipCol.r, equipCol.g, equipCol.b, 0.8f);
+            GUI.Label(btnRect, "★ EQUIPPED", new GUIStyle(GUI.skin.label) { fontSize = 14, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter });
         }
         else if (!canAfford)
         {
-            GUI.color = new Color(0.6f, 0.25f, 0.25f, 0.7f);
-            GUI.Button(btnRect, $"NEED {card.cost}", bigBtn);
+            GUI.color = new Color(0.5f, 0.15f, 0.15f, 0.5f);
+            GUI.DrawTexture(btnRect, _whiteTex);
+            GUI.color = new Color(1f, 0.4f, 0.4f, 0.5f);
+            GUI.Label(btnRect, $"NEED {card.cost}", new GUIStyle(GUI.skin.label) { fontSize = 13, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter });
         }
         else
         {
-            GUI.color = isHovered ? new Color(0.3f, 1f, 0.5f, 0.95f) : new Color(0.2f, 0.75f, 0.35f, 0.85f);
-            if (GUI.Button(btnRect, "BUY", bigBtn))
+            Color btnCol = isHovered ? new Color(0.3f, 1f, 0.5f, 0.95f) : new Color(0.18f, 0.7f, 0.32f, 0.85f);
+            GUI.color = btnCol;
+            if (GUI.Button(btnRect, "BUY ◈", bigBtn))
             {
                 var localPc = GameManager.localPlayer?.GetComponent<PlayerCombat>();
                 if (localPc != null) localPc.CmdBuyTraitCard(slotIndex);
@@ -925,38 +1028,90 @@ public class ShopUI : MonoBehaviour
 
     private void DrawPanelBorder(float x, float y, float w, float h, Color accent)
     {
-        GUI.color = new Color(accent.r * 0.2f, accent.g * 0.2f, accent.b * 0.2f, 0.8f);
+        // Dark glass background
+        GUI.color = new Color(0.02f, 0.03f, 0.06f, 0.92f);
         GUI.DrawTexture(new Rect(x, y, w, h), _whiteTex);
 
+        // Subtle inner glow at top
+        GUI.color = new Color(accent.r * 0.15f, accent.g * 0.15f, accent.b * 0.15f, 0.4f);
+        GUI.DrawTexture(new Rect(x + 2, y + 2, w - 4, 60f), _whiteTex);
+
+        // Bright accent border
         GUI.color = accent;
-        GUI.DrawTexture(new Rect(x, y, w, 1.5f), _whiteTex);
-        GUI.DrawTexture(new Rect(x, y + h - 1.5f, w, 1.5f), _whiteTex);
-        GUI.DrawTexture(new Rect(x, y, 1.5f, h), _whiteTex);
-        GUI.DrawTexture(new Rect(x + w - 1.5f, y, 1.5f, h), _whiteTex);
+        GUI.DrawTexture(new Rect(x, y, w, 2f), _whiteTex);
+        GUI.DrawTexture(new Rect(x, y + h - 2f, w, 2f), _whiteTex);
+        GUI.DrawTexture(new Rect(x, y, 2f, h), _whiteTex);
+        GUI.DrawTexture(new Rect(x + w - 2f, y, 2f, h), _whiteTex);
+
+        // Corner accents
+        float corner = 12f;
+        GUI.color = new Color(accent.r, accent.g, accent.b, 0.7f);
+        GUI.DrawTexture(new Rect(x, y, corner, 2f), _whiteTex);
+        GUI.DrawTexture(new Rect(x, y, 2f, corner), _whiteTex);
+        GUI.DrawTexture(new Rect(x + w - corner, y, corner, 2f), _whiteTex);
+        GUI.DrawTexture(new Rect(x + w - 2f, y, 2f, corner), _whiteTex);
+        GUI.DrawTexture(new Rect(x, y + h - 2f, corner, 2f), _whiteTex);
+        GUI.DrawTexture(new Rect(x, y + h - corner, 2f, corner), _whiteTex);
+        GUI.DrawTexture(new Rect(x + w - corner, y + h - 2f, corner, 2f), _whiteTex);
+        GUI.DrawTexture(new Rect(x + w - 2f, y + h - corner, 2f, corner), _whiteTex);
 
         GUI.color = Color.white;
     }
 
     private void DrawSectionHeader(float x, float y, float w, string text, Color accent)
     {
-        GUI.color = new Color(accent.r, accent.g, accent.b, 0.3f);
-        GUI.DrawTexture(new Rect(x, y, w, 32f), _whiteTex);
+        // Gradient header strip
+        GUI.color = new Color(accent.r * 0.25f, accent.g * 0.25f, accent.b * 0.25f, 0.7f);
+        GUI.DrawTexture(new Rect(x, y, w, 36f), _whiteTex);
+
+        // Accent underline
+        GUI.color = accent;
+        GUI.DrawTexture(new Rect(x, y + 34f, w, 2f), _whiteTex);
+
+        // Decorative left bar
+        GUI.DrawTexture(new Rect(x, y, 4f, 36f), _whiteTex);
+
         GUI.color = Color.white;
-        CyberpunkGUIUtils.DrawGlowText(new Rect(x, y, w, 32f), text, accent, _sectionStyle, accent);
+        CyberpunkGUIUtils.DrawGlowText(new Rect(x + 12f, y + 2f, w - 24f, 32f), text, accent, _sectionStyle, accent);
     }
 
     private void DrawLockInButton()
     {
-        float btnW = 280f;
-        float btnH = 56f;
+        float btnW = 320f;
+        float btnH = 60f;
         float btnX = _vw / 2f - btnW / 2f;
-        float btnY = _vh - 70f;
+        float btnY = _vh - 78f;
 
-        GUI.color = new Color(0f, 1f, 0.6f, 0.2f);
-        GUI.DrawTexture(new Rect(btnX - 2, btnY - 2, btnW + 4, btnH + 4), _whiteTex);
+        // Pulsing glow background
+        float pulse = (Mathf.Sin(Time.time * 4f) + 1f) * 0.5f;
+        GUI.color = new Color(0f, 1f, 0.6f, 0.1f + pulse * 0.1f);
+        GUI.DrawTexture(new Rect(btnX - 8, btnY - 8, btnW + 16, btnH + 16), _whiteTex);
+        GUI.color = new Color(0f, 1f, 0.6f, 0.25f + pulse * 0.15f);
+        GUI.DrawTexture(new Rect(btnX - 4, btnY - 4, btnW + 8, btnH + 8), _whiteTex);
 
-        GUI.color = new Color(0f, 1f, 0.6f);
-        if (GUI.Button(new Rect(btnX, btnY, btnW, btnH), "⚡ LOCK IN & FIGHT ⚡", new GUIStyle(GUI.skin.button) { fontSize = 20, fontStyle = FontStyle.Bold }))
+        // Button background
+        GUI.color = new Color(0f, 0.85f, 0.5f, 0.85f);
+        GUI.DrawTexture(new Rect(btnX, btnY, btnW, btnH), _whiteTex);
+
+        // Border
+        GUI.color = new Color(0f, 1f, 0.7f, 0.9f);
+        GUI.DrawTexture(new Rect(btnX, btnY, btnW, 2.5f), _whiteTex);
+        GUI.DrawTexture(new Rect(btnX, btnY + btnH - 2.5f, btnW, 2.5f), _whiteTex);
+        GUI.DrawTexture(new Rect(btnX, btnY, 2.5f, btnH), _whiteTex);
+        GUI.DrawTexture(new Rect(btnX + btnW - 2.5f, btnY, 2.5f, btnH), _whiteTex);
+
+        // Text
+        GUIStyle btnStyle = new GUIStyle(GUI.skin.label)
+        {
+            fontSize = 22,
+            fontStyle = FontStyle.Bold,
+            alignment = TextAnchor.MiddleCenter
+        };
+        GUI.color = Color.white;
+        CyberpunkGUIUtils.DrawGlowText(new Rect(btnX, btnY + 2f, btnW, btnH), "⚡  LOCK IN & FIGHT  ⚡", Color.white, btnStyle, new Color(0f, 1f, 0.7f));
+
+        // Invisible click area
+        if (GUI.Button(new Rect(btnX, btnY, btnW, btnH), "", GUIStyle.none))
         {
             var localPc = GameManager.localPlayer?.GetComponent<PlayerCombat>();
             if (localPc != null) localPc.CmdLockInPostRoundShop();

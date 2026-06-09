@@ -162,18 +162,23 @@ public class VoiceDebugGUI : MonoBehaviour
             GUIStyle infStyle = new GUIStyle(GUI.skin.label) { fontSize = 9 };
             infStyle.normal.textColor = new Color(0.8f, 0.8f, 0.8f);
             string recStatus = _vp.IsRecording ? "RECORDING" : "STOPPED";
-            GUILayout.Label($"Status: {recStatus} | Sample: {_vp.SampleRate}Hz | Vol: {_vp.CurrentRawVolume:F3}", infStyle);
+            GUILayout.Label($"Status: {recStatus} | Sample: {_vp.SampleRate}Hz | Raw: {_vp.CurrentRawVolume:F3} | Fest: {_vp.CurrentFestivalVolume:F3}", infStyle);
 
-            // Visual volume bar
-            float vol = _vp.CurrentRawVolume;
+            // Visual volume bar — raw (dim) + festival (bright)
+            float rawVol = _vp.CurrentRawVolume;
+            float festVol = _vp.CurrentFestivalVolume;
             Rect barBg = GUILayoutUtility.GetRect(GUIContent.none, GUIStyle.none, GUILayout.Height(10), GUILayout.ExpandWidth(true));
             GUI.color = new Color(0.15f, 0.15f, 0.15f);
             GUI.DrawTexture(barBg, Texture2D.whiteTexture);
-            Color fillColor = vol < 0.5f ? new Color(0.2f, 0.9f, 0.3f)
-                            : vol < 0.8f ? new Color(1f, 0.85f, 0.1f)
+            // Raw volume = dim background
+            GUI.color = new Color(0.3f, 0.3f, 0.3f);
+            GUI.DrawTexture(new Rect(barBg.x, barBg.y, barBg.width * Mathf.Clamp01(rawVol), barBg.height), Texture2D.whiteTexture);
+            // Festival volume = bright foreground
+            Color fillColor = festVol < 0.5f ? new Color(0.2f, 0.9f, 0.3f)
+                            : festVol < 0.8f ? new Color(1f, 0.85f, 0.1f)
                                          : new Color(1f, 0.25f, 0.1f);
             GUI.color = fillColor;
-            GUI.DrawTexture(new Rect(barBg.x, barBg.y, barBg.width * Mathf.Clamp01(vol), barBg.height), Texture2D.whiteTexture);
+            GUI.DrawTexture(new Rect(barBg.x, barBg.y, barBg.width * Mathf.Clamp01(festVol), barBg.height), Texture2D.whiteTexture);
             GUI.color = Color.white;
 
             if (_vp.IsClipping)

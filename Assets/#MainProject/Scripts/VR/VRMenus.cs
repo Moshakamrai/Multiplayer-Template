@@ -66,16 +66,16 @@ public class VRMenus : MonoBehaviour
 
         _pickerPanel = new GameObject("VRRoundPicker");
         PlacePanel(_pickerPanel, cam);
-        var crt = MakeCanvas(_pickerPanel, new Vector2(1200, 820));
+        var crt = MakeCanvas(_pickerPanel, new Vector2(1200, 900));
         MakeImage(crt, new Color(0.02f, 0.03f, 0.06f, 0.92f), Vector2.zero, crt.sizeDelta);
 
-        var title = MakeText(crt, "PICK THE ROUND", 64, new Vector2(0, 340), new Vector2(1100, 90));
+        var title = MakeText(crt, "PICK THE ROUND", 64, new Vector2(0, 390), new Vector2(1100, 90));
         title.fontStyle = FontStyle.Bold;
         title.color = new Color(1f, 0.85f, 0.2f);
 
         const int cols = 2;
-        Vector2 btnSize = new Vector2(520, 120);
-        float gapX = 40f, gapY = 28f, startY = 200f;
+        Vector2 btnSize = new Vector2(520, 260);
+        float gapX = 40f, gapY = 32f, startY = 280f;
         for (int i = 0; i < options.Count; i++)
         {
             int row = i / cols, col = i % cols;
@@ -84,7 +84,7 @@ public class VRMenus : MonoBehaviour
             float x = -rowW / 2f + btnSize.x / 2f + col * (btnSize.x + gapX);
             float y = startY - row * (btnSize.y + gapY);
             var o = options[i];
-            MakeButton(crt, o.label, o.used, o.select, new Vector2(x, y), btnSize);
+            MakeArtButton(crt, o.label, o.artwork, o.color, o.used, o.select, new Vector2(x, y), btnSize);
         }
     }
 
@@ -301,6 +301,85 @@ public class VRMenus : MonoBehaviour
 
         var txt = MakeText(rt, label, 34, Vector2.zero, size);
         txt.fontStyle = FontStyle.Bold;
+        return btn;
+    }
+
+    /// <summary>
+    /// A button with artwork texture + label strip — used for the round picker so artwork is visible in VR.
+    /// </summary>
+    private VRButton MakeArtButton(RectTransform parent, string label, Texture2D artwork, Color color, bool used, System.Action onClick, Vector2 pos, Vector2 size)
+    {
+        var go = new GameObject("VRArtBtn", typeof(RectTransform));
+        var rt = (RectTransform)go.transform;
+        rt.SetParent(parent, false);
+        rt.anchoredPosition = pos;
+        rt.sizeDelta = size;
+
+        float stripH = size.y * 0.22f;
+        float artH = size.y - stripH;
+
+        // Background
+        var img = go.AddComponent<Image>();
+        img.color = new Color(0.06f, 0.06f, 0.10f, 0.95f);
+
+        // Artwork image (fills the top portion)
+        if (artwork != null)
+        {
+            var artGo = new GameObject("Art", typeof(RectTransform));
+            var artRt = (RectTransform)artGo.transform;
+            artRt.SetParent(rt, false);
+            artRt.anchoredPosition = new Vector2(0, stripH * 0.5f);
+            artRt.sizeDelta = new Vector2(size.x, artH);
+            var rawImg = artGo.AddComponent<RawImage>();
+            rawImg.texture = artwork;
+            rawImg.color = used ? new Color(0.4f, 0.4f, 0.4f, 1f) : Color.white;
+        }
+        else
+        {
+            // Fallback dark panel when no artwork is assigned
+            var fallback = MakeImage(rt, new Color(0.08f, 0.08f, 0.12f, 0.98f), new Vector2(0, stripH * 0.5f), new Vector2(size.x, artH));
+            fallback.transform.SetParent(rt, false);
+        }
+
+        // Dark gradient at bottom of art so name strip blends in
+        var grad = MakeImage(rt, new Color(0.02f, 0.03f, 0.06f, 0.55f), new Vector2(0, -artH * 0.5f + 14f), new Vector2(size.x, 28f));
+        grad.transform.SetParent(rt, false);
+
+        // Name strip background
+        var strip = MakeImage(rt, new Color(0.03f, 0.04f, 0.08f, 0.97f), new Vector2(0, -size.y * 0.5f + stripH * 0.5f), new Vector2(size.x, stripH));
+        strip.transform.SetParent(rt, false);
+
+        // Accent line between art and strip
+        var accentLine = MakeImage(rt, color, new Vector2(0, -artH * 0.5f), new Vector2(size.x, 3f));
+        accentLine.transform.SetParent(rt, false);
+
+        // Label text
+        var txt = MakeText(rt, label, 30, new Vector2(0, -size.y * 0.5f + stripH * 0.5f), new Vector2(size.x, stripH));
+        txt.fontStyle = FontStyle.Bold;
+        txt.color = used ? new Color(0.5f, 0.5f, 0.5f) : color;
+
+        // Hover glow border (drawn as an image child, VRButton will tint it)
+        var glowGo = new GameObject("Glow", typeof(RectTransform));
+        var glowRt = (RectTransform)glowGo.transform;
+        glowRt.SetParent(rt, false);
+        glowRt.anchoredPosition = Vector2.zero;
+        glowRt.sizeDelta = size + new Vector2(8f, 8f);
+        var glowImg = glowGo.AddComponent<Image>();
+        glowImg.color = new Color(color.r, color.g, color.b, 0f);
+
+        // Button logic
+        var btn = go.AddComponent<VRButton>();
+        btn.background = glowImg;
+        btn.normalColor = new Color(color.r, color.g, color.b, 0f);
+        btn.hoverColor  = new Color(color.r, color.g, color.b, 0.35f);
+        btn.interactable = !used;
+        btn.OnClick = onClick;
+        btn.Refresh();
+
+        // Collider
+        var col = go.AddComponent<BoxCollider>();
+        col.size = new Vector3(size.x, size.y, 30f);
+
         return btn;
     }
 

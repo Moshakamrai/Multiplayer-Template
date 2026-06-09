@@ -109,6 +109,17 @@ public class PowerMeterReactor : MonoBehaviour
             return;
         }
 
+        // Position the meter on the LEFT side of the screen (flat builds only).
+        // VR positioning is handled by VRWorldHud docking.
+        var rt = GetComponent<RectTransform>();
+        if (rt != null && !UnityEngine.XR.XRSettings.isDeviceActive)
+        {
+            rt.anchorMin = new Vector2(0f, 0.5f);
+            rt.anchorMax = new Vector2(0f, 0.5f);
+            rt.pivot = new Vector2(0f, 0.5f);
+            rt.anchoredPosition = new Vector2(24f, 0f);
+        }
+
         var mask = GetComponentInParent<Mask>();
         var rectMask = GetComponentInParent<RectMask2D>();
         Debug.Log($"[PowerMeter] LIVE on '{name}'. Shader='{_mat.shader.name}', maskInParent={(mask != null || rectMask != null)}");
@@ -134,6 +145,25 @@ public class PowerMeterReactor : MonoBehaviour
         _beatFlash  = 1f;       // pop the glow on the shout
 
         Debug.Log($"[PowerMeter] Grade '{rating}' -> fill {grade:F2} (target now {_fillTarget:F2})");
+    }
+
+    /// <summary>
+    /// Stamp the meter from the raw combined power value (0.0–1.25).
+    /// This reflects VR swing speed + mic shout volume combined.
+    /// Called alongside RegisterGrade so the meter shows BOTH timing quality AND input power.
+    /// </summary>
+    public void RegisterPower(float power)
+    {
+        // Map 0.0–1.25 power onto the meter's 0.0–1.0 fill range
+        float powerFill = Mathf.Clamp01(power / 1.25f);
+
+        // Power fill can push the meter higher than the grade alone
+        // (e.g. GOOD timing + max power = higher meter than EXCELLENT timing + weak power)
+        _fillTarget = Mathf.Clamp01(Mathf.Max(_fillTarget, powerFill));
+        _holdTimer  = holdTime;
+        _beatFlash  = Mathf.Max(_beatFlash, 0.5f + powerFill * 0.5f); // stronger flash for more power
+
+        Debug.Log($"[PowerMeter] Power {power:F2} -> fill {powerFill:F2} (target now {_fillTarget:F2})");
     }
 
     void Update()

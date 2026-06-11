@@ -387,8 +387,19 @@ public class PlayerCombat : NetworkBehaviour
     }
 
     // ── Glove juice hooks (server triggers, all clients flash) ──────────────
-    [Server] public void GloveStrikeFlash() => RpcGloveStrike();
-    [ClientRpc] private void RpcGloveStrike() { if (_gloveGlow != null) _gloveGlow.FlashStrike(); }
+    // moveTrigger passed so the haptic hits the correct hand (Strike/Throw = right, else both).
+    [Server] public void GloveStrikeFlash(string moveTrigger = "")
+    {
+        CardFamily fam = _cardManager != null ? _cardManager.FamilyOfTrigger(moveTrigger) : CardFamily.Strike;
+        bool isOffense = fam == CardFamily.Strike || fam == CardFamily.Throw;
+        RpcGloveStrike(isOffense);
+    }
+    [ClientRpc] private void RpcGloveStrike(bool offenseHand)
+    {
+        if (_gloveGlow != null) _gloveGlow.FlashStrike();
+        if (isLocalPlayer)
+            VRHaptics.StrikeLanded(offenseHand ? VRHaptics.Hand.Right : VRHaptics.Hand.Left);
+    }
     [ClientRpc] private void RpcGloveHurt()   { if (_gloveGlow != null) _gloveGlow.FlashHurt(); }
 
     // ── Sword impact VFX (server triggers a hit-point burst on all clients) ──
@@ -435,6 +446,12 @@ public class PlayerCombat : NetworkBehaviour
         if (sp == null) sp = go.AddComponent<SlashProjectile>();
         sp.speed    = dist / flightTime;
         sp.lifetime = flightTime + 0.15f; // small tail so it isn't culled exactly on impact
+
+        // HAPTIC: this RPC runs on the ATTACKER whose strike got reflected. If that's the local
+        // player — clang + fading stutter. Otherwise the local player is the one who PARRIED —
+        // give them the satisfying "shing" on the parry hand.
+        if (isLocalPlayer) VRHaptics.GotParried();
+        else VRHaptics.ParrySuccess();
     }
 
     public void VoiceAttackJab() { if (isLocalPlayer && !IsDead) _attackQueue.Enqueue("Jab"); }
@@ -597,6 +614,17 @@ public class PlayerCombat : NetworkBehaviour
         {
             float closeness = 1f - Mathf.Clamp01(timeUntilImpact / Mathf.Max(0.001f, effectiveWindow));
             _powerMeter.LockIn(currentVol, closeness);
+
+            // HAPTIC: tight lock-in = crisp double-tap on the firing hand; sloppy = mushy fizzle.
+            VRHaptics.Hand lockHand = VRHaptics.Hand.Both;
+            if (_cardManager != null)
+            {
+                CardFamily lockFam = _cardManager.FamilyOfTrigger(currentMove);
+                if (lockFam == CardFamily.Strike || lockFam == CardFamily.Throw) lockHand = VRHaptics.Hand.Right;
+                else if (lockFam == CardFamily.Block || lockFam == CardFamily.Parry) lockHand = VRHaptics.Hand.Left;
+            }
+            if (closeness >= _powerMeter.goodLockCloseness) VRHaptics.LockGood(lockHand, closeness);
+            else VRHaptics.LockBad(lockHand);
         }
 
         if (!isChainMode && currentMove == "ParryIntent")
@@ -698,6 +726,7 @@ public class PlayerCombat : NetworkBehaviour
         _staggerRecoveryCharge = 0f;
         _staggerTimingEscaped  = false;
         if (CameraShake.Instance != null) CameraShake.Instance.Shake(0.15f, 0.22f);
+        VRHaptics.StaggerEscape();
     }
 
     [TargetRpc]
@@ -766,6 +795,7 @@ public class PlayerCombat : NetworkBehaviour
     private void RpcTriggerStaggerAnim()
     {
         if (animator != null) animator.SetTrigger("Stagger");
+        if (isLocalPlayer) VRHaptics.StaggerStart();
     }
 
     [Server]
@@ -1077,6 +1107,9 @@ public class PlayerCombat : NetworkBehaviour
             CameraShake.Instance?.Shake(shakeDur, shakeMag);
 
             _hurtFlashFade = Mathf.Max(_hurtFlashFade, Mathf.Min(1f, damage / 20f));
+
+            // HAPTIC: heavy rumble scaled by damage (big hits get a second shockwave).
+            VRHaptics.GotHit(damage / 20f);
         }
 
         // ── SINGLE MODE ONLY: hurt slow-mo effect ──
@@ -1121,7 +1154,7 @@ public class PlayerCombat : NetworkBehaviour
 
     private IEnumerator HurtStunTimer() { IsHurting = true; yield return new WaitForSeconds(0.2f); IsHurting = false; }
     private IEnumerator FlashEffectRoutine() { if (playerRenderer == null || flashMaterial == null) yield break; playerRenderer.material = flashMaterial; yield return new WaitForSeconds(0.1f); playerRenderer.material = _originalMaterial; }
-    [ClientRpc] void RpcKnockout() { IsDead = true; if (animator != null) animator.SetTrigger("Knock out"); CommentaryManager.Instance?.Trigger(CommentaryEvent.Knockout, forceInterrupt: true); CameraShake.Instance?.Shake(0.45f, 0.9f); }
+    [ClientRpc] void RpcKnockout() { IsDead = true; if (animator != null) animator.SetTrigger("Knock out"); CommentaryManager.Instance?.Trigger(CommentaryEvent.Knockout, forceInterrupt: true); CameraShake.Instance?.Shake(0.45f, 0.9f); if (isLocalPlayer) VRHaptics.Knockout(); else VRHaptics.Victory(); }
     [Server] public IEnumerator ServerRestartMatchRoutine() { yield return new WaitForSeconds(4f); NetworkManager.singleton.ServerChangeScene(SceneManager.GetActiveScene().name); }
 
     private Texture2D _whiteTexture;
@@ -1632,6 +1665,8 @@ public class PlayerCombat : NetworkBehaviour
     {
         if (SoundManagerMain.Instance != null)
             SoundManagerMain.Instance.PlaySuccessSFX(type);
+        // VR haptic on successful block/parry sounds (TargetRpc = local player only).
+        if (type == "Block") VRHaptics.BlockSuccess();
     }
 
     [ClientRpc]

@@ -1238,6 +1238,10 @@ public class RhythmRoundManager : NetworkBehaviour
         if (p2WinsTie) GrantCounterBonus(cm2, p2, p2UsedAttack);
     }
 
+    // Reflect-success juice: the attacker's own slash VFX flies BACK at them over this many seconds,
+    // and their hurt/blood reaction is delayed to land exactly when it arrives.
+    private const float REFLECT_FLIGHT_TIME = 0.35f;
+
     [Server]
     private int ProcessDamage(PlayerCombat attacker, PlayerCombat.RhythmAction move, PlayerCombat defender, PlayerCombat.RhythmAction defMove, bool isInterrupted, out int damageDealt, out string tradeReason)
     {
@@ -1339,7 +1343,8 @@ public class RhythmRoundManager : NetworkBehaviour
             float mirBonus = mirLvl >= 3 ? 1.25f : mirLvl == 2 ? 1.20f : 1.15f;
             int reflectedDmg = Mathf.RoundToInt(ApplyTraitMultiplier(Mathf.RoundToInt(baseDmg * mirBonus)) * CardUpgradeMult(defender, def));
             Vector3 kbDir = (attacker.transform.position - defender.transform.position).normalized;
-            attacker.TakeDamage(reflectedDmg, kbDir);
+            attacker.SpawnReversedStrike(defender, REFLECT_FLIGHT_TIME); // their own slash flies back
+            attacker.TakeDamage(reflectedDmg, kbDir, hurtDelay: REFLECT_FLIGHT_TIME);
             defender.HasMirrorBuff = false;
             tradeReason = "Mirror returned the hit";
             return -1;
@@ -1358,7 +1363,8 @@ public class RhythmRoundManager : NetworkBehaviour
                 // Reward the read: reflect 150% of the attack's damage, with a satisfying floor.
                 int reflectedDmg = Mathf.Max(12, Mathf.RoundToInt(ApplyTraitMultiplier(Mathf.RoundToInt(baseDmg * 1.5f)) * CardUpgradeMult(defender, def)));
                 Vector3 parryDir = (attacker.transform.position - defender.transform.position).normalized;
-                attacker.TakeDamage(reflectedDmg, parryDir, isOpponentDamage: true);
+                attacker.SpawnReversedStrike(defender, REFLECT_FLIGHT_TIME); // their own slash flies back
+                attacker.TakeDamage(reflectedDmg, parryDir, isOpponentDamage: true, hurtDelay: REFLECT_FLIGHT_TIME);
                 tradeReason = "Reflect punished the attack";
                 return -1;
             }
@@ -1390,7 +1396,8 @@ public class RhythmRoundManager : NetworkBehaviour
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Parry");
                 PlayHitParticle(defender.transform.position);
                 int returnDmg = Mathf.RoundToInt(ApplyTraitMultiplier(baseDmg) * CardUpgradeMult(defender, def));
-                attacker.TakeDamage(returnDmg, revDir);
+                attacker.SpawnReversedStrike(defender, REFLECT_FLIGHT_TIME); // their own slash flies back
+                attacker.TakeDamage(returnDmg, revDir, hurtDelay: REFLECT_FLIGHT_TIME);
                 tradeReason = "Reverse countered";
                 // ReverseLeech Lv3: heal 5% of returned damage as HP
                 var revCard = GetCardData("Reverse");
@@ -1427,7 +1434,8 @@ public class RhythmRoundManager : NetworkBehaviour
                 int baseDmg = GetBaseDamage(atk, attacker);
                 int clutchReflect = Mathf.RoundToInt(ApplyTraitMultiplier(Mathf.RoundToInt(baseDmg * 2f)) * CardUpgradeMult(defender, def));
                 Vector3 clutchDir = (attacker.transform.position - defender.transform.position).normalized;
-                attacker.TakeDamage(clutchReflect, clutchDir, isOpponentDamage: true);
+                attacker.SpawnReversedStrike(defender, REFLECT_FLIGHT_TIME); // their own slash flies back
+                attacker.TakeDamage(clutchReflect, clutchDir, isOpponentDamage: true, hurtDelay: REFLECT_FLIGHT_TIME);
                 tradeReason = "CLUTCH! Perfect counter";
 
                 // Clutch Lv3 perk: a perfect clutch also heals you 8%.
@@ -1699,7 +1707,7 @@ public class RhythmRoundManager : NetworkBehaviour
                 if (atk == "UnbreakablePunch" || atk == "Overclock") _heavyHitThisBeat = true;
                 if (attacker.connectionToClient != null) attacker.TargetPlaySuccessSound("Attack");
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Hurt");
-                attacker.GloveStrikeFlash(); // gloves flare white-hot on a landed hit
+                attacker.GloveStrikeFlash(atk); // gloves flare + haptic on the striking hand
                 attacker.SpawnSwordImpact(defender.transform.position + Vector3.up); // sword slash burst (no-op for glove fighters)
 
                 // ── POST-HIT PERK EFFECTS ──────────────────────────────────

@@ -200,10 +200,24 @@ public class VRHands : MonoBehaviour
         bool anyTrig = ltrig || rtrig;
         float speed = Mathf.Max(lspeed, rspeed);
 
+        float prevCharge = _charge;
         if (anyTrig && speed > motionThreshold)
             _charge = Mathf.Clamp01(_charge + speed * chargeGain * dt); // pulse to build power
         else
             _charge = Mathf.Max(0f, _charge - chargeDecay * dt);        // dissolve with no motion
+
+        // HAPTICS: holding a trigger rumbles that hand, growing with the charge (engine-rev feel),
+        // and a double-blip fires the moment the bar maxes so you know you're full without looking.
+        if (_charge > 0.02f)
+        {
+            float rumble = 0.06f + 0.40f * _charge;
+            if (ltrig) VRHaptics.Rumble(VRHaptics.Hand.Left, rumble);
+            if (rtrig) VRHaptics.Rumble(VRHaptics.Hand.Right, rumble);
+        }
+        if (_charge >= 1f && prevCharge < 1f)
+            VRHaptics.FullCharge(ltrig && !rtrig ? VRHaptics.Hand.Left
+                               : rtrig && !ltrig ? VRHaptics.Hand.Right
+                               : VRHaptics.Hand.Both);
 
         // Trigger RELEASE near the beat = lock-in, latched PER HAND (right = Strike/Throw, left = Block/Parry).
         float now = Time.time;

@@ -141,7 +141,44 @@ public class GloveBeatGlow : MonoBehaviour
         foreach (var m in _mats)
             if (m != null) m.SetColor(ID_Emission, emis);
 
+        // HAPTICS (local player only — never buzz the bot's phantom controllers).
+        if (round && _localCombat != null && _localCombat.isLocalPlayer)
+        {
+            VRHaptics.Hand cueHand = CueHandFor(_localCombat.PendingMoveTrigger);
+            bool hasPending = !string.IsNullOrEmpty(_localCombat.PendingMoveTrigger);
+
+            // 1. On-beat metronome tick.
+            if (mgr.lastBeatFireTime > 0f && mgr.lastBeatFireTime != _lastBeatTickTime)
+            {
+                _lastBeatTickTime = mgr.lastBeatFireTime;
+                VRHaptics.BeatTick(cueHand, 0.5f);
+                VRHaptics.ResetBeatApproach(); // clear approach accumulator after beat fires
+            }
+
+            // 2. Beat-approach escalating taps: charge goes 0→1 in the chargeLead window before the beat.
+            if (charge > 0f)
+                VRHaptics.BeatApproach(cueHand, charge);
+
+            // 3. Idle reminder rumble: gentle hum on the cue hand when a card is pending but the beat
+            //    is not close yet. Fades out as the approach taps take over.
+            if (hasPending)
+                VRHaptics.CardIdleRumble(cueHand, charge);
+        }
+
         UpdateActiveHandCue();
+    }
+
+    private float _lastBeatTickTime = -1f;
+
+    /// Which controller should act for this move — RIGHT for Strike/Throw, LEFT for Block/Parry,
+    /// BOTH for Support / no pending move. Mirrors the glove-glow cue.
+    private VRHaptics.Hand CueHandFor(string move)
+    {
+        if (string.IsNullOrEmpty(move) || _cardManager == null) return VRHaptics.Hand.Both;
+        CardFamily fam = _cardManager.FamilyOfTrigger(move);
+        if (fam == CardFamily.Strike || fam == CardFamily.Throw) return VRHaptics.Hand.Right;
+        if (fam == CardFamily.Block || fam == CardFamily.Parry) return VRHaptics.Hand.Left;
+        return VRHaptics.Hand.Both;
     }
 
     /// VR: glow the controller the player should use for the pending card — RIGHT for Strike/Throw,
@@ -166,7 +203,13 @@ public class GloveBeatGlow : MonoBehaviour
         if (_localCombat == null || !_localCombat.isLocalPlayer) return;
 
         string move = _localCombat.PendingMoveTrigger;
-        if (move != _lastCueMove) { _lastCueMove = move; Debug.Log($"[GloveCue] pending move -> '{move}'", this); }
+        if (move != _lastCueMove)
+        {
+            _lastCueMove = move;
+            Debug.Log($"[GloveCue] pending move -> '{move}'", this);
+            // HAPTIC: a new card was picked — tick the controller that must fire it.
+            if (!string.IsNullOrEmpty(move)) VRHaptics.CardCue(CueHandFor(move));
+        }
 
         Color rightEmis = Color.black;
         Color leftEmis  = Color.black;

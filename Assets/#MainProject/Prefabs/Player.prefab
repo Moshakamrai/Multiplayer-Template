@@ -1,4 +1,4 @@
-%YAML 1.1
+﻿%YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
 --- !u!1 &9355766990090146
 GameObject:
@@ -163,7 +163,7 @@ RectTransform:
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 0, y: 0}
   m_AnchoredPosition: {x: 0, y: 0}
-  m_SizeDelta: {x: 0, y: 0}
+  m_SizeDelta: {x: 160, y: 395}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!222 &5472956696675399513
 CanvasRenderer:
@@ -387,7 +387,7 @@ RectTransform:
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 0, y: 0}
   m_AnchoredPosition: {x: 0, y: 0}
-  m_SizeDelta: {x: 0, y: 0}
+  m_SizeDelta: {x: 160, y: 395}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!222 &5556397018674680705
 CanvasRenderer:
@@ -886,7 +886,7 @@ RectTransform:
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 0, y: 0}
   m_AnchoredPosition: {x: 0, y: 0}
-  m_SizeDelta: {x: 0, y: 0}
+  m_SizeDelta: {x: 160, y: 395}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!222 &7970013953544388511
 CanvasRenderer:
@@ -1035,7 +1035,7 @@ RectTransform:
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 0, y: 0}
   m_AnchoredPosition: {x: 0, y: 0}
-  m_SizeDelta: {x: 0, y: 0}
+  m_SizeDelta: {x: 160, y: 395}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!222 &3823382995630986781
 CanvasRenderer:
@@ -1432,8 +1432,8 @@ MonoBehaviour:
   m_ChildAlignment: 6
   m_StartCorner: 2
   m_StartAxis: 0
-  m_CellSize: {x: 678.5, y: 390.1}
-  m_Spacing: {x: -533, y: 0}
+  m_CellSize: {x: 158, y: 390}
+  m_Spacing: {x: 12, y: 0}
   m_Constraint: 2
   m_ConstraintCount: 1
 --- !u!1 &3722825525291365702
@@ -1691,6 +1691,8 @@ MonoBehaviour:
   flashDecay: 5
   colorShiftAmount: 0.12
   debugOscillate: 0
+  goodLockCloseness: 0.4
+  badLockPenalty: 0.2
 --- !u!1 &6036092921495172170
 GameObject:
   m_ObjectHideFlags: 0
@@ -1962,7 +1964,7 @@ RectTransform:
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 0, y: 0}
   m_AnchoredPosition: {x: 0, y: 0}
-  m_SizeDelta: {x: 0, y: 0}
+  m_SizeDelta: {x: 160, y: 395}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!222 &2804135200034846188
 CanvasRenderer:
@@ -2527,10 +2529,18 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 54c2d8958f1676b449bea33558267599, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  gloveRenderers:
+  gloveRenderers: []
+  rightGloveRenderers:
   - {fileID: 5241757253209151205}
+  leftGloveRenderers:
   - {fileID: 4508670261520271106}
-  chargeColor: {r: 0, g: 0.85, b: 1, a: 1}
+  offenseColor: {r: 1, g: 0.35, b: 0.05, a: 1}
+  defenseColor: {r: 0.1, g: 0.55, b: 1, a: 1}
+  supportColor: {r: 1, g: 1, b: 1, a: 1}
+  activeGlowIntensity: 2.2
+  idleGlowIntensity: 0.25
+  cuePulseSpeed: 3
+  chargeColor: {r: 1, g: 0, b: 0.1181407, a: 1}
   chargeIntensity: 2.2
   chargeLead: 0.6
   chargePulseMax: 12
@@ -2565,8 +2575,9 @@ MonoBehaviour:
   leftGlove: {fileID: 3375781535240649837}
   rightGlove: {fileID: 6410129354583715210}
   reach: 1
-  minPunchSpeed: 1
-  maxPunchSpeed: 5
+  chargeGain: 0.85
+  chargeDecay: 0.45
+  motionThreshold: 0.4
   disableAnimator: 0
 --- !u!1 &8782005603362053964
 GameObject:
@@ -3532,15 +3543,15 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: d892b5bc1d8d6104cad8e60fac3b01b0, type: 3}
       propertyPath: m_LocalPosition.x
-      value: 0.56
+      value: -0.56
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: d892b5bc1d8d6104cad8e60fac3b01b0, type: 3}
       propertyPath: m_LocalPosition.y
-      value: 0.989
+      value: -0.989
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: d892b5bc1d8d6104cad8e60fac3b01b0, type: 3}
       propertyPath: m_LocalPosition.z
-      value: -2.717
+      value: 2.717
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: d892b5bc1d8d6104cad8e60fac3b01b0, type: 3}
       propertyPath: m_LocalRotation.w
@@ -3744,15 +3755,15 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: d892b5bc1d8d6104cad8e60fac3b01b0, type: 3}
       propertyPath: m_LocalPosition.x
-      value: 0.546
+      value: -0.546
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: d892b5bc1d8d6104cad8e60fac3b01b0, type: 3}
       propertyPath: m_LocalPosition.y
-      value: 0.754
+      value: -0.754
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: d892b5bc1d8d6104cad8e60fac3b01b0, type: 3}
       propertyPath: m_LocalPosition.z
-      value: -2.7
+      value: 2.7
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: d892b5bc1d8d6104cad8e60fac3b01b0, type: 3}
       propertyPath: m_LocalRotation.w

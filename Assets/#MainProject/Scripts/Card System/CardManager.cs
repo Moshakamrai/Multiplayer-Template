@@ -86,9 +86,9 @@ public class CardManager : NetworkBehaviour
     private string _selectedCardTrigger = "";
     private float  _selectedCardAnimTimer = 0f;
 
-    // Single-mode card sizes
-    const float nWidth  = 240f;
-    const float nHeight = 380f;
+    // Single-mode card sizes — aspect matches artwork (787 × 1943 px)
+    const float nWidth  = 160f;
+    const float nHeight = 395f;
     const float nSpace  = 10f;
 
     // Combo HUD dimensions
@@ -355,7 +355,7 @@ public class CardManager : NetworkBehaviour
     }
 
     // ── Per-family hand draw ───────────────────────────────────────────────
-    private CardFamily FamilyOfTrigger(string t)
+    public CardFamily FamilyOfTrigger(string t)
     {
         switch (t)
         {

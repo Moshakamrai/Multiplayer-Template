@@ -1,4 +1,6 @@
 using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 
 /// 3D world-space music visualizer — spawns two rows of cubes (left + right of arena)
 /// that scale and glow in response to the audio spectrum and attack triggers.
@@ -51,10 +53,25 @@ public class BeatVisualizerWorld : MonoBehaviour
     [Range(5f, 40f)] public float amplitudeScale = 22f;
 
     [Header("Bar Colors (URP)")]
-    public Color barColorBase = new Color(0.85f, 0.04f, 0.02f);
-    public Color barColorPeak = new Color(1.00f, 0.72f, 0.00f);
+    [Tooltip("Spectrum gradient across the bars: low freq (start) → high freq (end). Cyan→magenta→yellow→red by default.")]
+    public Gradient barSpectrumGradient = DefaultSpectrumGradient();
+    [Tooltip("How much darker a bar is at rest vs. at peak (0 = always full color, 1 = goes black when idle).")]
+    [Range(0f, 1f)] public float idleDarken = 0.45f;
     [Tooltip("Emission multiplier — raise this for bloom glow. Requires Bloom post-process.")]
-    [Range(0f, 8f)] public float emissionIntensity = 3f;
+    [Range(0f, 20f)] public float emissionIntensity = 11.25f;
+
+    [Header("Auto Bloom (glow)")]
+    [Tooltip("If no Bloom is found in the scene at Start, spawn a global Volume with Bloom so the " +
+             "emissive bars actually glow. Turn OFF if your scene already has a tuned Bloom volume.")]
+    public bool autoAddBloom = true;
+    [Range(0f, 10f)] public float bloomIntensity = 0.96f;
+    [Tooltip("Brightness a pixel must exceed to bloom. Low = more things glow.")]
+    [Range(0f, 2f)] public float bloomThreshold = 0.6f;
+
+    [Header("Bar Separation (black borders)")]
+    [Tooltip("Shrinks each bar's width/depth so there's a dark GAP between neighbours — the segmented " +
+             "'black outline' look. 0 = bars touch, 0.4 = chunky gaps.")]
+    [Range(0f, 0.9f)] public float barGap = 0.35f;
 
     [Header("Beat Detection (ambient)")]
     [Range(0.005f, 0.3f)] public float beatThreshold = 0.05f;
@@ -87,6 +104,25 @@ public class BeatVisualizerWorld : MonoBehaviour
     private float _spikeGlow  = 0f;
     private int   _nextBeatIdx;
 
+    /// Default spectrum gradient: cyan (low) → blue → magenta → yellow → orange → red (high).
+    static Gradient DefaultSpectrumGradient()
+    {
+        var g = new Gradient();
+        g.SetKeys(
+            new GradientColorKey[]
+            {
+                new GradientColorKey(new Color(0f, 1f, 1f),    0.00f), // cyan
+                new GradientColorKey(new Color(0f, 0.5f, 1f),  0.20f), // blue
+                new GradientColorKey(new Color(1f, 0f, 1f),    0.40f), // magenta
+                new GradientColorKey(new Color(1f, 1f, 0f),    0.60f), // yellow
+                new GradientColorKey(new Color(1f, 0.5f, 0f),  0.80f), // orange
+                new GradientColorKey(new Color(1f, 0f, 0f),    1.00f), // red
+            },
+            new GradientAlphaKey[] { new GradientAlphaKey(1f, 0f), new GradientAlphaKey(1f, 1f) }
+        );
+        return g;
+    }
+
     // ─────────────────────────────────────────────────────────────────────
     void Start()
     {
@@ -100,6 +136,33 @@ public class BeatVisualizerWorld : MonoBehaviour
 
         BuildMaterial();
         SpawnBars();
+        if (autoAddBloom) EnsureBloom();
+    }
+
+    /// Make sure the scene has a Bloom post-process so the emissive bars actually glow. If a Bloom
+    /// override already exists anywhere, leave it alone; otherwise spawn a global Volume with one.
+    void EnsureBloom()
+    {
+        // Already have a Bloom somewhere? Don't double up.
+        var existing = FindObjectsOfType<Volume>();
+        foreach (var v in existing)
+            if (v.profile != null && v.profile.Has<Bloom>())
+                return;
+
+        var go = new GameObject("BeatVisualizer Bloom (auto)");
+        var vol = go.AddComponent<Volume>();
+        vol.isGlobal = true;
+        vol.priority = 10f; // sit above any default global so our Bloom wins
+
+        var profile = ScriptableObject.CreateInstance<VolumeProfile>();
+        vol.profile = profile;
+
+        var bloom = profile.Add<Bloom>(true);
+        bloom.intensity.Override(bloomIntensity);
+        bloom.threshold.Override(bloomThreshold);
+        bloom.scatter.Override(0.7f);
+
+        Debug.Log("[BeatVisualizerWorld] No Bloom found in scene — added a global Bloom volume so bars glow.", this);
     }
 
     void BuildMaterial()
@@ -249,7 +312,9 @@ public class BeatVisualizerWorld : MonoBehaviour
             float boosted = Mathf.Clamp01(_bars[i] * _spikeBoost);
             float height  = Mathf.Max(minBarHeight, boosted * maxBarHeight);
 
-            Color col      = Color.Lerp(barColorBase, barColorPeak, boosted);
+            // Spectrum gradient across the row (low→high freq), darkened at rest so peaks pop.
+            Color specCol = barSpectrumGradient.Evaluate(barCount > 1 ? (float)i / (barCount - 1) : 0f);
+            Color col      = specCol * Mathf.Lerp(1f - idleDarken, 1f, boosted);
             Color emission = Color.Lerp(col, spikeColor, _spikeGlow) * emissionIntensity;
 
             ApplyBar(_leftT[i], _leftR[i], _leftBase[i], height, col, emission);
@@ -269,7 +334,9 @@ public class BeatVisualizerWorld : MonoBehaviour
             // Bottom-anchor: cube pivot is center, so shift Y up by half height.
             t.localPosition = basePos + new Vector3(0f, height * 0.5f, 0f);
 
-        t.localScale = new Vector3(barFootprint.x, height, barFootprint.y);
+        // barGap shrinks width/depth so a dark gap shows between neighbours (the "black border" look).
+        float shrink = 1f - barGap;
+        t.localScale = new Vector3(barFootprint.x * shrink, height, barFootprint.y * shrink);
 
         // MaterialPropertyBlock avoids creating per-instance material copies
         _mpb.SetColor("_BaseColor",     col);      // URP Lit

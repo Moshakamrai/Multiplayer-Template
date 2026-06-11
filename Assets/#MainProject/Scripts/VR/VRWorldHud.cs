@@ -139,8 +139,8 @@ public class VRWorldHud : MonoBehaviour
         crt.localPosition = Vector3.zero;
 
         // Health bars: YOU (left), BOT (right), pushed high up for visibility.
-        BuildBar(crt, new Vector2(-300, 380), out _selfFill, out _selfLabel);
-        BuildBar(crt, new Vector2( 300, 380), out _oppFill,  out _oppLabel);
+        BuildBar(crt, new Vector2(-300, 570), out _selfFill, out _selfLabel);
+        BuildBar(crt, new Vector2( 300, 570), out _oppFill,  out _oppLabel);
 
         // Timing feedback text, centred (a bit above eye-line).
         _timingLabel = MakeText(crt, "", 80, new Vector2(0, 120), new Vector2(900, 140));
@@ -237,8 +237,8 @@ public class VRWorldHud : MonoBehaviour
 
     // Where the hand sits relative to the gaze HUD (HUD-local: +X = your right, +Y = up).
     // Tweak these two to taste — moved to the right and lowered into comfortable view.
-    private static readonly Vector3 CARD_OFFSET = new Vector3(0.55f, 1.05f, 0f);
-    private const float CARD_SCALE = 0.0026f;
+    private static readonly Vector3 CARD_OFFSET = new Vector3(0.30f, 1.05f, 0f); // nudged further left
+    private const float CARD_SCALE = 0.002418f; // 7% smaller than 0.0026
 
     // Dock the player's hand canvas to the lower-right of the HUD, facing the player, every frame.
     // Kept parented to the player so it's cleaned up with them; we drive world pose directly.
@@ -250,9 +250,9 @@ public class VRWorldHud : MonoBehaviour
         t.localScale = Vector3.one * CARD_SCALE;
     }
 
-    // Where the power cone sits relative to the HUD (HUD-local). Off to your LEFT.
-    private static readonly Vector3 POWER_OFFSET = new Vector3(-0.85f, 0f, 0f);
-    private const float POWER_SCALE = 0.0016f;
+    // Where the power cone sits relative to the HUD (HUD-local). Off to your RIGHT.
+    private static readonly Vector3 POWER_OFFSET = new Vector3(1.064f, 0f, 0f); // pulled 20% back left
+    private const float POWER_SCALE = 0.00136f; // 15% smaller than 0.0016
 
     // Find the local power-meter cone and make sure it renders in VR (world-space).
     private void PromotePowerCanvas(Camera cam)

@@ -2256,9 +2256,16 @@ public class RhythmRoundManager : NetworkBehaviour
         float spike = attacker.lastVocalSpikeTime;
         if (spike <= 0f) return 0.50f;
         float offset = Mathf.Abs(GetNextBeatTime() - spike);
-        if (offset <= 0.10f) return 1.25f;
-        if (offset <= 0.30f) return 1.00f;
-        return 0.50f;
+
+        // Continuous reward for shouting/striking CLOSE to the beat — the tighter, the harder it hits:
+        //   offset 0.00s  → 1.60×  (dead-on the beat)
+        //   offset 0.10s  → ~1.30×
+        //   offset 0.20s  → 1.00×  (on-time baseline)
+        //   offset ≥0.35s → 0.50×  (sloppy floor)
+        const float perfect = 1.60f, baseAt = 0.20f, badAt = 0.35f, floor = 0.50f;
+        if (offset <= baseAt) return Mathf.Lerp(perfect, 1.00f, offset / baseAt);
+        if (offset <= badAt)  return Mathf.Lerp(1.00f, floor, (offset - baseAt) / (badAt - baseAt));
+        return floor;
     }
 
     // Grants +1 slot of the OPPOSITE type to the winner of a trade.

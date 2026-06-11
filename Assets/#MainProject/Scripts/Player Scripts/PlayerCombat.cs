@@ -400,6 +400,43 @@ public class PlayerCombat : NetworkBehaviour
         Destroy(fx, 2f);
     }
 
+    // ── Parry reversal VFX ──────────────────────────────────────────────────
+    // When a parry/reflect succeeds, this fighter (the ATTACKER who got parried) has their own
+    // strike VFX flung BACK at them from the defender. Speed-matched so the bolt covers the gap in
+    // exactly `flightTime`, landing the moment the attacker's hurt/blood reaction plays.
+    // Called on the SERVER, on the ATTACKER's PlayerCombat, with the defender (parrier) as source.
+    [Server]
+    public void SpawnReversedStrike(PlayerCombat defender, float flightTime)
+    {
+        if (slashProjectilePrefab == null || defender == null) return;
+        Vector3 from = defender.slashSpawnPoint != null
+            ? defender.slashSpawnPoint.position
+            : defender.transform.position + Vector3.up * 1.2f;
+        Vector3 to = slashSpawnPoint != null
+            ? slashSpawnPoint.position
+            : transform.position + Vector3.up * 1.2f;
+        RpcReversedStrike(from, to, Mathf.Max(0.05f, flightTime));
+    }
+
+    [ClientRpc]
+    private void RpcReversedStrike(Vector3 from, Vector3 to, float flightTime)
+    {
+        if (slashProjectilePrefab == null) return;
+
+        Vector3 dir = to - from;
+        if (dir.sqrMagnitude < 0.0001f) dir = transform.forward;
+        Quaternion rot = Quaternion.LookRotation(dir.normalized, Vector3.up) * Quaternion.Euler(slashRotationOffset);
+
+        var go = Instantiate(slashProjectilePrefab, from, rot);
+
+        // Speed-match: cover the distance in exactly flightTime so it lands on the hurt animation.
+        float dist = dir.magnitude;
+        var sp = go.GetComponent<SlashProjectile>();
+        if (sp == null) sp = go.AddComponent<SlashProjectile>();
+        sp.speed    = dist / flightTime;
+        sp.lifetime = flightTime + 0.15f; // small tail so it isn't culled exactly on impact
+    }
+
     public void VoiceAttackJab() { if (isLocalPlayer && !IsDead) _attackQueue.Enqueue("Jab"); }
     public void VoiceAttackCross() { if (isLocalPlayer && !IsDead) _attackQueue.Enqueue("Cross"); }
     public void VoiceAttackHook() { if (isLocalPlayer && !IsDead) _attackQueue.Enqueue("Hook"); }
@@ -500,71 +537,67 @@ public class PlayerCombat : NetworkBehaviour
         // ── First spike only: once locked, ignore further input until next beat cycle ──────
         if (_spikeLockedThisBeat) return;
 
-        // ── INPUT SOURCES (both can contribute) ─────────────────────────────────────────────
-        // VR:   trigger release gives timing + swing power. Mic shout adds EXTRA volume bonus.
-        // Flat: mic shout is the ONLY source.
-        float punchVol = -1f;   // -1 = no punch consumed this frame
-        float shoutVol = -1f;   // -1 = no shout detected this frame
-        bool  gotInput = false;
+        // ── INPUT: the on-beat SHOUT fires the move and LOCKS IN your power (VR + flat). ──
+        // VR:   power = the trigger-charge you built by pulsing the controller; the shout locks it
+        //       in (a loud shout tops it up a little). The shout's closeness to the beat is what
+        //       scales damage — so the closeness reward is shout-only.
+        // Flat: the shout's own volume is the power.
+        // CurrentFestivalVolume subtracts a configurable noise floor (loud venues read as 0); Vosk
+        // speech recognition still works on the raw audio, this only affects timing spikes.
+        float shoutVol = vp != null ? vp.CurrentFestivalVolume : -1f;
+        bool  gotShout = vp != null && _vcm != null && shoutVol >= _vcm.parryVolumeThreshold;
 
-        // 1) VR punch (trigger release + swing speed)
-        if (VRCameraDriver.VRActive)
+        // VR: the MATCHING controller's trigger release on the beat fires the move — RIGHT hand for
+        // Strike/Throw, LEFT for Block/Parry (Support: either). Shout is an alternative lock-in; both
+        // lock the power and scale by beat-closeness.
+        bool  gotRelease    = false;
+        float releaseCharge = 0f;
+        if (VRCameraDriver.VRActive && _cardManager != null)
         {
-            if (VRHands.ConsumePunch(out punchVol))
-                gotInput = true;
+            CardFamily fam = _cardManager.FamilyOfTrigger(currentMove);
+            bool isOffense = fam == CardFamily.Strike || fam == CardFamily.Throw;
+            bool isDefense = fam == CardFamily.Block  || fam == CardFamily.Parry;
+            if (isOffense)      gotRelease = VRHands.ConsumeRelease(true,  out releaseCharge); // right hand
+            else if (isDefense) gotRelease = VRHands.ConsumeRelease(false, out releaseCharge); // left hand
+            else                gotRelease = VRHands.ConsumeRelease(true, out releaseCharge)   // Support: either hand
+                                          || VRHands.ConsumeRelease(false, out releaseCharge);
         }
 
-        // 2) Mic shout — ALWAYS active in both VR and flat builds
-        if (vp != null && _vcm != null)
-        {
-            // CurrentFestivalVolume subtracts a configurable floor — in loud environments
-            // (festivals), raise the floor so crowd noise reads as 0. Vosk speech
-            // recognition still works on raw audio; this only affects timing spikes.
-            shoutVol = vp.CurrentFestivalVolume;
-            if (shoutVol >= _vcm.parryVolumeThreshold)
-                gotInput = true;
-        }
+        if (!gotShout && !gotRelease) return; // need a shout OR the matching-hand trigger release on the beat
 
-        if (!gotInput) return;
-
-        // ── Combine inputs ──────────────────────────────────────────────────────────────────
-        // currentVol is what we send to the server as the "power" value.
-        // In VR with both:   blend punch power + shout volume (up to 1.25x cap)
-        // In VR punch only:  use punch power (0.4–1.0)
-        // In VR shout only:  use shout volume (0.0–1.0)
-        // In flat:           use shout volume (0.0–1.0)
         float currentVol;
-        bool  usedShout = false;
+        bool  usedShout = gotShout;
 
         if (VRCameraDriver.VRActive)
         {
-            bool hasShout = (_vcm != null && shoutVol >= _vcm.parryVolumeThreshold);
-            if (punchVol >= 0f && hasShout)
-            {
-                // BOTH punch + shout → combine for up to 1.25x max (extra 25% over pure punch)
-                float shoutBonus = Mathf.Clamp01((shoutVol - _vcm.parryVolumeThreshold) /
-                                                  Mathf.Max(0.01f, 1f - _vcm.parryVolumeThreshold));
-                currentVol = Mathf.Min(1.25f, punchVol + shoutBonus * 0.25f);
-                usedShout = true;
-            }
-            else if (punchVol >= 0f)
-            {
-                currentVol = punchVol;
-            }
-            else
-            {
-                currentVol = shoutVol;
-                usedShout = true;
-            }
+            // Power = the trigger-charge you built (shout and release both consume the same charge;
+            // release also captured the charge at the let-go moment). A loud shout tops it up to +0.25.
+            float charge = VRHands.ConsumeCharge();
+            if (gotRelease) charge = Mathf.Max(charge, releaseCharge);
+            float shoutBonus = gotShout
+                ? Mathf.Clamp01((shoutVol - _vcm.parryVolumeThreshold) / Mathf.Max(0.01f, 1f - _vcm.parryVolumeThreshold))
+                : 0f;
+            currentVol = Mathf.Clamp(charge + shoutBonus * 0.25f, 0f, 1.25f);
         }
         else
         {
             currentVol = shoutVol;
-            usedShout = true;
         }
 
         // ── Register the timing spike ─────────────────────────────────────────────────────
         _spikeLockedThisBeat = true;
+
+        // Fire the hand card's activation shine the moment you shout on the beat (local feedback).
+        _cardManager?.PlayActivationFor(currentMove);
+
+        // Lock the power meter in on the shout: the TIGHTER the shout (closer to the beat), the
+        // higher it locks. It holds for ~holdTime, then dissolves again unless you keep pulsing.
+        if (_powerMeter == null) _powerMeter = GetComponentInChildren<PowerMeterReactor>(true);
+        if (_powerMeter != null)
+        {
+            float closeness = 1f - Mathf.Clamp01(timeUntilImpact / Mathf.Max(0.001f, effectiveWindow));
+            _powerMeter.LockIn(currentVol, closeness);
+        }
 
         if (!isChainMode && currentMove == "ParryIntent")
         {
@@ -897,6 +930,18 @@ public class PlayerCombat : NetworkBehaviour
         return (_comboBuffer.Count > 0) ? _comboBuffer[0] : new RhythmAction { attack = "", dash = Vector3.zero };
     }
 
+    /// The currently-pending move's trigger (locally readable, e.g. for VR controller-glow cues).
+    /// Empty string when nothing is queued. Works in both single-move and chain modes.
+    public string PendingMoveTrigger
+    {
+        get
+        {
+            if (RhythmRoundManager.Instance == null) return "";
+            if (RhythmRoundManager.Instance.IsSingleMoveMode()) return _pendingAttackTrigger ?? "";
+            return (_comboBuffer.Count > 0) ? (_comboBuffer[_comboBuffer.Count - 1].attack ?? "") : "";
+        }
+    }
+
     [Server]
     public void ConsumeNextMove()
     {
@@ -977,7 +1022,7 @@ public class PlayerCombat : NetworkBehaviour
     }
 
     [Server]
-    public void TakeDamage(int damage, Vector3 knockbackDir = default, bool isOpponentDamage = false)
+    public void TakeDamage(int damage, Vector3 knockbackDir = default, bool isOpponentDamage = false, float hurtDelay = 0f)
     {
         StartCoroutine(FlashEffectRoutine());
         float oldPct = CurrentPercentage;
@@ -986,7 +1031,8 @@ public class PlayerCombat : NetworkBehaviour
         if (isServer && Mathf.FloorToInt(CurrentPercentage / 50f) > Mathf.FloorToInt(oldPct / 50f))
             TriggerStagger(2);
         CancelDefenseVfx(); // kill any active block/parry VFX the moment a hit lands
-        RpcTriggerHurt("Hurt " + Random.Range(1, 5), 0f, damage);
+        // hurtDelay > 0 (e.g. a parry reversal) holds the hurt/blood reaction until the flying VFX lands.
+        RpcTriggerHurt("Hurt " + Random.Range(1, 5), hurtDelay, damage);
         RpcShowDamageNumber(damage, isOpponentDamage);
         RpcGloveHurt();
         if (knockbackDir != default) RpcNudgeBack(knockbackDir);

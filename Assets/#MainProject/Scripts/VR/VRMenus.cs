@@ -274,6 +274,10 @@ public class VRMenus : MonoBehaviour
         canvasGo.transform.SetParent(root.transform, false);
         var canvas = canvasGo.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.WorldSpace;
+        // Crank pixel density so text + art render crisp in VR (default 1 = blurry).
+        var scaler = canvasGo.AddComponent<CanvasScaler>();
+        scaler.dynamicPixelsPerUnit = 4f;
+        scaler.referencePixelsPerUnit = 100f;
         var crt = (RectTransform)canvasGo.transform;
         crt.sizeDelta = size;
         crt.localScale = Vector3.one * PANEL_SCALE;

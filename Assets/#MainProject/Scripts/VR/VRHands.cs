@@ -36,11 +36,13 @@ public class VRHands : MonoBehaviour
     [Tooltip("Scales how far the gloves sit from your head. 1 = real arm distance.")]
     public float reach = 1f;
 
-    [Header("Punch input (replaces shout-on-beat)")]
-    [Tooltip("Hand speed (m/s) at or below this = weakest hit (no power bonus).")]
-    public float minPunchSpeed = 1.0f;
-    [Tooltip("Hand speed (m/s) at or above this = full power bonus.")]
-    public float maxPunchSpeed = 5.0f;
+    [Header("Trigger-charge power (VR)")]
+    [Tooltip("Hold the trigger and pulse the controller to BUILD power. Charge gained per (m/s of motion · second) while the trigger is held. Higher = fills faster.")]
+    public float chargeGain = 0.85f;
+    [Tooltip("How fast the power charge dissolves (per second) when you stop moving or release the trigger.")]
+    public float chargeDecay = 0.45f;
+    [Tooltip("Controller speed (m/s) above which motion counts as a 'pulse' that builds charge.")]
+    public float motionThreshold = 0.4f;
 
     [Header("Optional")]
     [Tooltip("Fully stop the character Animator. Leave OFF — the body is hidden anyway, and " +
@@ -61,36 +63,48 @@ public class VRHands : MonoBehaviour
     private Vector3 _rotOffsetR;
     private bool _rotInit;
 
-    // --- Punch input (pure swing motion), consumed by PlayerCombat in VR ---
-    // A fast hand swing latches a "punch" with that hand's speed as its power (0.4..1).
-    // No trigger needed — just swing hard near the beat.
-    // PlayerCombat.CheckLocalParryTiming consumes it on the beat, in place of the mic volume.
-    private static bool _punchPending;
-    private static float _punchPower;
-    private static float _punchSetTime;
-    private const float PUNCH_EXPIRY = 0.12f; // a swing only counts for ~120ms
-    private const float SWING_COOLDOWN = 0.25f; // minimum seconds between swings
+    // --- Trigger-charge power (VR), read by PlayerCombat when the shout locks in ---
+    // HOLD a trigger and PULSE the controller to BUILD power (0..1). It dissolves when motion
+    // stops, so you keep it alive by pulsing. The power meter shows it live. The on-beat SHOUT is
+    // what fires the move and LOCKS IN this charge as the punch's power.
+    private static float _charge; // 0..1 accumulated power
+    public static float Charge => _charge;
+
+    /// Take the current charge as punch power and reset it (called when the lock-in fires on the beat).
+    public static float ConsumeCharge()
+    {
+        float c = _charge;
+        _charge = 0f;
+        return c;
+    }
+
+    // Trigger RELEASE = a lock-in (alternative to shout). Tracked PER HAND so PlayerCombat can
+    // require the matching controller: RIGHT fires Strike/Throw, LEFT fires Block/Parry.
+    private const float RELEASE_EXPIRY = 0.15f;
+    private static bool  _relPendL, _relPendR;
+    private static float _relTimeL, _relTimeR, _relChargeL, _relChargeR;
+    private bool _prevLTrig, _prevRTrig;
+
+    /// True (once) if the given hand's trigger released within RELEASE_EXPIRY, with the charge at release.
+    public static bool ConsumeRelease(bool rightHand, out float charge)
+    {
+        if (rightHand)
+        {
+            if (_relPendR && Time.time - _relTimeR <= RELEASE_EXPIRY) { charge = _relChargeR; _relPendR = false; return true; }
+            _relPendR = false;
+        }
+        else
+        {
+            if (_relPendL && Time.time - _relTimeL <= RELEASE_EXPIRY) { charge = _relChargeL; _relPendL = false; return true; }
+            _relPendL = false;
+        }
+        charge = 0f;
+        return false;
+    }
 
     private Vector3 _prevLPos, _prevRPos;
     private bool _havedPrevPos;
-
-    // Per-hand cooldown to prevent double-firing on the same swing motion
-    private float _lastSwingTimeL, _lastSwingTimeR;
-
-    /// Called by PlayerCombat instead of reading mic volume when in VR.
-    /// Returns true (once) if a swing is waiting, with its power (0.4..1 from hand speed).
-    public static bool ConsumePunch(out float power)
-    {
-        if (_punchPending && Time.time - _punchSetTime <= PUNCH_EXPIRY)
-        {
-            power = _punchPower;
-            _punchPending = false;
-            return true;
-        }
-        _punchPending = false; // expire stale swings
-        power = 0f;
-        return false;
-    }
+    private PowerMeterReactor _reactor; // local power cone, driven live with the charge
 
     private void Awake()
     {
@@ -125,7 +139,7 @@ public class VRHands : MonoBehaviour
             _pivotsBuilt = true;
         }
 
-        UpdatePunchInput();
+        UpdateChargeInput();
 
         Camera cam = Camera.main;
         if (cam == null) return;
@@ -159,9 +173,10 @@ public class VRHands : MonoBehaviour
         return anchorGo.transform;
     }
 
-    /// Tracks each controller's speed and fires a punch on a fast swing — NO trigger needed.
-    /// Uses that hand's current speed as the punch power.
-    private void UpdatePunchInput()
+    /// While EITHER trigger is held, controller motion BUILDS the power charge (pulse to charge up).
+    /// With no motion (or the trigger released) the charge dissolves. The live value is pushed to the
+    /// power meter every frame so the bar reacts in real time; the on-beat shout consumes it.
+    private void UpdateChargeInput()
     {
         float dt = Time.deltaTime;
         if (dt <= 0f) return;
@@ -180,31 +195,25 @@ public class VRHands : MonoBehaviour
         }
         _prevLPos = lpos; _prevRPos = rpos; _havedPrevPos = true;
 
+        bool ltrig = ReadBtn(lh, CommonUsages.triggerButton);
+        bool rtrig = ReadBtn(rh, CommonUsages.triggerButton);
+        bool anyTrig = ltrig || rtrig;
+        float speed = Mathf.Max(lspeed, rspeed);
+
+        if (anyTrig && speed > motionThreshold)
+            _charge = Mathf.Clamp01(_charge + speed * chargeGain * dt); // pulse to build power
+        else
+            _charge = Mathf.Max(0f, _charge - chargeDecay * dt);        // dissolve with no motion
+
+        // Trigger RELEASE near the beat = lock-in, latched PER HAND (right = Strike/Throw, left = Block/Parry).
         float now = Time.time;
+        if (!ltrig && _prevLTrig) { _relPendL = true; _relTimeL = now; _relChargeL = _charge; }
+        if (!rtrig && _prevRTrig) { _relPendR = true; _relTimeR = now; _relChargeR = _charge; }
+        _prevLTrig = ltrig; _prevRTrig = rtrig;
 
-        // LEFT hand — fire on fast swing, with cooldown
-        if (lspeed >= minPunchSpeed && now - _lastSwingTimeL >= SWING_COOLDOWN)
-        {
-            _lastSwingTimeL = now;
-            RegisterPunch(lspeed);
-        }
-
-        // RIGHT hand — fire on fast swing, with cooldown
-        if (rspeed >= minPunchSpeed && now - _lastSwingTimeR >= SWING_COOLDOWN)
-        {
-            _lastSwingTimeR = now;
-            RegisterPunch(rspeed);
-        }
-    }
-
-    private void RegisterPunch(float speed)
-    {
-        float t = Mathf.Clamp01((speed - minPunchSpeed) / Mathf.Max(0.01f, maxPunchSpeed - minPunchSpeed));
-        // Map onto the existing "volume" power channel: 0.4 = no bonus, 1.0 = full +25%.
-        _punchPower = Mathf.Lerp(0.4f, 1.0f, t);
-        _punchPending = true;
-        _punchSetTime = Time.time;
-        Debug.Log($"[VRHands] Punch! speed={speed:0.0}m/s power={_punchPower:0.00}");
+        // Drive the power cone live so the player SEES the charge building / dissolving.
+        if (_reactor == null) _reactor = GetComponentInChildren<PowerMeterReactor>(true);
+        if (_reactor != null) _reactor.SetLiveCharge(_charge);
     }
 
     private static bool ReadBtn(InputDevice d, InputFeatureUsage<bool> usage)

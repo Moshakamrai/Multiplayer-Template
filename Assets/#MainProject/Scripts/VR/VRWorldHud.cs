@@ -39,6 +39,15 @@ public class VRWorldHud : MonoBehaviour
     private float _powerRetry;
     private bool _built;
 
+    // ── Per-frame allocation cuts ──
+    // Combatant lookup is cached and refreshed on an interval instead of every frame (it iterated
+    // GameManager.players + GetComponent each frame). Health label strings are only rebuilt when the
+    // displayed integer % changes, so we stop allocating a new string every single frame.
+    private PlayerCombat _cachedSelf, _cachedOpp;
+    private float _combatantRefresh;
+    private int _lastSelfPct = int.MinValue, _lastOppPct = int.MinValue;
+    private string _lastTimingText = null;
+
     private void Update()
     {
         if (!XRSettings.isDeviceActive) return;
@@ -91,29 +100,53 @@ public class VRWorldHud : MonoBehaviour
 
     private void UpdateHealth()
     {
-        GetCombatants(out PlayerCombat self, out PlayerCombat opp);
-        SetBar(_selfFill, _selfLabel, "YOU", self);
-        SetBar(_oppFill,  _oppLabel,  "BOT", opp);
+        // Refresh the cached combatant refs at most a couple times a second, not every frame.
+        _combatantRefresh -= Time.unscaledDeltaTime;
+        if (_combatantRefresh <= 0f || _cachedSelf == null)
+        {
+            _combatantRefresh = 0.5f;
+            GetCombatants(out _cachedSelf, out _cachedOpp);
+        }
+        SetBar(_selfFill, _selfLabel, "YOU", _cachedSelf, ref _lastSelfPct);
+        SetBar(_oppFill,  _oppLabel,  "BOT", _cachedOpp,  ref _lastOppPct);
     }
 
     private const float BAR_FULL_W = 512f;
 
-    private void SetBar(Image fill, Text label, string who, PlayerCombat pc)
+    private void SetBar(Image fill, Text label, string who, PlayerCombat pc, ref int lastPct)
     {
-        if (pc == null) { if (label) label.text = $"{who}  --"; return; }
-        float pct = Mathf.Clamp01(pc.CurrentPercentage / 100f); // Smash-style damage %
+        if (pc == null)
+        {
+            if (label && lastPct != int.MaxValue) { label.text = $"{who}  --"; lastPct = int.MaxValue; }
+            return;
+        }
+        int pctInt = Mathf.RoundToInt(pc.CurrentPercentage);
+        if (pctInt == lastPct) return; // nothing changed this frame — skip the bar + string work
+
+        lastPct = pctInt;
+        float pct01 = Mathf.Clamp01(pc.CurrentPercentage / 100f); // Smash-style damage %
         var rt = (RectTransform)fill.transform;
-        rt.sizeDelta = new Vector2(BAR_FULL_W * pct, rt.sizeDelta.y);
+        rt.sizeDelta = new Vector2(BAR_FULL_W * pct01, rt.sizeDelta.y);
         fill.color = SeverityColor(pc.CurrentPercentage);
-        if (label) label.text = $"{who}  {pc.CurrentPercentage:F0}%";
+        if (label) label.text = $"{who}  {pctInt}%";
     }
 
     private void UpdateTiming()
     {
         float age = Time.time - PlayerCombat.VRTimingTime;
-        if (age > 1.2f) { _timingLabel.text = ""; return; }
+        if (age > 1.2f)
+        {
+            if (_lastTimingText != "") { _timingLabel.text = ""; _lastTimingText = ""; }
+            return;
+        }
+        // Text only changes on a new feedback event; rebuild it only then. The alpha fade still runs
+        // every frame (it's just a color tween, no allocation).
+        if (_lastTimingText != PlayerCombat.VRTimingText)
+        {
+            _timingLabel.text = PlayerCombat.VRTimingText;
+            _lastTimingText = PlayerCombat.VRTimingText;
+        }
         float alpha = 1f - Mathf.Clamp01(age / 1.2f);
-        _timingLabel.text = PlayerCombat.VRTimingText;
         var c = PlayerCombat.VRTimingColor;
         _timingLabel.color = new Color(c.r, c.g, c.b, alpha);
     }

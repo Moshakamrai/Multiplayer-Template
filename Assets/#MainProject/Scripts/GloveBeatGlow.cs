@@ -46,6 +46,20 @@ public class GloveBeatGlow : MonoBehaviour
     public float flashIntensity = 4f;
     public float flashDecay     = 6f;
 
+    [Header("Selection Bloom")]
+    [Tooltip("Intensity of the card-selection bloom.")]
+    public float selectionBloomIntensity = 4f;
+    public float selectionBloomPulseSpeed = 8f;
+
+    [Header("Selection Bloom Colors")]
+    [ColorUsage(false, true)] public Color strikeBloomColor = new Color(1.0f, 0.35f, 0.05f);
+    [ColorUsage(false, true)] public Color throwBloomColor  = new Color(1.0f, 0.60f, 0.10f);
+    [ColorUsage(false, true)] public Color blockBloomColor  = new Color(0.10f, 0.55f, 1.0f);
+    [ColorUsage(false, true)] public Color parryBloomColor  = new Color(0.50f, 0.80f, 1.0f);
+    [ColorUsage(false, true)] public Color supportBloomColor = new Color(1.0f, 1.0f, 1.0f);
+    private bool _selectionBloomActive;
+    private CardFamily _selectionBloomFamily = CardFamily.Support;
+
     private Material[] _mats;
     private Material[] _rightMats;
     private Material[] _leftMats;
@@ -75,11 +89,42 @@ public class GloveBeatGlow : MonoBehaviour
                 Debug.Log($"[GloveCue] auto-resolved hand renderers from VRHands — " +
                           $"right={(rightGloveRenderers?.Length ?? 0)} left={(leftGloveRenderers?.Length ?? 0)}", this);
             }
+
+            // Still nothing? Split the generic gloveRenderers into left/right by object name so the
+            // active-hand cue works with zero extra setup (matches "left"/"right", "_l"/"_r", "L"/"R").
+            if ((rightGloveRenderers == null || rightGloveRenderers.Length == 0) &&
+                (leftGloveRenderers  == null || leftGloveRenderers.Length  == 0) &&
+                gloveRenderers != null && gloveRenderers.Length > 0)
+            {
+                var rs = new List<Renderer>(); var ls = new List<Renderer>();
+                foreach (var r in gloveRenderers)
+                {
+                    if (r == null) continue;
+                    string n = r.name.ToLower();
+                    bool isLeft  = n.Contains("left")  || n.Contains("_l") || n.EndsWith("l");
+                    bool isRight = n.Contains("right") || n.Contains("_r") || n.EndsWith("r");
+                    if (isRight && !isLeft) rs.Add(r);
+                    else if (isLeft && !isRight) ls.Add(r);
+                }
+                if (rs.Count > 0) rightGloveRenderers = rs.ToArray();
+                if (ls.Count > 0) leftGloveRenderers  = ls.ToArray();
+                Debug.Log($"[GloveCue] split gloveRenderers by name — right={rs.Count} left={ls.Count}. " +
+                          (rs.Count == 0 && ls.Count == 0 ? "<<< couldn't tell hands apart — assign Left/Right Glove Renderers in the Inspector." : ""), this);
+            }
         }
 
         _mats      = InstanceMats(gloveRenderers);
         _rightMats = InstanceMats(rightGloveRenderers);
         _leftMats  = InstanceMats(leftGloveRenderers);
+
+        // If the combined gloveRenderers list wasn't assigned, fall back to the per-hand lists.
+        if (_mats.Length == 0 && (_rightMats.Length > 0 || _leftMats.Length > 0))
+        {
+            var combined = new List<Material>();
+            combined.AddRange(_rightMats);
+            combined.AddRange(_leftMats);
+            _mats = combined.ToArray();
+        }
     }
 
     private static Material[] InstanceMats(Renderer[] renderers)
@@ -97,6 +142,33 @@ public class GloveBeatGlow : MonoBehaviour
 
     public void FlashStrike() => Flash(strikeFlashColor);
     public void FlashHurt()   => Flash(hurtFlashColor);
+
+    private string _suppressedMove = "";
+
+    public void TriggerSelectionBloom(string trigger)
+    {
+        _selectionBloomActive = true;
+        _suppressedMove = "";
+        _selectionBloomFamily = _cardManager != null ? _cardManager.FamilyOfTrigger(trigger) : CardFamily.Support;
+    }
+
+    public void EndSelectionBloom()
+    {
+        _selectionBloomActive = false;
+        _suppressedMove = _localCombat?.PendingMoveTrigger ?? "";
+    }
+
+    private Color BloomColorFor(CardFamily fam)
+    {
+        return fam switch
+        {
+            CardFamily.Strike => strikeBloomColor,
+            CardFamily.Throw  => throwBloomColor,
+            CardFamily.Block  => blockBloomColor,
+            CardFamily.Parry  => parryBloomColor,
+            _                 => supportBloomColor,
+        };
+    }
 
     private void Flash(Color c)
     {
@@ -202,7 +274,31 @@ public class GloveBeatGlow : MonoBehaviour
         // Runs on VR + flat. Only the LOCAL player's gloves cue (remote clones / bot are left dark).
         if (_localCombat == null || !_localCombat.isLocalPlayer) return;
 
+        // Selection bloom overrides the family cue.
+        if (_selectionBloomActive)
+        {
+            float bloomPulse = 0.7f + 0.3f * Mathf.Sin(Time.time * selectionBloomPulseSpeed * Mathf.PI);
+            Color bloom = BloomColorFor(_selectionBloomFamily) * (selectionBloomIntensity * bloomPulse);
+
+            bool rightHand = _selectionBloomFamily == CardFamily.Strike || _selectionBloomFamily == CardFamily.Throw || _selectionBloomFamily == CardFamily.Support;
+            bool leftHand  = _selectionBloomFamily == CardFamily.Block  || _selectionBloomFamily == CardFamily.Parry  || _selectionBloomFamily == CardFamily.Support;
+
+            if (rightHand)
+                foreach (var m in _rightMats) if (m != null) m.SetColor(ID_Emission, bloom);
+            if (leftHand)
+                foreach (var m in _leftMats)  if (m != null) m.SetColor(ID_Emission, bloom);
+            return;
+        }
+
+        // Keep the glove cue dark while the move that just started its animation is still pending.
         string move = _localCombat.PendingMoveTrigger;
+        if (!string.IsNullOrEmpty(_suppressedMove) && move == _suppressedMove)
+        {
+            foreach (var m in _rightMats) if (m != null) m.SetColor(ID_Emission, Color.black);
+            foreach (var m in _leftMats)  if (m != null) m.SetColor(ID_Emission, Color.black);
+            return;
+        }
+
         if (move != _lastCueMove)
         {
             _lastCueMove = move;

@@ -58,13 +58,13 @@ public class BeatVisualizerWorld : MonoBehaviour
     [Tooltip("How much darker a bar is at rest vs. at peak (0 = always full color, 1 = goes black when idle).")]
     [Range(0f, 1f)] public float idleDarken = 0.45f;
     [Tooltip("Emission multiplier — raise this for bloom glow. Requires Bloom post-process.")]
-    [Range(0f, 20f)] public float emissionIntensity = 11.25f;
+    [Range(0f, 20f)] public float emissionIntensity = 5.625f;
 
     [Header("Auto Bloom (glow)")]
     [Tooltip("If no Bloom is found in the scene at Start, spawn a global Volume with Bloom so the " +
              "emissive bars actually glow. Turn OFF if your scene already has a tuned Bloom volume.")]
     public bool autoAddBloom = true;
-    [Range(0f, 10f)] public float bloomIntensity = 0.96f;
+    [Range(0f, 10f)] public float bloomIntensity = 0.48f;
     [Tooltip("Brightness a pixel must exceed to bloom. Low = more things glow.")]
     [Range(0f, 2f)] public float bloomThreshold = 0.6f;
 
@@ -227,7 +227,9 @@ public class BeatVisualizerWorld : MonoBehaviour
     {
         if (targetAudio == null || !targetAudio.isPlaying) return;
 
-        targetAudio.GetSpectrumData(_spectrum, 0, FFTWindow.BlackmanHarris);
+        // Shared FFT: one GetSpectrumData per frame across all visualizers (see SharedSpectrum).
+        _spectrum = SharedSpectrum.Get(targetAudio);
+        if (_spectrum == null) return;
 
         UpdateBars();
         SmoothBarsSpatially();

@@ -85,6 +85,15 @@ public class VRHands : MonoBehaviour
     private static float _relTimeL, _relTimeR, _relChargeL, _relChargeR;
     private bool _prevLTrig, _prevRTrig;
 
+    /// Non-consuming check: is EITHER hand's trigger release currently pending (and unexpired)?
+    /// Used to spot an "fired too early" attempt without eating the release (so a real on-beat fire
+    /// a moment later still works).
+    public static bool AnyReleasePending()
+    {
+        return (_relPendR && Time.time - _relTimeR <= RELEASE_EXPIRY)
+            || (_relPendL && Time.time - _relTimeL <= RELEASE_EXPIRY);
+    }
+
     /// True (once) if the given hand's trigger released within RELEASE_EXPIRY, with the charge at release.
     public static bool ConsumeRelease(bool rightHand, out float charge)
     {

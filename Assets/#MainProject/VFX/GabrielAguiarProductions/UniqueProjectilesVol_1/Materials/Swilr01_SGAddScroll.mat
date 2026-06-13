@@ -207,7 +207,7 @@ Material:
     - Vector2_C3A961A0: {r: 0, g: 0, b: 0, a: 0}
     - Vector2_D6AA7B7D: {r: 1, g: 1, b: 0, a: 0}
     - Vector2_E10066FE: {r: -0.5, g: 0, b: 0, a: 0}
-    - _Color: {r: 73.516685, g: 23.860014, b: 0, a: 1}
+    - _Color: {r: 4.8149304, g: 0, b: 0.39921996, a: 1}
     - _DissolveSpeed: {r: -0.6, g: 0, b: 0, a: 0}
     - _DissolveTiling: {r: 1, g: 1, b: 0, a: 0}
     - _DistortionSpeed: {r: -0.5, g: 0, b: 0, a: 0}

@@ -138,7 +138,6 @@ public class PlayerController : NetworkBehaviour
     // Vertical (Y / gravity) is always left untouched.
     private void LateUpdate()
     {
-        if (VRCameraDriver.VRActive) return; // VR positions fighters in Movement() instead
         bool isBotOnServer = isServer && !isLocalPlayer;
         if (!(isLocalPlayer || isBotOnServer)) return;
         if (!_hasHome) return;
@@ -146,12 +145,32 @@ public class PlayerController : NetworkBehaviour
         var rmm = RhythmRoundManager.Instance;
         if (rmm == null || !rmm.isRoundActive) return;
 
-        Vector3 pos = transform.position;
         bool isBot = GetComponent<BotController>() != null;
 
-        transform.position = isBot
-            ? new Vector3(_homePosition.x, pos.y, _homePosition.z)  // bot: locked in place
-            : new Vector3(pos.x,          pos.y, _homePosition.z);  // player: Z locked, X free
+        if (isBot)
+        {
+            // Hard-lock bot to spawn on ALL axes — hurt/dash/knockback root motion cannot drift it.
+            // Skip in VR only for the human player (VRCameraDriver handles them); bot always pinned.
+            transform.position = _homePosition;
+
+            // Always face the opponent — animations can rotate the rig, so we enforce it here.
+            PlayerController opp = GetOpponent();
+            if (opp != null)
+            {
+                Vector3 dir = opp.transform.position - transform.position;
+                dir.y = 0f;
+                if (dir.sqrMagnitude > 0.001f)
+                    transform.rotation = Quaternion.LookRotation(dir);
+            }
+        }
+        else
+        {
+            // Human: skip position lock in VR (VRCameraDriver handles placement).
+            if (VRCameraDriver.VRActive) return;
+            Vector3 pos = transform.position;
+            // Z locked to spawn (no forward/back drift); X free (dodges work); Y free (gravity).
+            transform.position = new Vector3(pos.x, pos.y, _homePosition.z);
+        }
     }
 
     [Command]

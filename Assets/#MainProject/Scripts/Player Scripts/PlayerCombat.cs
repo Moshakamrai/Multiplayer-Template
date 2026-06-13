@@ -47,6 +47,74 @@ public class PlayerCombat : NetworkBehaviour
     [SyncVar] public int ConsecutiveHitsChain = 0; // For Bloodlust / Momentum traits
     [SyncVar] public bool HasStalwartBuff = false; // Stalwart trait: +10% next attack after block
 
+    // ── Elemental status (one at a time — see ElementSystem.cs for the wheel) ──
+    // BURN ticks damage, SHOCK shrinks timing windows, CHILL cuts outgoing damage,
+    // ROOT makes dodges fail, EXPOSE raises incoming damage. RhythmRoundManager owns
+    // all the rules; this just holds the state + drives client VFX via the hook.
+    [SyncVar(hook = nameof(OnElementStatusChanged))] public int StatusElement = 0; // (int)Element
+    [SyncVar] public int StatusBeatsRemaining = 0;
+    private GameObject _statusLoopVfx;
+
+    public Element CurrentElementStatus => (Element)StatusElement;
+
+    [Server]
+    public void ServerApplyElementStatus(Element e, int beats)
+    {
+        StatusElement = (int)e;
+        StatusBeatsRemaining = beats;
+        RpcElementStatusApplied((int)e);
+    }
+
+    [Server]
+    public void ServerClearElementStatus()
+    {
+        StatusElement = (int)Element.None;
+        StatusBeatsRemaining = 0;
+    }
+
+    // Per-fighter VFX slots — lazily resolved because SyncVar hooks can fire before Start().
+    private FighterCardVFX CardVfx => _cardVfx != null ? _cardVfx : (_cardVfx = GetComponent<FighterCardVFX>());
+
+    // SyncVar hook (runs on every client): attach/remove the looping status VFX.
+    private void OnElementStatusChanged(int oldVal, int newVal)
+    {
+        if (_statusLoopVfx != null) { Destroy(_statusLoopVfx); _statusLoopVfx = null; }
+        if ((Element)newVal != Element.None && CardVfx != null)
+            _statusLoopVfx = CardVfx.AttachLoop((Element)newVal);
+    }
+
+    [ClientRpc]
+    private void RpcElementStatusApplied(int e)
+    {
+        Element elem = (Element)e;
+        CardVfx?.PlayStatusApply(elem);
+        if (isLocalPlayer)
+        {
+            // You just got tagged — show the status name and give a soft warning buzz.
+            VRTimingText  = Elements.StatusName(elem);
+            VRTimingColor = Elements.ColorOf(elem);
+            VRTimingTime  = Time.time;
+            VRHaptics.Pulse(VRHaptics.Hand.Both, 0.45f, 0.12f);
+        }
+    }
+
+    /// Reaction fired ON this fighter (their status got detonated). Plays the big burst +
+    /// announces the reaction name; the damage itself arrives via the normal TakeDamage path.
+    [ClientRpc]
+    public void RpcElementReaction(int statusElement)
+    {
+        Element elem = (Element)statusElement;
+        CardVfx?.PlayReaction(elem);
+        // Everyone sees the reaction name in the timing HUD — it's the highlight moment.
+        VRTimingText  = Elements.ReactionName(elem);
+        VRTimingColor = Elements.ColorOf(elem);
+        VRTimingTime  = Time.time;
+        if (isLocalPlayer)
+            VRHaptics.GotParried(); // detonated = your power blew up in your face
+        else
+            VRHaptics.FullCharge(VRHaptics.Hand.Both); // you (likely the triggerer) get the reward blip
+    }
+
     private Queue<string> _attackQueue = new Queue<string>();
     public SphereCollider weaponGloveLeft;
     public SphereCollider weaponGloveRight;
@@ -145,6 +213,19 @@ public class PlayerCombat : NetworkBehaviour
     private Vector3 _pendingDashDirection = Vector3.zero;
     public string PendingAttackTrigger => _pendingAttackTrigger;
 
+    // ── Sticky / repeating move (single-move mode) ───────────────────────────
+    // Once a card is picked it becomes the "active move" and AUTO-REPEATS every beat until the
+    // player picks a different card — they no longer have to re-select the same move each beat
+    // (they still shout/release on the beat to actually fire it). Carries across rounds + stagger.
+    [Tooltip("ON: a picked card stays active and repeats every beat until you pick another card.")]
+    public bool stickyMoveEnabled = true;
+    private string  _stickyAttackTrigger = "";
+    private Vector3 _stickyDashDirection = Vector3.zero;
+    // True when the current pending move was auto-armed FROM the sticky move (not freshly picked this
+    // beat). A sticky-armed move must still leave the input slot "open" so the player can pick a
+    // DIFFERENT card to replace it — otherwise the active move locks out all further card picks.
+    private bool _pendingFromSticky = false;
+
     // --- TIMING FEEDBACK VARIABLES ---
     private string _timingText = "";
     private Color _timingColor = Color.white;
@@ -200,12 +281,17 @@ public class PlayerCombat : NetworkBehaviour
         lastVocalSpikeVolume = 0f;
         _pendingAttackTrigger = "";
         _pendingDashDirection = Vector3.zero;
+        // Sticky move carries across rounds: re-arm the pending move from it so the player's last
+        // chosen card is already active on the first beat of the new round (no re-pick needed).
+        RestickPendingMove();
+        if (connectionToClient != null) TargetRestickPendingMove(_stickyAttackTrigger, _stickyDashDirection);
         _attackQueue.Clear();
         _comboBuffer.Clear();
         _pressureLevel = 0f;
         _staggerRecoveryCharge = 0f;
         _staggerTimingEscaped = false;
         _spikeLockedThisBeat = false;
+        EndGloveSelectionBloom();
         HasPendingTrap = false;
         HasPendingCage = false;
         HasFocusBuff = false;
@@ -229,6 +315,8 @@ public class PlayerCombat : NetworkBehaviour
 
     private GloveBeatGlow _gloveGlow;
     private SwordArcTrail _swordArc;
+    private FighterCardVFX _cardVfx;   // per-fighter card/element VFX slots (optional)
+    private string _lastSwingTrigger;  // attack trigger of the current swing, for per-card slash lookup
 
     [Header("Sword Impact VFX (sword characters only — leave empty for glove fighters)")]
     public GameObject swordImpactVfx;
@@ -309,7 +397,12 @@ public class PlayerCombat : NetworkBehaviour
     }
 
     [Header("Sword Slash Projectile (sword characters only)")]
-    public GameObject slashProjectilePrefab;     // a slash VFX; add SlashProjectile.cs to it to make it fly
+    [Tooltip("Default slash VFX, used for STRIKE-family swings (Jab, Cross, Hook, Boom, Uppercut, Overclock). " +
+             "Add SlashProjectile.cs to it to make it fly.")]
+    public GameObject slashProjectilePrefab;     // STRIKE family (and the fallback for everything else)
+    [Tooltip("Alternate slash VFX used for THROW-family swings (Grapple, Fake, Sweep). " +
+             "Leave empty to reuse the default slash prefab above.")]
+    public GameObject throwSlashProjectilePrefab; // THROW family
     public Transform  slashSpawnPoint;           // optional; defaults to chest-height, slightly forward
     [Tooltip("Delay before the slash spawns — raise this so it fires LATER in the swing (when the blade actually cuts), not at the start of the anim.")]
     public float slashSpawnDelay = 0.25f;
@@ -317,6 +410,10 @@ public class PlayerCombat : NetworkBehaviour
     public bool slashViaAnimationEvent = false;
     [Tooltip("One-time correction for however your slash art is oriented (applied on top of the auto blade angle).")]
     public Vector3 slashRotationOffset = Vector3.zero;
+    [Tooltip("Uniform scale applied to the spawned main/slash VFX. Lower this if your VFX look too big (1 = prefab's own size, 0.5 = half).")]
+    [Range(0.05f, 3f)] public float slashSizeScale = 0.5f;
+    [Tooltip("ON = the slash always flies straight at the opponent (recommended). OFF = it flies along the fighter's facing direction.")]
+    public bool slashAimsAtOpponent = true;
 
     // Timed code path: waits slashSpawnDelay then spawns. (Skipped when slashViaAnimationEvent is on.)
     private void ThrowSlash(string trigger)
@@ -339,6 +436,18 @@ public class PlayerCombat : NetworkBehaviour
         if (fwd.sqrMagnitude < 0.0001f) fwd = Vector3.forward;
         fwd.Normalize();
 
+        // Aim straight at the opponent so the projectile actually travels toward them and connects,
+        // instead of flying along whatever direction the fighter happens to be facing.
+        if (slashAimsAtOpponent)
+        {
+            var opp = GetComponent<PlayerController>()?.GetOpponent();
+            if (opp != null)
+            {
+                Vector3 toOpp = opp.transform.position - transform.position; toOpp.y = 0f;
+                if (toOpp.sqrMagnitude > 0.0001f) fwd = toOpp.normalized;
+            }
+        }
+
         // Auto-angle: align the slash's "up" axis to the actual blade direction this frame.
         Vector3 up = Vector3.up;
         if (_swordArc != null && _swordArc.bladeBase != null && _swordArc.bladeTip != null)
@@ -352,10 +461,25 @@ public class PlayerCombat : NetworkBehaviour
             ? slashSpawnPoint.position
             : transform.position + Vector3.up * 1.2f + fwd * 0.6f;
 
-        GameObject go;
-        if (slashProjectilePrefab != null)
+        // Prefab priority: a per-family main VFX from FighterCardVFX (if assigned) wins; otherwise use
+        // the family-routed default slash — THROW family gets throwSlashProjectilePrefab, everything
+        // else (Strike, Block, Parry, Support) uses the default slashProjectilePrefab.
+        GameObject prefab = _cardVfx != null ? _cardVfx.MainVfxFor(_lastSwingTrigger) : null;
+        if (prefab == null)
         {
-            go = Instantiate(slashProjectilePrefab, origin, rot);
+            CardFamily fam = _cardManager != null ? _cardManager.FamilyOfTrigger(_lastSwingTrigger) : CardFamily.Strike;
+            prefab = (fam == CardFamily.Throw && throwSlashProjectilePrefab != null)
+                ? throwSlashProjectilePrefab
+                : slashProjectilePrefab;
+        }
+
+        GameObject go;
+        if (prefab != null)
+        {
+            go = Instantiate(prefab, origin, rot);
+            // Scale the VFX down — many of the imported slash/projectile prefabs are authored huge.
+            if (!Mathf.Approximately(slashSizeScale, 1f))
+                go.transform.localScale *= slashSizeScale;
         }
         else
         {
@@ -370,11 +494,54 @@ public class PlayerCombat : NetworkBehaviour
             mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         }
 
-        if (go.GetComponent<SlashProjectile>() == null)
+        var slashSp = go.GetComponent<SlashProjectile>();
+        if (slashSp == null)
         {
-            var sp = go.AddComponent<SlashProjectile>();
-            sp.speed = 7f;
-            sp.lifetime = 1.0f;
+            slashSp = go.AddComponent<SlashProjectile>();
+            slashSp.speed = 7f;
+            slashSp.lifetime = 1.0f;
+        }
+        else
+        {
+            // Per-family prefabs sometimes ship with speed 0 (sits still) or a very long lifetime
+            // (lingers between beats). Force sane travel + cleanup so the VFX always flies and clears.
+            if (slashSp.speed <= 0.01f) slashSp.speed = 7f;
+            if (slashSp.lifetime > 1.5f || slashSp.lifetime <= 0f) slashSp.lifetime = 1.0f;
+        }
+
+        // Track for trade-loss dissolves. If the kill order arrived BEFORE the slash spawned
+        // (the spawn is delayed into the swing), apply it now.
+        _liveSlash = slashSp;
+        if (Time.time <= _pendingSlashKillUntil)
+        {
+            slashSp.DissolveAt(_pendingSlashKillPoint);
+            _pendingSlashKillUntil = -1f;
+            _liveSlash = null;
+        }
+    }
+
+    // ── Trade-loss projectile dissolve ───────────────────────────────────────
+    // When this fighter LOSES a trade (interrupted, fully blocked, parried), their flying slash
+    // shouldn't pass through the winner's VFX — it flies to the clash point and fizzles there.
+    private SlashProjectile _liveSlash;            // this client's instance of our latest slash
+    private Vector3 _pendingSlashKillPoint;        // kill order that arrived before the slash spawned
+    private float   _pendingSlashKillUntil = -1f;  // valid window for the pending order
+
+    [Server] public void ServerDissolveSlash(Vector3 clashPoint) => RpcDissolveSlash(clashPoint);
+
+    [ClientRpc]
+    private void RpcDissolveSlash(Vector3 clashPoint)
+    {
+        if (_liveSlash != null)
+        {
+            _liveSlash.DissolveAt(clashPoint);
+            _liveSlash = null;
+        }
+        else
+        {
+            // Slash not spawned yet (slashSpawnDelay) — latch the order for when it appears.
+            _pendingSlashKillPoint = clashPoint;
+            _pendingSlashKillUntil = Time.time + 1f;
         }
     }
 
@@ -384,7 +551,11 @@ public class PlayerCombat : NetworkBehaviour
         _cardManager = GetComponent<CardManager>();
         _gloveGlow = GetComponent<GloveBeatGlow>();
         _swordArc  = GetComponent<SwordArcTrail>();
+        _cardVfx   = GetComponent<FighterCardVFX>();
     }
+
+    public void TriggerGloveSelectionBloom(string trigger) => _gloveGlow?.TriggerSelectionBloom(trigger);
+    public void EndGloveSelectionBloom()                   => _gloveGlow?.EndSelectionBloom();
 
     // ── Glove juice hooks (server triggers, all clients flash) ──────────────
     // moveTrigger passed so the haptic hits the correct hand (Strike/Throw = right, else both).
@@ -402,12 +573,28 @@ public class PlayerCombat : NetworkBehaviour
     }
     [ClientRpc] private void RpcGloveHurt()   { if (_gloveGlow != null) _gloveGlow.FlashHurt(); }
 
+    // ── Per-family HIT effect (server triggers; prefab comes from THIS fighter's FighterCardVFX) ──
+    [Server]
+    public void SpawnFamilyHit(string trigger, Vector3 victimPos)
+    {
+        if (_cardManager == null) _cardManager = GetComponent<CardManager>();
+        if (_cardManager == null) return;
+        RpcFamilyHit((int)_cardManager.FamilyOfTrigger(trigger), victimPos);
+    }
+
+    [ClientRpc]
+    private void RpcFamilyHit(int family, Vector3 victimPos)
+    {
+        CardVfx?.PlayHit((CardFamily)family, victimPos);
+    }
+
     // ── Sword impact VFX (server triggers a hit-point burst on all clients) ──
     [Server] public void SpawnSwordImpact(Vector3 pos) { if (swordImpactVfx != null) RpcSwordImpact(pos); }
     [ClientRpc] private void RpcSwordImpact(Vector3 pos)
     {
         if (swordImpactVfx == null) return;
         var fx = Instantiate(swordImpactVfx, pos, Quaternion.identity);
+        if (!Mathf.Approximately(slashSizeScale, 1f)) fx.transform.localScale *= slashSizeScale;
         Destroy(fx, 2f);
     }
 
@@ -426,6 +613,9 @@ public class PlayerCombat : NetworkBehaviour
         Vector3 to = slashSpawnPoint != null
             ? slashSpawnPoint.position
             : transform.position + Vector3.up * 1.2f;
+        // The attacker's ORIGINAL forward slash dissolves at the parry point (the defender) so it
+        // doesn't pass through — then the reversed slash flies back from there.
+        ServerDissolveSlash(from);
         RpcReversedStrike(from, to, Mathf.Max(0.05f, flightTime));
     }
 
@@ -486,7 +676,7 @@ public class PlayerCombat : NetworkBehaviour
 
     // --- RESTORED ANIMATION EVENT FUNCTIONS ---
     public void StartAttackWindow() { isAttacking = true; }
-    public void EndAttackWindow() { isAttacking = false; }
+    public void EndAttackWindow() { isAttacking = false; _cardVfx?.StopAura(); } // attack anim done → kill weapon aura
 
     private void CheckLocalParryTiming()
     {
@@ -505,6 +695,12 @@ public class PlayerCombat : NetworkBehaviour
             _spikeLockedThisBeat   = false;
             _staggerTimingEscaped  = false;
             _lastTrackedBeatFire   = beatFireTime;
+
+            // The move that just fired now becomes the sticky/active move LOCALLY — re-arm it and
+            // mark it replaceable so the player can immediately pick a different card this new beat
+            // (without waiting for the server's re-stick RPC to round-trip).
+            if (rmm.IsSingleMoveMode() && stickyMoveEnabled)
+                RestickPendingMove();
         }
 
         bool isChainMode = !rmm.IsSingleMoveMode();
@@ -549,7 +745,22 @@ public class PlayerCombat : NetworkBehaviour
 
         effectiveWindow *= timingWindowMult;
         bool inShoutWindow = timeUntilImpact > 0f && timeUntilImpact <= effectiveWindow;
-        if (!inShoutWindow) return;
+        if (!inShoutWindow)
+        {
+            // TOO EARLY coaching: the beat window hasn't opened yet, but if the local player ALREADY
+            // shouted or let go of the trigger they jumped the gun (the classic new-player mistake).
+            // Flag it so the tutorial can say "wait for the ring to close" — without consuming the
+            // input, and only when the beat is still clearly ahead (not a near-miss on the late side).
+            if (isLocalPlayer && timeUntilImpact > effectiveWindow)
+            {
+                bool earlyShout = vp != null && _vcm != null
+                    && vp.CurrentFestivalVolume >= _vcm.parryVolumeThreshold;
+                bool earlyRelease = VRCameraDriver.VRActive && VRHands.AnyReleasePending();
+                if (earlyShout || earlyRelease)
+                    VREarlyTime = Time.time;
+            }
+            return;
+        }
 
         // ── First spike only: once locked, ignore further input until next beat cycle ──────
         if (_spikeLockedThisBeat) return;
@@ -748,6 +959,7 @@ public class PlayerCombat : NetworkBehaviour
         lastVocalSpikeVolume = vol;
         IsParryActive = true;
 
+        EndGloveSelectionBloom();
         if (animator != null) animator.Play("ParryIntent");
 
         TargetAddEnergy(1);
@@ -767,6 +979,7 @@ public class PlayerCombat : NetworkBehaviour
     void CmdConfirmSuccessfulParry()
     {
         IsParryActive = true;
+        EndGloveSelectionBloom();
 
         if (animator != null)
         {
@@ -829,9 +1042,12 @@ public class PlayerCombat : NetworkBehaviour
     {
         isAttacking = true;
         if (isLocalPlayer && animator != null) animator.Play(AnimName(trigger), 0, 0f);
+        // Weapon aura + family sword tint for ANY card (attack, block, parry, support).
+        if (isLocalPlayer) _cardVfx?.OnCardTriggered(trigger);
         // Your own blade arc + slash VFX (local view) on offensive swings.
         if (isLocalPlayer && CardManager.IsAttackTrigger(trigger))
         {
+            _lastSwingTrigger = trigger;
             if (_swordArc != null) _swordArc.StartSwing();
             if (!slashViaAnimationEvent) ThrowSlash(trigger);
         }
@@ -861,6 +1077,12 @@ public class PlayerCombat : NetworkBehaviour
     public static string VRTimingText = "";
     public static Color  VRTimingColor = Color.white;
     public static float  VRTimingTime = -999f;
+
+    // "Too early" coaching signal: set when the local player shouts / releases the trigger well
+    // BEFORE the beat window opens (a very common new-player mistake — they fire as soon as they're
+    // ready instead of waiting for the ring to close). The tutorial reads this to coach them, and it
+    // also counts toward the "are they getting it?" streak that hides/shows the tutorial.
+    public static float  VREarlyTime = -999f;
 
     private PowerMeterReactor _powerMeter;
 
@@ -943,6 +1165,17 @@ public class PlayerCombat : NetworkBehaviour
         {
             if (!string.IsNullOrEmpty(attackTrigger)) { _pendingAttackTrigger = attackTrigger; _pendingDashDirection = Vector3.zero; }
             if (dashDir != Vector3.zero) { _pendingDashDirection = dashDir; _pendingAttackTrigger = ""; }
+
+            // Fresh deliberate pick this beat — no longer just a sticky re-arm.
+            _pendingFromSticky = false;
+
+            // Remember this pick as the sticky/active move so it auto-repeats on later beats until
+            // the player picks a different card (see ConsumeNextMove / RestickPendingMove).
+            if (stickyMoveEnabled)
+            {
+                _stickyAttackTrigger = _pendingAttackTrigger;
+                _stickyDashDirection = _pendingDashDirection;
+            }
         }
         else
         {
@@ -952,6 +1185,9 @@ public class PlayerCombat : NetworkBehaviour
                 _comboBuffer.Add(new RhythmAction { attack = attackTrigger, dash = dashDir });
             }
         }
+
+        // Hard glove bloom from card chosen until the attack animation starts.
+        TriggerGloveSelectionBloom(attackTrigger);
     }
 
     public RhythmAction PeekNextMove()
@@ -975,8 +1211,46 @@ public class PlayerCombat : NetworkBehaviour
     [Server]
     public void ConsumeNextMove()
     {
-        if (RhythmRoundManager.Instance.IsSingleMoveMode()) { _pendingAttackTrigger = ""; _pendingDashDirection = Vector3.zero; }
+        if (RhythmRoundManager.Instance.IsSingleMoveMode())
+        {
+            // Sticky move: instead of clearing the pending move after the beat, re-arm it from the
+            // last picked card so it auto-repeats next beat. The player still has to shout/release on
+            // the beat to fire it; they only need to pick a card again to CHANGE the move.
+            _pendingAttackTrigger = "";
+            _pendingDashDirection = Vector3.zero;
+            RestickPendingMove();
+            // Mirror the re-arm to the owning client so its local timing check has a move to fire.
+            if (connectionToClient != null) TargetRestickPendingMove(_stickyAttackTrigger, _stickyDashDirection);
+        }
         else if (_comboBuffer.Count > 0) _comboBuffer.RemoveAt(0);
+    }
+
+    // Re-load the pending move from the sticky/active move (if any). No-op when sticky is off/empty.
+    // Marks the move as sticky-armed so HasOpenSlot still lets the player pick a replacement card.
+    private void RestickPendingMove()
+    {
+        if (!stickyMoveEnabled) return;
+        if (!string.IsNullOrEmpty(_stickyAttackTrigger))
+        {
+            _pendingAttackTrigger = _stickyAttackTrigger;
+            _pendingDashDirection = Vector3.zero;
+            _pendingFromSticky = true;
+        }
+        else if (_stickyDashDirection != Vector3.zero)
+        {
+            _pendingDashDirection = _stickyDashDirection;
+            _pendingAttackTrigger = "";
+            _pendingFromSticky = true;
+        }
+    }
+
+    [TargetRpc]
+    private void TargetRestickPendingMove(string sticky, Vector3 stickyDash)
+    {
+        if (!isLocalPlayer) return;
+        _stickyAttackTrigger = sticky;
+        _stickyDashDirection = stickyDash;
+        RestickPendingMove();
     }
 
     [Server]
@@ -1000,6 +1274,9 @@ public class PlayerCombat : NetworkBehaviour
 
     private void ExecuteMoveEffect(string attack, Vector3 dash)
     {
+        // Attack/dash animation is starting — kill the selection bloom now.
+        EndGloveSelectionBloom();
+
         if (!string.IsNullOrEmpty(attack))
         {
             // Map the logical trigger to its Animator state name (see AnimName).
@@ -1042,9 +1319,12 @@ public class PlayerCombat : NetworkBehaviour
     {
         if (isLocalPlayer) return;
         if (animator != null) animator.SetTrigger(AnimName(t));
-        // Opponent/bot blade arc + slash VFX (this is the copy the human watches).
+        // Weapon aura + family sword tint for ANY card (this is the copy the human watches).
+        _cardVfx?.OnCardTriggered(t);
+        // Opponent/bot blade arc + slash VFX.
         if (CardManager.IsAttackTrigger(t))
         {
+            _lastSwingTrigger = t;
             if (_swordArc != null) _swordArc.StartSwing();
             if (!slashViaAnimationEvent) ThrowSlash(t);
         }
@@ -1129,7 +1409,12 @@ public class PlayerCombat : NetworkBehaviour
             _attackQueue.Clear();
             _pendingAttackTrigger = "";
             _pendingDashDirection = Vector3.zero;
+            // Sticky move carries through being hit: re-arm it so the active move resumes after the
+            // hurt/stagger instead of forcing the player to re-pick.
+            RestickPendingMove();
             isAttacking = false;
+            if (string.IsNullOrEmpty(_pendingAttackTrigger) && _pendingDashDirection == Vector3.zero)
+                EndGloveSelectionBloom();
             GetComponent<PlayerController>().InterruptMovement();
             StartCoroutine(HurtStunTimer());
         }
@@ -1147,6 +1432,11 @@ public class PlayerCombat : NetworkBehaviour
         if (RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive)
         {
             if (!RhythmRoundManager.Instance.IsSingleMoveMode()) return _comboBuffer.Count < RhythmRoundManager.Instance.currentComboCount;
+
+            // A move that's only here because it was auto-armed from the sticky/active move still
+            // counts as an OPEN slot — the player must always be able to pick a different card to
+            // replace it. Only a move FRESHLY picked this beat locks the slot for that beat.
+            if (_pendingFromSticky) return true;
             return isMovement ? _pendingDashDirection == Vector3.zero : string.IsNullOrEmpty(_pendingAttackTrigger);
         }
         return isMovement || _attackQueue.Count < 2;
@@ -1684,13 +1974,21 @@ public class PlayerCombat : NetworkBehaviour
         if (rmm == null || !rmm.isRoundActive) return;
         if (rmm.IsSingleMoveMode())
         {
+            // Explicit cancel also stops the move repeating (clears the sticky/active move).
             _pendingAttackTrigger = "";
             _pendingDashDirection = Vector3.zero;
+            _stickyAttackTrigger = "";
+            _stickyDashDirection = Vector3.zero;
+            _pendingFromSticky = false;
         }
         else if (_comboBuffer.Count > 0)
         {
             _comboBuffer.RemoveAt(_comboBuffer.Count - 1);
         }
+
+        if (string.IsNullOrEmpty(_pendingAttackTrigger) && _pendingDashDirection == Vector3.zero && _comboBuffer.Count == 0)
+            EndGloveSelectionBloom();
+
         CmdCancelLastInput();
     }
 
@@ -1703,10 +2001,15 @@ public class PlayerCombat : NetworkBehaviour
         {
             _pendingAttackTrigger = "";
             _pendingDashDirection = Vector3.zero;
+            _stickyAttackTrigger = "";
+            _stickyDashDirection = Vector3.zero;
         }
         else if (_comboBuffer.Count > 0)
         {
             _comboBuffer.RemoveAt(_comboBuffer.Count - 1);
         }
+
+        if (string.IsNullOrEmpty(_pendingAttackTrigger) && _pendingDashDirection == Vector3.zero && _comboBuffer.Count == 0)
+            EndGloveSelectionBloom();
     }
 }

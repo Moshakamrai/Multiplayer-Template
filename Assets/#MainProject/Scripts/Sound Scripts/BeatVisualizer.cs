@@ -101,7 +101,9 @@ public class BeatVisualizer : MonoBehaviour
     {
         if (targetAudio == null || !targetAudio.isPlaying) return;
 
-        targetAudio.GetSpectrumData(_spectrum, 0, FFTWindow.BlackmanHarris);
+        // Shared FFT: one GetSpectrumData per frame across all visualizers (see SharedSpectrum).
+        _spectrum = SharedSpectrum.Get(targetAudio);
+        if (_spectrum == null) return;
 
         UpdateBars();
         DetectAmbientBeat();

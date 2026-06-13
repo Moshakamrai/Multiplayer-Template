@@ -34,8 +34,8 @@ Material:
     - _CrestBoost: 2.5
     - _CrestWidth: 0.08
     - _EdgeSoft: 0.02
-    - _FillAmount: 0.5
-    - _GlowIntensity: 2.48
+    - _FillAmount: 1
+    - _GlowIntensity: 3
     - _NoiseScale: 40
     - _NoiseScroll: 0.6
     - _NoiseStrength: 0.12
@@ -50,8 +50,8 @@ Material:
     - _UseUIAlphaClip: 0
     m_Colors:
     - _Color: {r: 1, g: 1, b: 1, a: 1}
-    - _ColorBottom: {r: 1, g: 0, b: 0.3676405, a: 1}
-    - _ColorMid: {r: 0.6509804, g: 0.027450982, b: 0.055832747, a: 1}
-    - _ColorTop: {r: 4, g: 0.45713782, b: 0, a: 1}
+    - _ColorBottom: {r: 0, g: 0.24290538, b: 1, a: 1}
+    - _ColorMid: {r: 0.6509804, g: 0.027450982, b: 0.6175448, a: 1}
+    - _ColorTop: {r: 0.018264769, g: 0, b: 3.9999995, a: 1}
     - _CrestColor: {r: 1, g: 1, b: 1, a: 1}
   m_BuildTextureStacks: []

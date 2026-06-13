@@ -188,6 +188,15 @@
       "source": "builtin",
       "dependencies": {}
     },
+    "com.unity.visualeffectgraph": {
+      "version": "14.0.12",
+      "depth": 0,
+      "source": "builtin",
+      "dependencies": {
+        "com.unity.shadergraph": "14.0.12",
+        "com.unity.render-pipelines.core": "14.0.12"
+      }
+    },
     "com.unity.xr.core-utils": {
       "version": "2.5.2",
       "depth": 1,

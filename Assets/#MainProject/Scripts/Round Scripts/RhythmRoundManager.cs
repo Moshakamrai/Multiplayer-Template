@@ -30,6 +30,13 @@ public class RhythmRoundManager : NetworkBehaviour
     [Header("Round Music")]
     public AudioClip slowRhythmMusic;
 
+    [Header("Metronome (audio tick on each beat)")]
+    [Tooltip("Short click/tick clip played on every impact beat so players can hear the rhythm. Leave empty to disable.")]
+    public AudioClip metronomeTick;
+    [Tooltip("Volume of the metronome tick (0 = silent, 1 = full).")]
+    [Range(0f, 1f)] public float metronomeVolume = 0.6f;
+    private AudioSource _metronomeSource; // lazily created 2D source on each client
+
     [Header("Custom Tracks")]
     public AudioClip[] availableTracks; // Drag all your MP3s/WAVs here in the Inspector!
 
@@ -70,6 +77,9 @@ public class RhythmRoundManager : NetworkBehaviour
     public float botStandDistance = 6.0f;
     [Tooltip("Spawn height offset for the bot. Raise this if the bot's legs sink into the floor on spawn.")]
     public float botSpawnY = 1.0f;
+    [Tooltip("EXTRA Y lift added on top of the bot's home position, ALWAYS applied (even when a " +
+             "Bot Start Position transform is assigned). Bump this up if the bot's legs clip into the floor.")]
+    public float botYOffset = 0.15f;
     private GameObject _activeBot;
     private GameObject _activeBotPrefab;  // which prefab the current bot was spawned from
 
@@ -109,6 +119,12 @@ public class RhythmRoundManager : NetworkBehaviour
     // fixed coords if unassigned. Drive round setup, the bot spawn, AND the LateUpdate home-lock.
     private Vector3 _spawnP1 => playerStartPosition != null ? playerStartPosition.position : new Vector3(0f, 0f, -2.5f);
     private Vector3 _spawnP2 => botStartPosition    != null ? botStartPosition.position    : new Vector3(0f, botSpawnY, 2.5f);
+
+    // The bot's home INCLUDING the always-applied Y lift, so its feet sit on the floor instead of
+    // clipping into it. Used for the spawn, the per-round reset, AND the LateUpdate home-lock so the
+    // bot is pinned at this exact height and can't drift/sink while playing hurt animations.
+    private Vector3 BotHome => _spawnP2 + Vector3.up * botYOffset;
+    public float BotHomeY => BotHome.y; // read by PlayerController's home-lock
 
     [Header("Shop Phase")]
     [SyncVar] public bool isShopPhase = false;
@@ -176,11 +192,7 @@ public class RhythmRoundManager : NetworkBehaviour
             var cdGo = new GameObject("CardDatabase");
             cdGo.AddComponent<CardDatabase>();
         }
-        if (RoundCountdownUI.Instance == null)
-        {
-            var go = new GameObject("RoundCountdownUI");
-            go.AddComponent<RoundCountdownUI>();
-        }
+
     }
 
     public override void OnStartServer()
@@ -614,8 +626,7 @@ public class RhythmRoundManager : NetworkBehaviour
         currentChainPosition = 0;
         _clusterBeatsLeftToFire = (_clusterSizes.Count > 0) ? _clusterSizes[0] : 1;
         RpcClearLogs();
-        RpcStartCountdown();
-        StartCoroutine(DelayedRoundActivation(5f));
+        StartCoroutine(DelayedRoundActivation(0f));
     }
 
     [Server]
@@ -629,12 +640,6 @@ public class RhythmRoundManager : NetworkBehaviour
         }
         _startTime = NetworkTime.time + 1.0;
         isRoundActive = true;
-    }
-
-    [ClientRpc]
-    private void RpcStartCountdown()
-    {
-        RoundCountdownUI.Instance?.StartCountdown(5);
     }
 
     private string CardIdToTrigger(string cardId)
@@ -875,8 +880,8 @@ public class RhythmRoundManager : NetworkBehaviour
         {
             PlayerCombat botCombat = _activeBot.GetComponent<PlayerCombat>();
             if (botCombat != null) botCombat.ResetRoundStats();
-            _activeBot.transform.position = _spawnP2;
-            _activeBot.GetComponent<PlayerController>().SetHome(_spawnP2); // bot anchor → fixed, equal distance
+            _activeBot.transform.position = BotHome;
+            _activeBot.GetComponent<PlayerController>().SetHome(BotHome); // bot anchor → fixed, equal distance + Y lift
 
             PlayerController botController = _activeBot.GetComponent<PlayerController>();
             PlayerController human = null;
@@ -929,10 +934,16 @@ public class RhythmRoundManager : NetworkBehaviour
 
             if (_roundPickerTimer <= 0f)
             {
+                // Auto-pick on timeout. (The Fast round was removed.) Prefer the Slow rhythm round;
+                // if it's already been used this match, fall back to the first unused custom track.
                 if (!_usedRoundTypes.Contains(RoundType.SlowRhythm))
                     SelectRoundType(RoundType.SlowRhythm);
-                else if (!_usedRoundTypes.Contains(RoundType.FastCombo))
-                    SelectRoundType(RoundType.FastCombo);
+                else
+                {
+                    string map = FirstUnusedCustomMap();
+                    if (!string.IsNullOrEmpty(map)) SelectRoundType(RoundType.CustomTrack, map);
+                    else SelectRoundType(RoundType.SlowRhythm); // nothing else left — replay Slow
+                }
             }
         }
 
@@ -1016,6 +1027,9 @@ public class RhythmRoundManager : NetworkBehaviour
                             customIsCombo = (currentComboCount > 1);
                     }
 
+                    // Audio metronome: tick on every beat so all players hear the rhythm.
+                    RpcPlayMetronomeTick();
+
                     // Skip hit-stop when tiebreaker just triggered — its HitStopRoutine
                     // would reset Time.timeScale to 1.0 and cancel the slow-mo.
                     if (!_tiebreakerPaused)
@@ -1041,13 +1055,61 @@ public class RhythmRoundManager : NetworkBehaviour
 
     private bool MapExists(string mapName) => !string.IsNullOrEmpty(GetMapTapData(mapName));
 
-    // The bundled AudioClip for a map (from the inspector availableTracks or runtime-loaded).
+    // All playable custom map names, de-duped. Sources, in order:
+    //   1. EVERY baked beatmap in Resources/BeatMaps/  ← ships with builds, so VR + PC match.
+    //   2. The PlayerPrefs registry (live editor mapping only).
+    //   3. The inspector availableTracks clips.
+    // (1) is the build-proof source — it doesn't depend on PlayerPrefs (empty in a fresh build) or on
+    // availableTracks being wired on the prefab. That's why the VR build used to show fewer songs.
+    private List<string> AllPlayableMapNames()
+    {
+        var names = new List<string>();
+
+        // 1) Baked beatmaps shipped in Resources — present in every build identically.
+        foreach (var ta in Resources.LoadAll<TextAsset>("BeatMaps"))
+            if (ta != null && !string.IsNullOrEmpty(ta.name) && !names.Contains(ta.name)) names.Add(ta.name);
+
+        // 2) Live editor registry (PlayerPrefs).
+        string registry = PlayerPrefs.GetString("CustomMapRegistry", "");
+        if (!string.IsNullOrEmpty(registry))
+            foreach (string n in registry.Split('|'))
+                if (!string.IsNullOrEmpty(n) && MapExists(n) && !names.Contains(n)) names.Add(n);
+
+        // 3) Inspector-assigned clips.
+        if (availableTracks != null)
+            foreach (AudioClip t in availableTracks)
+                if (t != null && MapExists(t.name) && !names.Contains(t.name)) names.Add(t.name);
+
+        return names;
+    }
+
+    // First custom map not yet used this match THAT HAS AUDIO, or "" if none remain. Used by the picker
+    // auto-select — must skip audioless maps so it never auto-starts a silent round.
+    private string FirstUnusedCustomMap()
+    {
+        foreach (string n in AllPlayableMapNames())
+        {
+            if (_usedCustomMaps.Contains(n)) continue;
+            bool hasAudio = GetClipForMap(n) != null || PlayerPrefs.HasKey("CustomMapPath_" + n);
+            if (hasAudio) return n;
+        }
+        return "";
+    }
+
+    // The bundled AudioClip for a map. Resolution order:
+    //   1. Inspector availableTracks  2. runtime-loaded cache  3. Resources/Music/<name> (build-proof).
+    // Put each song mp3/wav under Assets/Resources/Music/ named EXACTLY like its beatmap .txt and it
+    // will load in every build with no Inspector wiring. Returns null if no audio exists for the map.
     private AudioClip GetClipForMap(string mapName)
     {
         if (availableTracks != null)
             foreach (var t in availableTracks)
                 if (t != null && t.name == mapName) return t;
-        if (_runtimeClips.TryGetValue(mapName, out var c)) return c;
+        if (_runtimeClips.TryGetValue(mapName, out var c) && c != null) return c;
+
+        // Try Resources/Music/<name> (and cache it so we only load once).
+        var fromResources = Resources.Load<AudioClip>("Music/" + mapName);
+        if (fromResources != null) { _runtimeClips[mapName] = fromResources; return fromResources; }
         return null;
     }
 
@@ -1242,6 +1304,96 @@ public class RhythmRoundManager : NetworkBehaviour
     // and their hurt/blood reaction is delayed to land exactly when it arrives.
     private const float REFLECT_FLIGHT_TIME = 0.35f;
 
+    // ═══════════════════════ ELEMENTAL SYSTEM ═══════════════════════
+    // Family-RPS decides WHO wins the exchange (unchanged). Every successful move then makes
+    // "elemental contact" with its family's element: Strike=Fire, Throw=Lightning, Parry=Water,
+    // Block/Dodge=Earth, Support=Wind. Contact APPLIES that element's status — unless the target
+    // already carries the status this element DETONATES, in which case a REACTION fires instead.
+    // The wheel (see ElementSystem.cs): Fire → Lightning → Water → Earth → Wind → Fire.
+    [Header("Elemental Statuses (all tunable)")]
+    [Tooltip("BURN (Fire): damage each beat while burning.")]
+    public int burnDamagePerBeat = 4;
+    public int burnBeats = 2;
+    [Tooltip("SHOCK (Lightning): timing-window multiplier while shocked. Lower = harder to time clean.")]
+    [Range(0.3f, 1f)] public float shockWindowMult = 0.65f;
+    public int shockBeats = 1;
+    [Tooltip("CHILL (Water): outgoing-damage multiplier while chilled (numbed arms).")]
+    [Range(0.3f, 1f)] public float chillDamageMult = 0.70f;
+    public int chillBeats = 1;
+    [Tooltip("ROOT (Earth): dodges FAIL while rooted.")]
+    public int rootBeats = 1;
+    [Tooltip("EXPOSE (Wind): incoming-damage multiplier while exposed.")]
+    [Range(1f, 2f)] public float exposeDamageMult = 1.30f;
+    public int exposeBeats = 1;
+
+    [Header("Elemental Reactions (detonate a status with the next element in the wheel)")]
+    [Tooltip("FIRESTORM — Burn + Lightning hit: instant burst damage.")]
+    public int firestormDamage = 12;
+    [Tooltip("ELECTROCUTE — Shock + getting parried (Water): burst damage on top of the reflect.")]
+    public int electrocuteDamage = 10;
+    [Tooltip("SHATTER — Chill + blocked/dodged (Earth): the chilled attacker is STAGGERED this many beats.")]
+    public int shatterStaggerBeats = 1;
+    [Tooltip("EROSION — Root + Taunt/Cage (Wind): burst damage AND converts the root into EXPOSE.")]
+    public int erosionDamage = 8;
+    [Tooltip("COMBUST — Expose + Strike (Fire): the triggering hit's damage is multiplied by this.")]
+    [Range(1f, 2.5f)] public float combustMult = 1.5f;
+
+    /// Beats a freshly applied status lasts, per element.
+    private int StatusBeats(Element e) => e switch
+    {
+        Element.Fire      => burnBeats,
+        Element.Lightning => shockBeats,
+        Element.Water     => chillBeats,
+        Element.Earth     => rootBeats,
+        Element.Wind      => exposeBeats,
+        _                 => 0,
+    };
+
+    /// Elemental contact: `source`'s successful move touches `target` with `contact` element.
+    /// If the target's current status is detonated by this element → REACTION (status consumed).
+    /// Otherwise → apply this element's status to the target.
+    /// Returns a damage multiplier for the hit that caused the contact (only COMBUST is > 1).
+    [Server]
+    private float ElementContact(PlayerCombat source, PlayerCombat target, Element contact)
+    {
+        if (target == null || contact == Element.None) return 1f;
+
+        Element targetStatus = target.CurrentElementStatus;
+        if (targetStatus != Element.None && Elements.DetonatorOf(targetStatus) == contact)
+        {
+            // ── REACTION — the contact is consumed detonating the status (no new status applied).
+            target.ServerClearElementStatus();
+            target.RpcElementReaction((int)targetStatus);
+            Debug.Log($"<color=magenta>ELEMENT REACTION:</color> {Elements.ReactionName(targetStatus)} " +
+                      $"({Elements.StatusName(targetStatus)} detonated by {contact}) on {target.name}");
+
+            switch (targetStatus)
+            {
+                case Element.Fire:      // FIRESTORM — the burn explodes
+                    target.TakeDamage(firestormDamage);
+                    return 1f;
+                case Element.Lightning: // ELECTROCUTE — extra burst on top of the reflect
+                    target.TakeDamage(electrocuteDamage);
+                    return 1f;
+                case Element.Water:     // SHATTER — frozen solid, skip a beat
+                    target.TriggerStagger(shatterStaggerBeats);
+                    return 1f;
+                case Element.Earth:     // EROSION — ground crumbles: damage + now EXPOSED
+                    target.TakeDamage(erosionDamage);
+                    target.ServerApplyElementStatus(Element.Wind, exposeBeats);
+                    return 1f;
+                case Element.Wind:      // COMBUST — the exposed target eats an amplified hit
+                    return combustMult;
+            }
+            return 1f;
+        }
+
+        // ── No reaction: tag the target with this element's status (overwrites/refreshes).
+        target.ServerApplyElementStatus(contact, StatusBeats(contact));
+        return 1f;
+    }
+    // ═════════════════════════════════════════════════════════════════
+
     [Server]
     private int ProcessDamage(PlayerCombat attacker, PlayerCombat.RhythmAction move, PlayerCombat defender, PlayerCombat.RhythmAction defMove, bool isInterrupted, out int damageDealt, out string tradeReason)
     {
@@ -1298,6 +1450,10 @@ public class RhythmRoundManager : NetworkBehaviour
         // Covers Strike-beats-Throw and the loser of a same-family timing clash. (Traps/Cages above still punish.)
         if (isInterrupted && !IsProtected(atk))
         {
+            // Trade-loser VFX: their flying slash dissolves at the clash point (mid-arena)
+            // instead of passing through the winner's attack.
+            Vector3 clashMid = Vector3.Lerp(attacker.transform.position, defender.transform.position, 0.5f) + Vector3.up * 1.2f;
+            attacker.ServerDissolveSlash(clashMid);
             tradeReason = $"{atk} was interrupted";
             return 0;
         }
@@ -1344,6 +1500,7 @@ public class RhythmRoundManager : NetworkBehaviour
             int reflectedDmg = Mathf.RoundToInt(ApplyTraitMultiplier(Mathf.RoundToInt(baseDmg * mirBonus)) * CardUpgradeMult(defender, def));
             Vector3 kbDir = (attacker.transform.position - defender.transform.position).normalized;
             attacker.SpawnReversedStrike(defender, REFLECT_FLIGHT_TIME); // their own slash flies back
+            ElementContact(defender, attacker, Element.Water); // ELEMENT: reflect = Water contact (CHILL, or ELECTROCUTE a SHOCKed attacker)
             attacker.TakeDamage(reflectedDmg, kbDir, hurtDelay: REFLECT_FLIGHT_TIME);
             defender.HasMirrorBuff = false;
             tradeReason = "Mirror returned the hit";
@@ -1364,6 +1521,7 @@ public class RhythmRoundManager : NetworkBehaviour
                 int reflectedDmg = Mathf.Max(12, Mathf.RoundToInt(ApplyTraitMultiplier(Mathf.RoundToInt(baseDmg * 1.5f)) * CardUpgradeMult(defender, def)));
                 Vector3 parryDir = (attacker.transform.position - defender.transform.position).normalized;
                 attacker.SpawnReversedStrike(defender, REFLECT_FLIGHT_TIME); // their own slash flies back
+                ElementContact(defender, attacker, Element.Water); // ELEMENT: parry = Water contact (CHILL / ELECTROCUTE)
                 attacker.TakeDamage(reflectedDmg, parryDir, isOpponentDamage: true, hurtDelay: REFLECT_FLIGHT_TIME);
                 tradeReason = "Reflect punished the attack";
                 return -1;
@@ -1397,6 +1555,7 @@ public class RhythmRoundManager : NetworkBehaviour
                 PlayHitParticle(defender.transform.position);
                 int returnDmg = Mathf.RoundToInt(ApplyTraitMultiplier(baseDmg) * CardUpgradeMult(defender, def));
                 attacker.SpawnReversedStrike(defender, REFLECT_FLIGHT_TIME); // their own slash flies back
+                ElementContact(defender, attacker, Element.Water); // ELEMENT: reverse = Water contact (CHILL / ELECTROCUTE)
                 attacker.TakeDamage(returnDmg, revDir, hurtDelay: REFLECT_FLIGHT_TIME);
                 tradeReason = "Reverse countered";
                 // ReverseLeech Lv3: heal 5% of returned damage as HP
@@ -1435,6 +1594,7 @@ public class RhythmRoundManager : NetworkBehaviour
                 int clutchReflect = Mathf.RoundToInt(ApplyTraitMultiplier(Mathf.RoundToInt(baseDmg * 2f)) * CardUpgradeMult(defender, def));
                 Vector3 clutchDir = (attacker.transform.position - defender.transform.position).normalized;
                 attacker.SpawnReversedStrike(defender, REFLECT_FLIGHT_TIME); // their own slash flies back
+                ElementContact(defender, attacker, Element.Water); // ELEMENT: clutch = Water contact (CHILL / ELECTROCUTE)
                 attacker.TakeDamage(clutchReflect, clutchDir, isOpponentDamage: true, hurtDelay: REFLECT_FLIGHT_TIME);
                 tradeReason = "CLUTCH! Perfect counter";
 
@@ -1478,11 +1638,19 @@ public class RhythmRoundManager : NetworkBehaviour
             {
                 moveSuccessful = false; // a Throw catches the dodge
             }
+            else if (defender.CurrentElementStatus == Element.Earth)
+            {
+                moveSuccessful = false; // ROOTed — feet are stone, the dodge fails
+            }
             else
             {
                 moveSuccessful = true;
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Dash");
                 PlayHitParticle(defender.transform.position);
+
+                // ELEMENT: a successful dodge is Earth contact — the whiffed attacker gets ROOTed
+                // (or, if they're CHILLed, SHATTERs them into a stagger).
+                ElementContact(defender, attacker, Element.Earth);
 
                 // Dodge Lv3 perk: slipping a Strike sets up a whiff-punish — your next attack is charged.
                 var dodgeCard = GetCardData(def);
@@ -1523,6 +1691,15 @@ public class RhythmRoundManager : NetworkBehaviour
 
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Block");
                 PlayHitParticle(defender.transform.position);
+
+                // Trade-loser VFX: a FULL block stops the slash dead at the shield — it dissolves
+                // there instead of passing through. (Piercing chips through, so it keeps flying.)
+                if (blockMitigation >= 1.0f)
+                    attacker.ServerDissolveSlash(defender.transform.position + Vector3.up * 1.2f);
+
+                // ELEMENT: a successful block is Earth contact — the stopped attacker gets ROOTed
+                // (or SHATTERs if they were CHILLed: frozen arms meeting a stone wall).
+                ElementContact(defender, attacker, Element.Earth);
             }
         }
 
@@ -1614,6 +1791,10 @@ public class RhythmRoundManager : NetworkBehaviour
         // Card upgrade level: +15% damage per level above 1 (Lv2 = +15%, Lv3 = +30%).
         finalDmg = Mathf.RoundToInt(finalDmg * CardUpgradeMult(attacker, atk));
 
+        // ELEMENT — CHILL status: numbed arms, outgoing damage reduced while chilled.
+        if (attacker.CurrentElementStatus == Element.Water)
+            finalDmg = Mathf.RoundToInt(finalDmg * chillDamageMult);
+
         // --- 3. HIT DETECTION (rock-paper-scissors) ---
         bool hits = false;
         if (defenderStaggered)
@@ -1665,12 +1846,16 @@ public class RhythmRoundManager : NetworkBehaviour
                     attacker.HasPendingCage = true;
                     defender.CageBeatsRemaining = setupLv3 ? 2 : 1;            // Lv3: locked out 2 beats
                     tradeReason = "Cage — opponent can't defend next beat";
+                    // ELEMENT: Cage messes with the opponent = Wind contact (EXPOSE, or EROSION on a ROOTed foe)
+                    ElementContact(attacker, defender, Element.Wind);
                     break;
                 case "Taunt":
                     // Force the opponent to throw a STRIKE next beat — or take damage.
                     defender.MustStrikeBeats = (setupLv3 || tricky) ? 2 : 1;
                     tradeReason = "Taunt — opponent MUST Strike next beat";
                     if (defender.connectionToClient != null) defender.TargetMustStrikeWarn(defender.connectionToClient);
+                    // ELEMENT: Taunt messes with the opponent = Wind contact (EXPOSE, or EROSION on a ROOTed foe)
+                    ElementContact(attacker, defender, Element.Wind);
                     break;
             }
         }
@@ -1704,11 +1889,24 @@ public class RhythmRoundManager : NetworkBehaviour
 
             if (damageDealt > 0)
             {
+                // ── ELEMENT: the landing hit carries its family's element (Strike=Fire, Throw=Lightning).
+                // Detonates the defender's status if this element is its detonator (FIRESTORM / COMBUST...),
+                // otherwise tags them with this element's status (BURN / SHOCK).
+                Element atkElem = Elements.OfFamily(GetFamily(atk));
+                float reactionMult = ElementContact(attacker, defender, atkElem);
+                // Passive EXPOSE: bonus damage while exposed. (Skipped automatically if the contact just
+                // detonated it — COMBUST cleared the status and already boosts via reactionMult.)
+                if (defender.CurrentElementStatus == Element.Wind)
+                    reactionMult *= exposeDamageMult;
+                if (!Mathf.Approximately(reactionMult, 1f))
+                    damageDealt = Mathf.Max(1, Mathf.RoundToInt(damageDealt * reactionMult));
+
                 if (atk == "UnbreakablePunch" || atk == "Overclock") _heavyHitThisBeat = true;
                 if (attacker.connectionToClient != null) attacker.TargetPlaySuccessSound("Attack");
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Hurt");
                 attacker.GloveStrikeFlash(atk); // gloves flare + haptic on the striking hand
                 attacker.SpawnSwordImpact(defender.transform.position + Vector3.up); // sword slash burst (no-op for glove fighters)
+                attacker.SpawnFamilyHit(atk, defender.transform.position + Vector3.up); // per-family HIT effect from the attacker's FighterCardVFX
 
                 // ── POST-HIT PERK EFFECTS ──────────────────────────────────
                 if (perkOn)
@@ -1815,11 +2013,14 @@ public class RhythmRoundManager : NetworkBehaviour
     // Base value is widened by the card's per-level timing bonus so upgrades feel real.
     private float DefenseWindow(PlayerCombat defender, string trigger, float baseWindow)
     {
+        // ELEMENT — SHOCK status: sparking nerves, defense timing windows shrink while shocked.
+        float shockScale = defender.CurrentElementStatus == Element.Lightning ? shockWindowMult : 1f;
+
         var card = GetCardData(trigger);
-        if (card == null) return baseWindow;
+        if (card == null) return baseWindow * shockScale;
         int lvl = GetCardLevel(defender, trigger);
         float bonus = lvl >= 3 ? card.lv3TimingBonus : lvl == 2 ? card.lv2TimingBonus : 0f;
-        return baseWindow + bonus;
+        return (baseWindow + bonus) * shockScale;
     }
 
     // Card upgrade level multiplier — kept for the existing reflect damage calls that already use it.
@@ -2233,6 +2434,16 @@ public class RhythmRoundManager : NetworkBehaviour
                             if (pc.BleedTurnsRemaining <= 0) pc.BleedDamagePerBeat = 0;
                         }
 
+                        // ── ELEMENT: status tick — BURN damage + duration countdown ──
+                        if (pc.StatusBeatsRemaining > 0)
+                        {
+                            if (pc.CurrentElementStatus == Element.Fire)
+                                pc.TakeDamage(burnDamagePerBeat);
+                            pc.StatusBeatsRemaining--;
+                            if (pc.StatusBeatsRemaining <= 0)
+                                pc.ServerClearElementStatus();
+                        }
+
                         // Stagger perk (Hook Lv3): apply stagger on the beat after the hit
                         if (pc.StaggerNextBeat)
                         {
@@ -2271,8 +2482,13 @@ public class RhythmRoundManager : NetworkBehaviour
         //   offset 0.20s  → 1.00×  (on-time baseline)
         //   offset ≥0.35s → 0.50×  (sloppy floor)
         const float perfect = 1.60f, baseAt = 0.20f, badAt = 0.35f, floor = 0.50f;
-        if (offset <= baseAt) return Mathf.Lerp(perfect, 1.00f, offset / baseAt);
-        if (offset <= badAt)  return Mathf.Lerp(1.00f, floor, (offset - baseAt) / (badAt - baseAt));
+
+        // ELEMENT — SHOCK status: the timing curve compresses, so the same offset reads sloppier.
+        float shockScale = attacker.CurrentElementStatus == Element.Lightning ? shockWindowMult : 1f;
+        float bAt = baseAt * shockScale, dAt = badAt * shockScale;
+
+        if (offset <= bAt) return Mathf.Lerp(perfect, 1.00f, offset / bAt);
+        if (offset <= dAt) return Mathf.Lerp(1.00f, floor, (offset - bAt) / (dAt - bAt));
         return floor;
     }
 
@@ -2474,6 +2690,21 @@ public class RhythmRoundManager : NetworkBehaviour
     }
     private IEnumerator HitStopRoutine(float dur, float scale) { Time.timeScale = scale; yield return new WaitForSecondsRealtime(dur); Time.timeScale = 1.0f; }
 
+    // Play the metronome tick on every client at the beat. 2D PlayOneShot, unaffected by hit-stop
+    // (the source is its own 2D AudioSource; PlayOneShot ignores Time.timeScale for pitch).
+    [ClientRpc] private void RpcPlayMetronomeTick()
+    {
+        if (metronomeTick == null || metronomeVolume <= 0f) return;
+        if (_metronomeSource == null)
+        {
+            _metronomeSource = gameObject.AddComponent<AudioSource>();
+            _metronomeSource.playOnAwake = false;
+            _metronomeSource.spatialBlend = 0f;   // 2D — same level for everyone
+            _metronomeSource.ignoreListenerPause = true;
+        }
+        _metronomeSource.PlayOneShot(metronomeTick, metronomeVolume);
+    }
+
     void OnRoundStateChanged(bool oldVal, bool newVal) { if (BeatAnalyzer.Instance != null && BeatAnalyzer.Instance.audioSource != null && currentType != RoundType.CustomTrack) { if (newVal) BeatAnalyzer.Instance.audioSource.Play(); else BeatAnalyzer.Instance.audioSource.Stop(); } }
 
     // Smooth per-card hover amount (0..1), keyed by card name. Eased each Repaint.
@@ -2515,30 +2746,19 @@ public class RhythmRoundManager : NetworkBehaviour
 
         GUIStyle cardNameStyle = new GUIStyle(GUI.skin.label) { fontSize = 24, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
 
-        // Collect custom maps. Sources: PlayerPrefs registry (live editor maps) + every
-        // inspector AudioClip whose beat-data exists (PlayerPrefs OR baked Resources = builds).
-        var allMapNames = new List<string>();
-        string registry = PlayerPrefs.GetString("CustomMapRegistry", "");
-        if (!string.IsNullOrEmpty(registry))
-            foreach (string n in registry.Split('|'))
-                if (!string.IsNullOrEmpty(n) && MapExists(n) && !allMapNames.Contains(n))
-                    allMapNames.Add(n);
-        if (availableTracks != null)
-            foreach (AudioClip t in availableTracks)
-                if (t != null && MapExists(t.name) && !allMapNames.Contains(t.name))
-                    allMapNames.Add(t.name);
+        // Collect custom maps via the shared list: EVERY baked Resources beatmap + the live editor
+        // registry + inspector clips. Same source as the VR picker, so both builds match.
+        var allMapNames = AllPlayableMapNames();
 
-        // Build the full button list (Slow, Fast, then each playable custom map).
+        // Build the full button list (Slow, then each playable custom map).
         var cards = new List<(string name, Texture2D art, Color color, System.Action onClick)>();
 
         bool slowUsed = _usedRoundTypes.Contains(RoundType.SlowRhythm);
         cards.Add((NameForButton(0), ArtForButton(0), slowUsed ? Color.gray : new Color(0.2f, 0.9f, 1f),
             () => { if (!slowUsed && isServer) SelectRoundType(RoundType.SlowRhythm); }));
 
-        bool fastUsed = _usedRoundTypes.Contains(RoundType.FastCombo);
-        cards.Add((NameForButton(1), ArtForButton(1), fastUsed ? Color.gray : new Color(1f, 0.3f, 0.8f),
-            () => { if (!fastUsed && isServer) SelectRoundType(RoundType.FastCombo); }));
-
+        // Fast round removed — its button is gone. Custom-map art/name slots still start at index 2
+        // (btn = idx + 2) so existing Inspector artwork assignments keep lining up.
         for (int idx = 0; idx < allMapNames.Count; idx++)
         {
             string mapName = allMapNames[idx];
@@ -2548,11 +2768,15 @@ public class RhythmRoundManager : NetworkBehaviour
             bool mapUsed = _usedCustomMaps.Contains(mapName);
             int btn = idx + 2;
 
+            bool playable = clip != null || hasPath;
             if (loading)
                 cards.Add(("LOADING...", ArtForButton(btn), Color.yellow, () => { }));
-            else if (clip != null || hasPath)
+            else if (playable)
                 cards.Add((NameForButton(btn), ArtForButton(btn), mapUsed ? Color.gray : new Color(0.3f, 1f, 0.5f),
                     () => { if (!mapUsed && isServer) SelectRoundType(RoundType.CustomTrack, mapName); }));
+            // No audio in the project for this beatmap → don't list it at all (a silent round can't be
+            // played, so showing it just confuses the picker).
+            // else: skipped.
         }
 
         // Place them in a grid: up to MAX_COLS per row, each row horizontally centered.
@@ -3087,7 +3311,7 @@ public class RhythmRoundManager : NetworkBehaviour
 
         if (_activeBot != null) return; // correct bot already present
 
-        Vector3 spawnPos = _spawnP2; // bot's fixed home (botStartPosition)
+        Vector3 spawnPos = BotHome; // bot's fixed home + Y lift so feet sit on the floor
         _activeBot = Instantiate(desired, spawnPos, Quaternion.identity);
 
         if (_activeBot.GetComponent<PlayerInventory>() == null)
@@ -3113,7 +3337,7 @@ public class RhythmRoundManager : NetworkBehaviour
     // One round-picker option, shared by the flat IMGUI picker and the VR world-space panel.
     public struct RoundOption { public string label; public Texture2D artwork; public Color color; public bool used; public System.Action select; }
 
-    // Build the current round choices (Slow, Fast, then each playable custom map) for the VR menu.
+    // Build the current round choices (Slow, then each playable custom map) for the VR menu.
     public List<RoundOption> GetRoundOptionsForVR()
     {
         var list = new List<RoundOption>();
@@ -3128,30 +3352,21 @@ public class RhythmRoundManager : NetworkBehaviour
             select = () => { if (!slowUsed && isServer) SelectRoundType(RoundType.SlowRhythm); }
         });
 
-        bool fastUsed = _usedRoundTypes.Contains(RoundType.FastCombo);
-        list.Add(new RoundOption
-        {
-            label = NameForButton(1),
-            artwork = ArtForButton(1),
-            color = fastUsed ? Color.gray : new Color(1f, 0.3f, 0.8f),
-            used = fastUsed,
-            select = () => { if (!fastUsed && isServer) SelectRoundType(RoundType.FastCombo); }
-        });
-
-        var allMapNames = new List<string>();
-        string registry = PlayerPrefs.GetString("CustomMapRegistry", "");
-        if (!string.IsNullOrEmpty(registry))
-            foreach (string n in registry.Split('|'))
-                if (!string.IsNullOrEmpty(n) && MapExists(n) && !allMapNames.Contains(n)) allMapNames.Add(n);
-        if (availableTracks != null)
-            foreach (AudioClip t in availableTracks)
-                if (t != null && MapExists(t.name) && !allMapNames.Contains(t.name)) allMapNames.Add(t.name);
+        // Fast round removed — no Fast option. Custom maps still use art/name index btn = i + 2.
+        // Use the shared list so every baked Resources beatmap shows in the VR build (was only
+        // reading registry + availableTracks, which are empty in a fresh build → too few buttons).
+        var allMapNames = AllPlayableMapNames();
 
         for (int i = 0; i < allMapNames.Count; i++)
         {
             string mapName = allMapNames[i];
-            bool mapUsed = _usedCustomMaps.Contains(mapName);
             int btn = i + 2;
+            // No audio in the project for this beatmap → skip it entirely (a silent round can't play,
+            // so don't even list it).
+            bool hasAudio = GetClipForMap(mapName) != null || PlayerPrefs.HasKey("CustomMapPath_" + mapName);
+            if (!hasAudio) continue;
+
+            bool mapUsed = _usedCustomMaps.Contains(mapName);
             list.Add(new RoundOption
             {
                 label = NameForButton(btn),

@@ -30,6 +30,9 @@ public static class VRHaptics
     /// Master switch — expose in a settings menu if needed.
     public static bool Enabled = true;
 
+    /// Global strength multiplier for all haptic effects.
+    public static float StrengthMultiplier = 3f;
+
     // ── Low-level ─────────────────────────────────────────────────────────
 
     private static bool Ready => Enabled && XRSettings.isDeviceActive;
@@ -38,7 +41,8 @@ public static class VRHaptics
     public static void Pulse(Hand hand, float amplitude, float duration)
     {
         if (!Ready) return;
-        amplitude = Mathf.Clamp01(amplitude);
+        amplitude = Mathf.Clamp01(amplitude * StrengthMultiplier);
+        duration *= StrengthMultiplier;
         if (hand != Hand.Right) Send(XRNode.LeftHand,  amplitude, duration);
         if (hand != Hand.Left)  Send(XRNode.RightHand, amplitude, duration);
     }

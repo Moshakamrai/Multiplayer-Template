@@ -30,6 +30,19 @@ public class CardShineEffect : MonoBehaviour
     public float punchScale    = 0.12f;   // 0 = disabled
     public float punchDuration = 0.25f;
 
+    [Header("\"Called\" Pop (extra juice when a card is locked in)")]
+    [Tooltip("ON: card does an elastic overshoot + tilt wobble + glow flash when activated, " +
+             "instead of the plain shine. OFF: just the subtle shine/punch above.")]
+    public bool useCalledPop = true;
+    [Tooltip("How far the card overshoots its size at the peak of the pop (0.3 = +30%).")]
+    public float popOvershoot = 0.32f;
+    [Tooltip("Total length of the pop animation (overshoot + elastic settle).")]
+    public float popDuration = 0.55f;
+    [Tooltip("Max tilt (degrees) of the quick wobble during the pop.")]
+    public float popTilt = 9f;
+    [Tooltip("Glow brightness at the flash peak (stacks on the shine glow).")]
+    public float popGlowPeak = 2.6f;
+
     [Header("Dissolve (exit / enter)")]
     public Color dissolveColor   = new Color(1f, 0.55f, 0.1f, 1f); // hot burning edge
     public float dissolveEdge    = 0.08f;
@@ -44,9 +57,11 @@ public class CardShineEffect : MonoBehaviour
     private Material  _mat;
     private RectTransform _rt;
     private Vector3   _baseScale = Vector3.one;
+    private Quaternion _baseRot  = Quaternion.identity;
     private Coroutine _shine;
     private Coroutine _punch;
     private Coroutine _anim;   // enter/exit dissolve
+    private Coroutine _pop;    // "called" elastic pop
 
     static readonly int ID_ShineColor      = Shader.PropertyToID("_ShineColor");
     static readonly int ID_Shine           = Shader.PropertyToID("_Shine");
@@ -66,6 +81,7 @@ public class CardShineEffect : MonoBehaviour
         _img = GetComponent<Image>();
         _rt  = GetComponent<RectTransform>();
         _baseScale = _rt.localScale;
+        _baseRot   = _rt.localRotation;
         _state = gameObject.activeSelf ? State.Shown : State.Hidden;
 
         var shader = Shader.Find("UI/CardActivate");
@@ -155,14 +171,51 @@ public class CardShineEffect : MonoBehaviour
     {
         if (!isActiveAndEnabled || _mat == null) return;
 
+        // Always sweep the shine across the card.
         if (_shine != null) StopCoroutine(_shine);
         _shine = StartCoroutine(ShineRoutine());
 
-        if (punchScale > 0.001f)
+        if (useCalledPop)
+        {
+            // Juicy "card called" moment: elastic scale overshoot + tilt wobble + glow flash.
+            if (_pop != null) StopCoroutine(_pop);
+            _pop = StartCoroutine(CalledPopRoutine());
+        }
+        else if (punchScale > 0.001f)
         {
             if (_punch != null) StopCoroutine(_punch);
             _punch = StartCoroutine(PunchRoutine());
         }
+    }
+
+    // Snappy overshoot that springs past full size then settles back with a damped bounce, while the
+    // card tilts and a glow flash fires — reads clearly as "this card just got locked in".
+    private IEnumerator CalledPopRoutine()
+    {
+        float tiltDir = Random.value < 0.5f ? -1f : 1f; // wobble left or right at random for variety
+        float t = 0f;
+        while (t < popDuration)
+        {
+            t += Time.unscaledDeltaTime;
+            float p = Mathf.Clamp01(t / popDuration);
+
+            // Damped elastic curve: a big overshoot up front that rings down to 0.
+            float decay   = Mathf.Exp(-6f * p);
+            float spring  = decay * Mathf.Sin(p * Mathf.PI * 3.0f);
+            float scaleAdd = popOvershoot * spring;
+            _rt.localScale = _baseScale * (1f + scaleAdd);
+
+            // Tilt follows the same spring, fading out as it settles.
+            _rt.localRotation = _baseRot * Quaternion.Euler(0f, 0f, tiltDir * popTilt * spring);
+
+            // Glow flashes hardest at the start of the pop, then fades.
+            _mat.SetFloat(ID_Glow, Mathf.Max(_mat.GetFloat(ID_Glow), popGlowPeak * decay));
+            yield return null;
+        }
+        _rt.localScale    = _baseScale;
+        _rt.localRotation = _baseRot;
+        _mat.SetFloat(ID_Glow, 0f);
+        _pop = null;
     }
 
     private IEnumerator ShineRoutine()
@@ -173,11 +226,13 @@ public class CardShineEffect : MonoBehaviour
             t += Time.unscaledDeltaTime;
             float p = Mathf.Clamp01(t / shineDuration);
             _mat.SetFloat(ID_Shine, p);
-            _mat.SetFloat(ID_Glow, Mathf.Sin(p * Mathf.PI) * glowPeak);
+            // Max so the shine glow and the "called" pop glow combine instead of overwriting each
+            // other when both run in the same frame.
+            _mat.SetFloat(ID_Glow, Mathf.Max(_mat.GetFloat(ID_Glow), Mathf.Sin(p * Mathf.PI) * glowPeak));
             yield return null;
         }
         _mat.SetFloat(ID_Shine, 0f);
-        _mat.SetFloat(ID_Glow, 0f);
+        if (_pop == null) _mat.SetFloat(ID_Glow, 0f); // don't kill the pop's glow if it's still going
         _shine = null;
     }
 
@@ -205,8 +260,8 @@ public class CardShineEffect : MonoBehaviour
             _mat.SetFloat(ID_Glow, 0f);
             _mat.SetFloat(ID_Dissolve, 0f);
         }
-        if (_rt != null) _rt.localScale = _baseScale;
-        _shine = _punch = _anim = null;
+        if (_rt != null) { _rt.localScale = _baseScale; _rt.localRotation = _baseRot; }
+        _shine = _punch = _anim = _pop = null;
     }
 
     void OnDestroy()

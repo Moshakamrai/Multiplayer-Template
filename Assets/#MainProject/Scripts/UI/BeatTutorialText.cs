@@ -77,10 +77,12 @@ public class BeatTutorialText : MonoBehaviour
     // Catch fresh success / too-early events and arm the matching flash timer.
     private void WatchEvents()
     {
-        if (PlayerCombat.VRTimingTime > _lastTimingSeen + 0.001f)
+        // Read the dedicated grade signal (not VRTimingText, which the element system clobbers with
+        // status names right after a hit).
+        if (PlayerCombat.VRGradeTime > _lastTimingSeen + 0.001f)
         {
-            _lastTimingSeen = PlayerCombat.VRTimingTime;
-            string r = PlayerCombat.VRTimingText;
+            _lastTimingSeen = PlayerCombat.VRGradeTime;
+            string r = PlayerCombat.VRGradeText;
             if (r == "EXCELLENT" || r == "GOOD") { _niceTimer = NICE_HOLD; _earlyTimer = 0f; }
         }
         if (PlayerCombat.VREarlyTime > _lastEarlySeen + 0.001f)

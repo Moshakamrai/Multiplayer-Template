@@ -194,17 +194,21 @@ public class TiebreakerManager : NetworkBehaviour
     // ── Update ─────────────────────────────────────────────────────────────────
     private void Update()
     {
-        // Always: smooth timeScale lerp + music pitch
-        Time.timeScale = Mathf.Lerp(Time.timeScale, _targetTimeScale,
-            Time.unscaledDeltaTime * TIMESCALE_SPEED);
-        if (_normalMusic != null)
-            _normalMusic.pitch = Time.timeScale;
-
+        // ONLY drive timeScale + music pitch while a tiebreaker is actually running. This used to run
+        // EVERY frame unconditionally, so it constantly forced the song's pitch to match Time.timeScale
+        // — meaning any brief hit-stop or hurt slow-mo (e.g. on a successful parry) dragged the MUSIC
+        // down with it. Gating it here lets the song play at full speed during normal combat.
         if (!IsTiebreakerActive)
         {
             UpdateColorBurst();
             return;
         }
+
+        // Tiebreaker is live: smooth timeScale lerp + match the music pitch to the slow-mo.
+        Time.timeScale = Mathf.Lerp(Time.timeScale, _targetTimeScale,
+            Time.unscaledDeltaTime * TIMESCALE_SPEED);
+        if (_normalMusic != null)
+            _normalMusic.pitch = Time.timeScale;
 
         if (!_effectsApplied) ApplyTiebreakerEffects();
 
@@ -424,7 +428,12 @@ public class TiebreakerManager : NetworkBehaviour
     private void RestoreTiebreakerEffects()
     {
         _effectsApplied  = false;
-        _targetTimeScale = 1.0f; // smooth speed-up; pitch follows in Update
+        _targetTimeScale = 1.0f;
+
+        // Restore time + music pitch IMMEDIATELY. Update() no longer runs the lerp once the tiebreaker
+        // is inactive (it used to fight every other slow-mo in the game), so we reset them here.
+        Time.timeScale = 1.0f;
+        if (_normalMusic != null) _normalMusic.pitch = 1.0f;
 
         // Restore main volume colors
         if (mainVolume != null)

@@ -59,6 +59,14 @@ public class BeatAnalyzer : MonoBehaviour
 
     void Update()
     {
+        // Keep the MUSIC immune to game slow-motion. The hurt/knockout effect drops Time.timeScale
+        // for a juicy slow-mo on the animation, but the song should keep playing at normal speed —
+        // so we pin this source's pitch to 1.0 every frame (overriding anything that would slow it).
+        // Exception: the Tiebreaker minigame deliberately slows the music, so don't fight it then.
+        bool tiebreakerActive = TiebreakerManager.Instance != null && TiebreakerManager.Instance.IsTiebreakerActive;
+        if (audioSource != null && !tiebreakerActive && !Mathf.Approximately(audioSource.pitch, 1f))
+            audioSource.pitch = 1f;
+
         if (isAnalyzing)
         {
             if (!audioSource.isPlaying)

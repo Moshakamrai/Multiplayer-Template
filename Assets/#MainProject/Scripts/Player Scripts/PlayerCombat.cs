@@ -11,6 +11,40 @@ public class PlayerCombat : NetworkBehaviour
     [SyncVar] public int roundDamageDealt = 0;
     [SyncVar] public int roundExcellentCount = 0;
     [SyncVar] public int roundCounterCount = 0;
+
+    // ── SCORE (replaces the health % as the win metric) ──────────────────────
+    // You gain points for moves that BENEFIT you: a clean on-beat move, a successful defense that
+    // takes no damage, a parry/reflect that turns the tables, and especially landing a hard hit.
+    // Higher score at the end of the round WINS (the loser plays the knockout anim on the last hit).
+    // Server-authoritative, synced to clients; the hook drives the animated 3D count-up display.
+    [SyncVar(hook = nameof(OnScoreChanged))] public int Score = 0;
+
+    // Running total across ALL rounds of the match — this is what goes on the leaderboard at match
+    // end. Score resets each round; MatchScore banks the round's score into it (see ResetRoundStats),
+    // so it survives until the scene reloads (which starts a fresh match).
+    [SyncVar] public int MatchScore = 0;
+
+    // Score tuning — deliberately BIG ("thousands per move") for arcade dopamine.
+    public const int SCORE_ONBEAT_GOOD      = 1000;  // played the move on-beat
+    public const int SCORE_ONBEAT_EXCELLENT = 2000;  // nailed the beat
+    public const int SCORE_DEFENSE_SUCCESS  = 2500;  // blocked/parried and took no damage (won the exchange)
+    public const int SCORE_HIT_PER_DAMAGE   = 250;   // landed a hit: this × damage = "how hard you hit" bonus
+    public const int SCORE_COUNTER_BONUS    = 1500;  // extra on top of a hit for a parry/reflect reversal
+
+    // Fired on every client when the synced Score changes — the score HUD animates from old→new.
+    private void OnScoreChanged(int oldVal, int newVal)
+    {
+        ScoreHud.Instance?.OnScoreUpdated(this, oldVal, newVal);
+    }
+
+    /// Server-only: grant points for a beneficial action, then let clients animate the count-up.
+    /// reason is just for logging/feel. Amounts are in the THOUSANDS (see callers).
+    [Server]
+    public void AddScore(int amount, string reason = "")
+    {
+        if (amount <= 0) return;
+        Score += amount;
+    }
     [SyncVar] public string availableCardsString = "";
     public Animator animator;
     public bool isAttacking = false;
@@ -270,6 +304,7 @@ public class PlayerCombat : NetworkBehaviour
     public void ResetRoundStats()
     {
         CurrentPercentage = 0f;
+        Score = 0;            // points reset each round — most points at the timer wins
         roundDamageDealt = 0;
         roundExcellentCount = 0;
         roundCounterCount = 0;
@@ -668,6 +703,20 @@ public class PlayerCombat : NetworkBehaviour
             if (IsStaggered) UpdateStaggerRecovery();
             else             { _staggerRecoveryCharge = 0f; _wasStaggered = false; }
 
+            // FLAT live power feed: in VR the meter fills live from the controller trigger-charge
+            // (VRHands → SetLiveCharge). Flat builds had nothing driving it, so the bar looked dead.
+            // Feed the live MIC volume so the meter responds to the player's voice in real time, the
+            // same way the VR charge does.
+            if (!VRCameraDriver.VRActive && vp != null && _vcm != null)
+            {
+                if (_powerMeter == null) _powerMeter = GetComponentInChildren<PowerMeterReactor>(true);
+                if (_powerMeter != null)
+                {
+                    float thr = _vcm.parryVolumeThreshold;
+                    float live = Mathf.Clamp01((vp.CurrentFestivalVolume - thr) / Mathf.Max(0.01f, 1f - thr));
+                    _powerMeter.SetLiveCharge(live);
+                }
+            }
         }
 
         if (!isLocalPlayer || IsDead || IsHurting) return;
@@ -1084,6 +1133,13 @@ public class PlayerCombat : NetworkBehaviour
     // also counts toward the "are they getting it?" streak that hides/shows the tutorial.
     public static float  VREarlyTime = -999f;
 
+    // DEDICATED timing-grade signal for the beat coach — separate from VRTimingText because the
+    // element system overwrites VRTimingText with status/reaction names ("Frozen", "Burn"…) right
+    // after a hit, which would clobber the "GOOD"/"EXCELLENT"/"BAD" grade before the coach reads it.
+    // Only TargetShowTimingFeedback writes these, so the streak logic always sees the true grade.
+    public static string VRGradeText = "";
+    public static float  VRGradeTime = -999f;
+
     private PowerMeterReactor _powerMeter;
 
     [TargetRpc]
@@ -1100,6 +1156,11 @@ public class PlayerCombat : NetworkBehaviour
         VRTimingText = rating;
         VRTimingColor = _timingColor;
         VRTimingTime = Time.time;
+
+        // Dedicated grade signal (only set here) — the beat coach reads this so the element system's
+        // VRTimingText overwrite can't hide the player's real on-beat result from the streak logic.
+        VRGradeText = rating;
+        VRGradeTime = Time.time;
 
         // Drive the cyberpunk power cone from BOTH timing grade AND input power.
         if (_powerMeter == null) _powerMeter = GetComponentInChildren<PowerMeterReactor>(true);
@@ -1335,6 +1396,18 @@ public class PlayerCombat : NetworkBehaviour
     public void TakeDamage(int damage, Vector3 knockbackDir = default, bool isOpponentDamage = false, float hurtDelay = 0f)
     {
         StartCoroutine(FlashEffectRoutine());
+
+        // SCORE: a hit landed → whoever dealt it BENEFITED. Award the dealer (this victim's opponent)
+        // points scaled by the damage = "how hard you hit". This single chokepoint covers every clash
+        // outcome: a normal landed hit (attacker scores), a mistimed defense (the attacker still
+        // scores because the defender took damage), and a parry/reflect that turns a hit back on the
+        // attacker (the original defender, now the dealer, scores — see AwardCounterBonus callers).
+        if (isServer && damage > 0)
+        {
+            var dealer = GetComponent<PlayerController>()?.GetOpponent()?.GetComponent<PlayerCombat>();
+            if (dealer != null) dealer.AddScore(damage * SCORE_HIT_PER_DAMAGE, "landed hit");
+        }
+
         float oldPct = CurrentPercentage;
         CurrentPercentage += damage;
         // Stagger at every 50% damage threshold crossed (50, 100, 150, ...)
@@ -1364,6 +1437,10 @@ public class PlayerCombat : NetworkBehaviour
     }
 
     [Server] private IEnumerator DelayedKnockout(float delay) { yield return new WaitForSeconds(delay); RpcKnockout(); }
+
+    /// Server-only: make this fighter play the knockout animation right now. Called on the round
+    /// LOSER when the timer ends (points decide the winner; the loser drops as the final beat).
+    [Server] public void PlayKnockoutNow() { RpcKnockout(); }
     [ClientRpc] void RpcTriggerHurt(string trigger, float delay, int damage) { StartCoroutine(DelayedHurtRoutine(trigger, delay, damage)); }
 
     private IEnumerator DelayedHurtRoutine(string trigger, float delay, int damage)
@@ -1609,7 +1686,10 @@ public class PlayerCombat : NetworkBehaviour
             PlayerCombat oppCombat = opponent.GetComponent<PlayerCombat>();
             if (oppCombat != null)
             {
-                // ── OPPONENT HEALTH BAR (Top Right) ──
+                // OPPONENT score bar REMOVED — the big 3D "BOT" world-space score replaces it.
+                #pragma warning disable 0162
+                if (false)
+                {
                 float barWidth = 380f;
                 float barHeight = 52f;
                 float posX = Screen.width - barWidth - 24f;
@@ -1652,7 +1732,9 @@ public class PlayerCombat : NetworkBehaviour
 
                 string oppName = string.IsNullOrEmpty(opponent.PlayerName) ? "OPPONENT" : opponent.PlayerName;
                 CyberpunkGUIUtils.DrawGlowText(new Rect(posX + 12f, posY, barWidth - 24f, barHeight),
-                    $"{oppName}  |  {oppCombat.CurrentPercentage:F0}%", new Color(1f, 0.35f, 0.35f), nameStyle, new Color(1f, 0.15f, 0.15f));
+                    $"{oppName}  |  {oppCombat.Score:N0} PTS", new Color(1f, 0.35f, 0.35f), nameStyle, new Color(1f, 0.15f, 0.15f));
+                } // end if(false) opponent score bar
+                #pragma warning restore 0162
 
                 // --- OPPONENT CARDS PANEL (Top Left) --- (hidden for cleaner HUD)
 #if false
@@ -1716,7 +1798,9 @@ public class PlayerCombat : NetworkBehaviour
             }
         }
 
-        // --- LOCAL PLAYER HEALTH BAR (Bottom Left) — distinct from opponent bar ---
+        // LOCAL PLAYER score bar REMOVED — the big 3D "YOU" world-space score replaces it.
+        #pragma warning disable 0162
+        if (false)
         {
             float barWidth  = 380f;
             float barHeight = 52f;
@@ -1760,8 +1844,9 @@ public class PlayerCombat : NetworkBehaviour
             string myName = GetComponent<PlayerController>().PlayerName;
             if (string.IsNullOrEmpty(myName)) myName = "YOU";
             CyberpunkGUIUtils.DrawGlowText(new Rect(posX + 12f, posY, barWidth - 24f, barHeight),
-                $"{CurrentPercentage:F0}%  |  {myName}", new Color(0.2f, 0.9f, 1f), myNameStyle, new Color(0.1f, 0.6f, 0.9f));
-        }
+                $"{Score:N0} PTS  |  {myName}", new Color(0.2f, 0.9f, 1f), myNameStyle, new Color(0.1f, 0.6f, 0.9f));
+        } // end if(false) local player score bar
+        #pragma warning restore 0162
 
         // --- 2. MIC THRESHOLD (Right Bottom Corner) ---
         if (vp != null)

@@ -107,69 +107,42 @@ public class PlayerController : NetworkBehaviour
         Movement();
     }
 
-    private void FixedUpdate()
-    {
-        if (!isServer || !_isSpacingActive) return;
-
-        // Only the BOT closes distance — the player stands still.
-        bool isBot = GetComponent<BotController>() != null;
-        if (!isBot) return;
-
-        PlayerController opponent = GetOpponent();
-        if (opponent == null) return;
-
-        float currentDist = Vector3.Distance(transform.position, opponent.transform.position);
-
-        if (!_isDashing && !_combat.IsHurting && !opponent._isDashing && !opponent._combat.IsHurting)
-        {
-            if (Mathf.Abs(currentDist - DesiredDistance) > 0.1f)
-            {
-                Vector3 dir = (opponent.transform.position - transform.position).normalized;
-                float moveDir = (currentDist > DesiredDistance) ? 1f : -1f;
-                _characterController.Move(dir * moveDir * SpacingSpeed * Time.fixedDeltaTime);
-            }
-        }
-    }
+    // Bot auto-spacing DISABLED — both fighters are now hard-pinned to their spawn in LateUpdate, so
+    // the bot must never try to "close distance" (it just fought the pin and shoved the bot around).
+    private void FixedUpdate() { }
 
     // Hard-anchor each fighter to its spawn spot — applied AFTER animation root motion every
     // frame, so the body can NEVER drift (no snap, because nothing ever accumulates):
     //   • BOT    — fully pinned (X + Z). It never moves, so the gap stays exactly constant.
     //   • PLAYER — Z locked to spawn (no forward/back drift); X is free so sidestep dodges work.
     // Vertical (Y / gravity) is always left untouched.
+    // HARD-ANCHOR both fighters to their spawn spot, EVERY frame, ALWAYS (not just mid-round).
+    // Applied in LateUpdate (after animation root motion + the CharacterController.Move in Movement),
+    // so nothing — idle/hurt/dash/knockback root motion, gravity drift, bot spacing — can ever walk a
+    // fighter off its spawn. The body is pinned on ALL THREE axes; only the rotation is allowed to
+    // turn to face the opponent. Dodges still play their lean animation but never relocate the body.
     private void LateUpdate()
     {
         bool isBotOnServer = isServer && !isLocalPlayer;
         if (!(isLocalPlayer || isBotOnServer)) return;
         if (!_hasHome) return;
 
-        var rmm = RhythmRoundManager.Instance;
-        if (rmm == null || !rmm.isRoundActive) return;
-
+        // In VR the human is positioned by VRCameraDriver/their real body — don't fight it. The BOT is
+        // always pinned (even in VR), since it has no rig driving it.
         bool isBot = GetComponent<BotController>() != null;
+        if (!isBot && VRCameraDriver.VRActive) return;
 
-        if (isBot)
-        {
-            // Hard-lock bot to spawn on ALL axes — hurt/dash/knockback root motion cannot drift it.
-            // Skip in VR only for the human player (VRCameraDriver handles them); bot always pinned.
-            transform.position = _homePosition;
+        // Full pin to spawn on every axis.
+        transform.position = _homePosition;
 
-            // Always face the opponent — animations can rotate the rig, so we enforce it here.
-            PlayerController opp = GetOpponent();
-            if (opp != null)
-            {
-                Vector3 dir = opp.transform.position - transform.position;
-                dir.y = 0f;
-                if (dir.sqrMagnitude > 0.001f)
-                    transform.rotation = Quaternion.LookRotation(dir);
-            }
-        }
-        else
+        // Face the opponent (animations can twist the rig; enforce the facing here).
+        PlayerController opp = GetOpponent();
+        if (opp != null)
         {
-            // Human: skip position lock in VR (VRCameraDriver handles placement).
-            if (VRCameraDriver.VRActive) return;
-            Vector3 pos = transform.position;
-            // Z locked to spawn (no forward/back drift); X free (dodges work); Y free (gravity).
-            transform.position = new Vector3(pos.x, pos.y, _homePosition.z);
+            Vector3 dir = opp.transform.position - transform.position;
+            dir.y = 0f;
+            if (dir.sqrMagnitude > 0.001f)
+                transform.rotation = Quaternion.LookRotation(dir);
         }
     }
 
@@ -305,25 +278,10 @@ public class PlayerController : NetworkBehaviour
             playerCollider.enabled = true;
         }
 
-        // 4. Home anchoring is handled continuously in LateUpdate (after animation root
-        //    motion), so the body can't drift via hurt/attack clips. Nothing to add here.
+        // 4. Home anchoring is handled in LateUpdate (full pin to spawn, every frame). The bot used to
+        //    "auto-space" toward the player here in VR, but that fought the pin and shoved it around —
+        //    removed. Both fighters now simply hold their spawn.
         Vector3 autoSpacingVelocity = Vector3.zero;
-        // VR mode keeps the bot in front of the physically-moving player (mirror X, hold Z gap).
-        // On flat-screen the bot is hard-locked to its spawn in LateUpdate, so no spacing here.
-        bool isBot = GetComponent<BotController>() != null;
-        if (isBot && opponent != null && VRCameraDriver.VRActive &&
-            !_isDashing && !_combat.isAttacking && !_combat.IsHurting)
-        {
-            Vector3 botTarget = new Vector3(
-                opponent.transform.position.x,
-                transform.position.y,
-                opponent.transform.position.z + DesiredDistance
-            );
-            Vector3 toTarget = botTarget - transform.position;
-            toTarget.y = 0;
-            if (toTarget.magnitude > 0.05f)
-                autoSpacingVelocity = toTarget.normalized * SpacingSpeed * 2f;
-        }
 
         // 5. Visual Cleanup
         if (isLocalPlayer)

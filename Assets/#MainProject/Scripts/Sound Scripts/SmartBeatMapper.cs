@@ -41,6 +41,7 @@ public class SmartBeatMapper : MonoBehaviour
     private string _loadStatus        = "";
     private bool   _loadStatusIsError = false;
     private string _pendingFilePath   = null;
+    private NativeFileDialog.Pick _filePick = null; // in-flight Browse dialog (standalone)
 
     // ── BPM ───────────────────────────────────────────────────────────────
     private string _bpmInput     = "";
@@ -87,6 +88,20 @@ public class SmartBeatMapper : MonoBehaviour
     {
         if (_tapFlashTimer > 0f)
             _tapFlashTimer -= Time.deltaTime;
+
+        // A Browse dialog finished (standalone build, worker thread) — pull its result on the main thread.
+        if (_filePick != null && _filePick.Done)
+        {
+            if (!string.IsNullOrEmpty(_filePick.Error))
+            {
+                _loadStatus = _filePick.Error; _loadStatusIsError = true;
+            }
+            else if (!string.IsNullOrEmpty(_filePick.Path))
+            {
+                _pendingFilePath = _filePick.Path;
+            }
+            _filePick = null;
+        }
 
         if (_pendingFilePath != null)
         {
@@ -703,36 +718,24 @@ public class SmartBeatMapper : MonoBehaviour
     }
 
     // ── File dialog ───────────────────────────────────────────────────────
+    // Uses the shared NativeFileDialog: native panel in the Editor, a properly-shown PowerShell
+    // dialog in a standalone Windows build. The old inline version ran PowerShell with
+    // -NonInteractive + CreateNoWindow, so the dialog never appeared and Browse "did nothing".
     private void OpenFileDialog()
     {
-#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
-        var t = new System.Threading.Thread(() =>
+        var pick = NativeFileDialog.OpenAudio(out string editorImmediate);
+
+        if (pick == null)
         {
-            const string ps = @"
-Add-Type -AssemblyName System.Windows.Forms
-$d = New-Object System.Windows.Forms.OpenFileDialog
-$d.Title  = 'Select Audio File'
-$d.Filter = 'Audio Files|*.mp3;*.wav;*.ogg;*.aiff;*.aif|All Files|*.*'
-if ($d.ShowDialog() -eq 'OK') { Write-Output $d.FileName }
-";
-            var psi = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName               = "powershell",
-                Arguments              = $"-NoProfile -NonInteractive -Command \"{ps.Replace("\"", "\\\"")}\"",
-                UseShellExecute        = false,
-                RedirectStandardOutput = true,
-                CreateNoWindow         = true
-            };
-            using var proc = System.Diagnostics.Process.Start(psi);
-            string result  = proc.StandardOutput.ReadToEnd().Trim();
-            proc.WaitForExit();
-            if (!string.IsNullOrEmpty(result)) _pendingFilePath = result;
-        });
-        t.Start();
-#else
-        _loadStatus = "Browse not supported — paste path manually.";
-        _loadStatusIsError = true;
-#endif
+            // Editor: result resolved synchronously.
+            if (!string.IsNullOrEmpty(editorImmediate))
+                _pendingFilePath = editorImmediate;
+            return;
+        }
+
+        // Standalone: poll it in Update().
+        _filePick = pick;
+        _loadStatus = "Opening file browser…"; _loadStatusIsError = false;
     }
 
     // ── Audio loader ──────────────────────────────────────────────────────
@@ -790,18 +793,13 @@ if ($d.ShowDialog() -eq 'OK') { Write-Output $d.FileName }
     private void SaveCustomTrack()
     {
         string clipName = audioSource.clip.name;
-        PlayerPrefs.SetString("CustomMap_" + clipName, string.Join("|", _quantizedBeats));
+        // Durable save: writes a real .txt (Resources in editor, persistentDataPath in builds) so the
+        // map survives quitting Unity AND ships in builds — not just a fragile PlayerPrefs entry.
+        BeatMapStore.Save(clipName, string.Join("|", _quantizedBeats),
+            string.IsNullOrEmpty(_filePath) ? null : _filePath);
 
-        if (!string.IsNullOrEmpty(_filePath))
-            PlayerPrefs.SetString("CustomMapPath_" + clipName, _filePath);
-
-        string raw   = PlayerPrefs.GetString("CustomMapRegistry", "");
-        var    names = new HashSet<string>(
-            raw.Split(new char[] { '|' }, System.StringSplitOptions.RemoveEmptyEntries));
-        names.Add(clipName);
-        PlayerPrefs.SetString("CustomMapRegistry", string.Join("|", names));
-
-        PlayerPrefs.Save();
-        Debug.Log($"<color=green>SAVED MAP:</color> CustomMap_{clipName}  ({_quantizedBeats.Count} beats)");
+        _loadStatus = $"Saved \"{clipName}\" — {_quantizedBeats.Count} beats (permanent).";
+        _loadStatusIsError = false;
+        Debug.Log($"<color=green>SAVED MAP:</color> {clipName}  ({_quantizedBeats.Count} beats)");
     }
 }

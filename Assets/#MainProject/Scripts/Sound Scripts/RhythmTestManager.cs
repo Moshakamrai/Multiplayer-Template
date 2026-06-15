@@ -41,6 +41,7 @@ public class RhythmTestManager : MonoBehaviour
     private string _fileStatus  = "";
     private bool   _fileError   = false;
     private string _pendingFile = null;
+    private NativeFileDialog.Pick _filePick = null; // in-flight Browse dialog (standalone)
 
     // Analysis
     private float   _progress = 0f;
@@ -86,6 +87,14 @@ public class RhythmTestManager : MonoBehaviour
     void Update()
     {
         if (_gradeT > 0f) _gradeT -= Time.deltaTime;
+
+        // A Browse dialog finished (standalone build, worker thread) — pull its result on the main thread.
+        if (_filePick != null && _filePick.Done)
+        {
+            if (!string.IsNullOrEmpty(_filePick.Error)) { _fileStatus = _filePick.Error; _fileError = true; }
+            else if (!string.IsNullOrEmpty(_filePick.Path)) { _pendingFile = _filePick.Path; }
+            _filePick = null;
+        }
 
         if (_pendingFile != null) { _filePath = _pendingFile; _pendingFile = null; StartCoroutine(LoadAudio(_filePath)); }
 
@@ -440,15 +449,9 @@ public class RhythmTestManager : MonoBehaviour
         string clipName = _map.songName;
         string data     = string.Join("|", times.ConvertAll(t => t.ToString(CultureInfo.InvariantCulture)));
 
-        PlayerPrefs.SetString("CustomMap_" + clipName, data);
-        if (!string.IsNullOrEmpty(_filePath))
-            PlayerPrefs.SetString("CustomMapPath_" + clipName, _filePath);
-
-        string reg  = PlayerPrefs.GetString("CustomMapRegistry", "");
-        var    keys = new HashSet<string>(reg.Split(new[]{'|'}, System.StringSplitOptions.RemoveEmptyEntries));
-        keys.Add(clipName);
-        PlayerPrefs.SetString("CustomMapRegistry", string.Join("|", keys));
-        PlayerPrefs.Save();
+        // Durable save: writes a real .txt (Resources in editor, persistentDataPath in builds) so the
+        // map survives quitting Unity AND ships in builds — not just a fragile PlayerPrefs entry.
+        BeatMapStore.Save(clipName, data, string.IsNullOrEmpty(_filePath) ? null : _filePath);
 
         _saveMsg = $"Saved {times.Count} triggers for \"{clipName}\"";
         _saveErr = false;
@@ -513,27 +516,21 @@ public class RhythmTestManager : MonoBehaviour
         _engine.Analyze(clip);
     }
 
+    // Uses the shared NativeFileDialog: native panel in the Editor, a properly-shown PowerShell dialog
+    // in a standalone Windows build. The old inline version ran PowerShell with -NonInteractive +
+    // CreateNoWindow, so the dialog never appeared and Browse "did nothing".
     void OpenFileDlg()
     {
-#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
-        new System.Threading.Thread(() =>
+        var pick = NativeFileDialog.OpenAudio(out string editorImmediate);
+
+        if (pick == null)
         {
-            const string ps = @"Add-Type -AssemblyName System.Windows.Forms
-$d=New-Object System.Windows.Forms.OpenFileDialog
-$d.Filter='Audio|*.mp3;*.wav;*.ogg;*.aiff;*.aif|All|*.*'
-if($d.ShowDialog()-eq'OK'){Write-Output $d.FileName}";
-            var psi = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = "powershell", Arguments = $"-NoProfile -NonInteractive -Command \"{ps.Replace("\"","\\\"")}\"",
-                UseShellExecute = false, RedirectStandardOutput = true, CreateNoWindow = true
-            };
-            using var p = System.Diagnostics.Process.Start(psi);
-            string r = p.StandardOutput.ReadToEnd().Trim(); p.WaitForExit();
-            if (!string.IsNullOrEmpty(r)) _pendingFile = r;
-        }).Start();
-#else
-        _fileStatus = "Browse not supported — paste path manually"; _fileError = true;
-#endif
+            if (!string.IsNullOrEmpty(editorImmediate)) _pendingFile = editorImmediate;
+            return;
+        }
+
+        _filePick = pick;
+        _fileStatus = "Opening file browser…"; _fileError = false;
     }
 
     // ── GUI helpers ───────────────────────────────────────────────────────

@@ -7,7 +7,9 @@ using System.IO;
 using UnityEngine.SceneManagement;
 using UnityEngine.XR;
 
-public enum RoundType { SlowRhythm, FastCombo, CustomTrack }
+// FastCombo removed (the Fast round was scrapped). Kept the slot unused so any older serialized
+// 'currentType' values don't silently shift — we never set or branch on it anymore.
+public enum RoundType { SlowRhythm, _RemovedFastCombo, CustomTrack }
 
 public class RhythmRoundManager : NetworkBehaviour
 {
@@ -157,6 +159,17 @@ public class RhythmRoundManager : NetworkBehaviour
         => (buttonArtworks != null && i >= 0 && i < buttonArtworks.Length) ? buttonArtworks[i] : null;
     private string NameForButton(int i)
         => (buttonNames != null && buttonNames.Length > 0) ? buttonNames[i % buttonNames.Length] : "";
+
+    // Label for a CUSTOM map button: prefer a real inspector display name explicitly assigned to this
+    // slot, otherwise use the map's own (file) name prettied up. This is why songs you just mapped now
+    // show in the picker — they're no longer forced through the fixed buttonNames array.
+    private string PrettyMapLabel(string mapName, int btn)
+    {
+        if (buttonNames != null && btn >= 0 && btn < buttonNames.Length && !string.IsNullOrEmpty(buttonNames[btn]))
+            return buttonNames[btn];
+        string s = mapName.Replace('_', ' ').Replace('-', ' ').Trim();
+        return string.IsNullOrEmpty(s) ? mapName : s.ToUpper();
+    }
 
     private readonly string[] _shopCardPool = { "Jab", "Cross", "Hook", "Block", "Left", "Right" };
     private List<string> _p1ShopSelection = new List<string>();
@@ -457,7 +470,6 @@ public class RhythmRoundManager : NetworkBehaviour
         switch (type)
         {
             case RoundType.SlowRhythm: StartSlowRound(); break;
-            case RoundType.FastCombo: StartFastRound(); break;
             case RoundType.CustomTrack:
                 if (!string.IsNullOrEmpty(customMapName))
                     // Pass the bundled clip when we have one (builds); falls back to the saved
@@ -515,54 +527,7 @@ public class RhythmRoundManager : NetworkBehaviour
         SetupRound();
     }
 
-    [Server]
-    public void StartFastRound()
-    {
-        if (isRoundActive) return;
-        currentType = RoundType.FastCombo;
-        _upcomingImpacts.Clear();
-        _clusterSizes.Clear();
-
-        // 1. The Intro (Impacts at 8.0, 8.6, 9.2, 9.8) - Wraps up right before 10s
-        AddComboWindow(0f, 8f, 4, 0.6f);
-
-        // 2. The 13s Half-Beat Burst (Impacts at 13.0, 13.3, 13.6, 13.9)
-        // 4 hits using 0.3f gap for that fast double-time feel
-        AddComboWindow(10f, 3f, 4, 0.3f);
-
-        // 3. Engagement Filler (15s to 38s)
-        // Single strikes spaced 4 seconds apart to keep the player active
-        AddComboWindow(14f, 4f, 1, 0.6f); // Hits at 18.0s
-        AddComboWindow(18f, 4f, 1, 0.6f); // Hits at 22.0s
-        AddComboWindow(22f, 4f, 1, 0.6f); // Hits at 26.0s
-        AddComboWindow(26f, 4f, 1, 0.6f); // Hits at 30.0s
-        AddComboWindow(30f, 4f, 1, 0.6f); // Hits at 34.0s
-
-        // 4. The 38.4s BIG DROP
-        // Starts exactly at 38.4s and runs 4 heavy hits
-        AddComboWindow(34f, 4.4f, 4, 0.6f);
-
-        // 5. Final Burst before the 52s Loop
-        // Fast half-beats ending right at 48.9s
-        AddComboWindow(41f, 7f, 4, 0.3f);
-
-        currentComboCount = 4; // Ensures the buffer is open
-        customIsCombo = true;
-
-        SetupRound();
-    }
-
-    // Added 'beatGap' parameter to control how fast the chain executes
-    private void AddComboWindow(float startTime, float inputWindow, int hits, float beatGap = 0.6f)
-    {
-        for (int j = 0; j < hits; j++)
-        {
-            // Hits fire sequentially based on the specific beat gap
-            float t = startTime + inputWindow + (j * beatGap);
-            _upcomingImpacts.Add(t);
-        }
-        for (int j = 0; j < hits; j++) _clusterSizes.Add(hits);
-    }
+    // Fast round fully removed — StartFastRound() and its AddComboWindow() helper deleted.
 
     [Server]
     public void StartCustomRound()
@@ -588,6 +553,22 @@ public class RhythmRoundManager : NetworkBehaviour
     private void SetupRound()
     {
         EnsureBotExists();
+
+        // Anchor BOTH fighters to their spawn at the start of EVERY round (including round 1, which
+        // ResetPlayersForNextRound never touches) — so they're pinned from the first beat, not drifting
+        // until the first round ends. Humans go to their spawn; the bot to BotHome.
+        int anchorIdx = 0;
+        foreach (var player in GameManager.players)
+        {
+            if (player == null) continue;
+            var ctrl = player.GetComponent<PlayerController>();
+            if (ctrl == null) continue;
+            bool isBotPlayer = player.GetComponent<BotController>() != null;
+            Vector3 home = isBotPlayer ? BotHome : ((anchorIdx == 0) ? _spawnP1 : _spawnP2);
+            player.transform.position = home;
+            ctrl.SetHome(home);
+            if (!isBotPlayer) anchorIdx++;
+        }
 
         // Sync equipped cards from PlayerInventory to PlayerCombat for all players
         foreach (var player in GameManager.players)
@@ -730,34 +711,34 @@ public class RhythmRoundManager : NetworkBehaviour
         int roundWinner = 0; // 0=draw, 1=p1, 2=p2
         string winReason = "";
 
-        if (p1.CurrentPercentage < p2.CurrentPercentage)
+        // WIN = most POINTS when the timer ends (the score system replaced health %).
+        if (p1.Score > p2.Score)
         {
             roundWinner = 1;
-            winReason = "Lower %";
+            winReason = "Higher Score";
         }
-        else if (p2.CurrentPercentage < p1.CurrentPercentage)
+        else if (p2.Score > p1.Score)
         {
             roundWinner = 2;
-            winReason = "Lower %";
+            winReason = "Higher Score";
         }
         else
         {
-            if (_p1RoundDamageDealt > _p2RoundDamageDealt)
-            {
-                roundWinner = 1;
-                winReason = "More Damage";
-            }
-            else if (_p2RoundDamageDealt > _p1RoundDamageDealt)
-            {
-                roundWinner = 2;
-                winReason = "More Damage";
-            }
-            else
-            {
-                roundWinner = 0;
-                winReason = "Draw";
-            }
+            // Exact tie on score → fall back to who dealt more damage, then draw.
+            if (_p1RoundDamageDealt > _p2RoundDamageDealt)      { roundWinner = 1; winReason = "More Damage"; }
+            else if (_p2RoundDamageDealt > _p1RoundDamageDealt) { roundWinner = 2; winReason = "More Damage"; }
+            else                                                { roundWinner = 0; winReason = "Draw"; }
         }
+
+        // The LOSER plays the knockout animation as the round's final beat (winner stays standing).
+        if (roundWinner == 1)      p2.PlayKnockoutNow();
+        else if (roundWinner == 2) p1.PlayKnockoutNow();
+
+        // Bank this round's points into each fighter's match total (Score zeroes next round; MatchScore
+        // accumulates for the leaderboard). Done here so the FINAL round counts even though match end
+        // skips ResetPlayersForNextRound.
+        p1.MatchScore += p1.Score;
+        p2.MatchScore += p2.Score;
 
         int p1Credits = 0;
         int p2Credits = 0;
@@ -827,7 +808,10 @@ public class RhythmRoundManager : NetworkBehaviour
             isMatchOver = true;
 
             RpcShowMatchResult(matchWinner, p1RoundWins, p2RoundWins, p1TotalCredits, p2TotalCredits);
-            yield return new WaitForSeconds(5f);
+            // Hold on the WIN/LOSE + leaderboard panels long enough to read the board, then reload the
+            // scene — which fully resets the match (inventory/round wins/scores are all respawned) and
+            // starts fresh from round 1, win or lose.
+            yield return new WaitForSeconds(8f);
             NetworkManager.singleton.ServerChangeScene(SceneManager.GetActiveScene().name);
             yield break;
         }
@@ -912,6 +896,19 @@ public class RhythmRoundManager : NetworkBehaviour
     private void RpcShowMatchResult(int winner, int p1Wins, int p2Wins, int p1Credits, int p2Credits)
     {
         Debug.Log($"<color=green>[MATCH END]</color> Winner: {winner} | Score {p1Wins}-{p2Wins} | P1 Credits: {p1Credits} | P2 Credits: {p2Credits}");
+
+        // Show the world-space WIN/LOSE + leaderboard panels for the LOCAL human, and record their run.
+        var lp = GameManager.localPlayer;
+        if (lp == null) return;
+        var pc = lp.GetComponent<PlayerCombat>();
+        if (pc == null) return;
+
+        int myIndex = GetPlayerIndex(pc); // 0-based; winner is 1-based (1=p1, 2=p2)
+        bool iWon   = (myIndex >= 0 && winner == myIndex + 1);
+        bool draw   = (winner == 3);
+        string myName = string.IsNullOrEmpty(lp.PlayerName) ? "PLAYER" : lp.PlayerName;
+
+        MatchResultHud.Show(iWon, draw, myName, pc.MatchScore);
     }
 
     [ClientRpc] private void RpcClearLogs() { combatLogs.Clear(); }
@@ -925,25 +922,24 @@ public class RhythmRoundManager : NetworkBehaviour
         {
             _roundPickerTimer -= Time.deltaTime;
 
-            // VR: press B (right controller) to pick the first rhythm option immediately.
+            // VR: press B (right controller) to pick the first available custom map immediately.
             // Solo host reads its own controller here. Edge-triggered so one press = one select.
             bool bNow = VRCameraDriver.VRActive && ReadRightB();
-            if (bNow && !_prevPickerB && !_usedRoundTypes.Contains(RoundType.SlowRhythm))
-                SelectRoundType(RoundType.SlowRhythm);
+            if (bNow && !_prevPickerB)
+            {
+                string mapB = FirstUnusedCustomMap();
+                if (!string.IsNullOrEmpty(mapB)) SelectRoundType(RoundType.CustomTrack, mapB);
+            }
             _prevPickerB = bNow;
 
             if (_roundPickerTimer <= 0f)
             {
-                // Auto-pick on timeout. (The Fast round was removed.) Prefer the Slow rhythm round;
-                // if it's already been used this match, fall back to the first unused custom track.
-                if (!_usedRoundTypes.Contains(RoundType.SlowRhythm))
-                    SelectRoundType(RoundType.SlowRhythm);
-                else
-                {
-                    string map = FirstUnusedCustomMap();
-                    if (!string.IsNullOrEmpty(map)) SelectRoundType(RoundType.CustomTrack, map);
-                    else SelectRoundType(RoundType.SlowRhythm); // nothing else left — replay Slow
-                }
+                // Auto-pick on timeout: the first unused custom track (Slow round was removed from the
+                // list). Only if there are literally no custom maps at all do we fall back to Slow so
+                // the game never hard-stalls with nothing to play.
+                string map = FirstUnusedCustomMap();
+                if (!string.IsNullOrEmpty(map)) SelectRoundType(RoundType.CustomTrack, map);
+                else SelectRoundType(RoundType.SlowRhythm);
             }
         }
 
@@ -956,13 +952,32 @@ public class RhythmRoundManager : NetworkBehaviour
             bool shouldEndRound = false;
             float currentTime = GetCurrentTrackTime();
 
+            // 1) No beats left to fire — the map is done.
             if (_upcomingImpacts.Count == 0) shouldEndRound = true;
 
-            // Hard 60-second cap on WALL-CLOCK time (not audio time). The audio clock
-            // (audioSource.time) plateaus when a custom clip ends, so beats scheduled past
-            // the clip's length would otherwise never fire and the round would hang forever.
+            // 2) For a custom song: end as soon as the AUDIO has FINISHED. When a clip stops, Unity
+            //    resets audioSource.time to 0, so beats scheduled near the end would never be reached
+            //    and the round would hang (this is the bug where rounds 2+ never ended on their own).
+            //    We give a 1s grace after _startTime so the very first frames (clip just starting,
+            //    isPlaying not yet true) don't false-trigger. Slow/grid rounds skip this — they have
+            //    no clip and use the wall-clock cap below.
+            if (currentType == RoundType.CustomTrack)
+            {
+                var src = BeatAnalyzer.Instance != null ? BeatAnalyzer.Instance.audioSource : null;
+                bool pastStart = (NetworkTime.time - _startTime) > 1.0;
+                if (src != null && pastStart && !src.isPlaying)
+                    shouldEndRound = true;
+            }
+
+            // 3) Hard WALL-CLOCK cap as a final safety net (never hang regardless of audio state).
+            //    Use the clip's real length + buffer for custom songs; a flat 60s for grid rounds.
             double wallElapsed = NetworkTime.time - _startTime;
-            if (wallElapsed >= 60.0) shouldEndRound = true;
+            double wallCap = 60.0;
+            if (currentType == RoundType.CustomTrack && BeatAnalyzer.Instance != null
+                && BeatAnalyzer.Instance.audioSource != null
+                && BeatAnalyzer.Instance.audioSource.clip != null)
+                wallCap = BeatAnalyzer.Instance.audioSource.clip.length + 3.0;
+            if (wallElapsed >= wallCap) shouldEndRound = true;
 
             if (shouldEndRound && !_isEndingRound)
             {
@@ -1047,10 +1062,9 @@ public class RhythmRoundManager : NetworkBehaviour
     private string GetMapTapData(string mapName)
     {
         if (string.IsNullOrEmpty(mapName)) return "";
-        string key = "CustomMap_" + mapName;
-        if (PlayerPrefs.HasKey(key)) return PlayerPrefs.GetString(key);     // live editor mapping
-        var baked = Resources.Load<TextAsset>("BeatMaps/" + mapName);       // shipped in builds
-        return baked != null ? baked.text : "";
+        // BeatMapStore checks, in order: persistentDataPath file → Resources baked → PlayerPrefs.
+        // This is why maps now survive quitting and appear in builds (file on disk beats stale prefs).
+        return BeatMapStore.Load(mapName);
     }
 
     private bool MapExists(string mapName) => !string.IsNullOrEmpty(GetMapTapData(mapName));
@@ -1065,11 +1079,12 @@ public class RhythmRoundManager : NetworkBehaviour
     {
         var names = new List<string>();
 
-        // 1) Baked beatmaps shipped in Resources — present in every build identically.
-        foreach (var ta in Resources.LoadAll<TextAsset>("BeatMaps"))
-            if (ta != null && !string.IsNullOrEmpty(ta.name) && !names.Contains(ta.name)) names.Add(ta.name);
+        // 1) Durable maps on disk — baked Resources (.txt that ship with builds) PLUS any authored
+        //    inside a standalone build (persistentDataPath). Survives quit; appears in builds.
+        foreach (var n in BeatMapStore.AllNames())
+            if (!string.IsNullOrEmpty(n) && !names.Contains(n)) names.Add(n);
 
-        // 2) Live editor registry (PlayerPrefs).
+        // 2) Live editor registry (PlayerPrefs) — covers a map just saved this session.
         string registry = PlayerPrefs.GetString("CustomMapRegistry", "");
         if (!string.IsNullOrEmpty(registry))
             foreach (string n in registry.Split('|'))
@@ -1090,7 +1105,8 @@ public class RhythmRoundManager : NetworkBehaviour
         foreach (string n in AllPlayableMapNames())
         {
             if (_usedCustomMaps.Contains(n)) continue;
-            bool hasAudio = GetClipForMap(n) != null || PlayerPrefs.HasKey("CustomMapPath_" + n);
+            bool hasAudio = GetClipForMap(n) != null || PlayerPrefs.HasKey("CustomMapPath_" + n)
+                         || !string.IsNullOrEmpty(BeatMapStore.FindSongFile(n));
             if (hasAudio) return n;
         }
         return "";
@@ -1107,8 +1123,10 @@ public class RhythmRoundManager : NetworkBehaviour
                 if (t != null && t.name == mapName) return t;
         if (_runtimeClips.TryGetValue(mapName, out var c) && c != null) return c;
 
-        // Try Resources/Music/<name> (and cache it so we only load once).
-        var fromResources = Resources.Load<AudioClip>("Music/" + mapName);
+        // Try Resources/Music/<name> (and cache it so we only load once). Also try the filename-safe
+        // form, since the mapper copies the song in as Resources/Music/<SafeName>.<ext>.
+        var fromResources = Resources.Load<AudioClip>("Music/" + mapName)
+                         ?? Resources.Load<AudioClip>("Music/" + BeatMapStore.SafeName(mapName));
         if (fromResources != null) { _runtimeClips[mapName] = fromResources; return fromResources; }
         return null;
     }
@@ -1268,6 +1286,24 @@ public class RhythmRoundManager : NetworkBehaviour
         // Track damage dealt for round economy
         if (dmgToP2 > 0) _p1RoundDamageDealt += dmgToP2;
         if (dmgToP1 > 0) _p2RoundDamageDealt += dmgToP1;
+
+        // ── SCORE the exchange outcome (the "who benefited" rewards) ──────────────────────────────
+        // ProcessDamage(attacker, defender) returns: -1 = the DEFENDER countered the attack (defender
+        // benefited), 1 = the attack LANDED (the hardness bonus is already given in TakeDamage).
+        // Here we add the SUPPLEMENTARY bonuses the raw damage chokepoint can't see:
+        //   • A clean defense that took NO damage (block/parry that fully negated) → defender scores.
+        //   • A parry/reflect/reverse that turned the hit back (a counter) → defender gets a bonus.
+        // p1Result is for p1-attacking-p2, so p1Result == -1 means P2 successfully defended, etc.
+        if (p1Result == -1) // p2 defended against p1's attack
+        {
+            p2.AddScore(PlayerCombat.SCORE_DEFENSE_SUCCESS, "successful defense");
+            if (dmgToP1 > 0) p2.AddScore(PlayerCombat.SCORE_COUNTER_BONUS, "counter reversal"); // reflected damage back
+        }
+        if (p2Result == -1) // p1 defended against p2's attack
+        {
+            p1.AddScore(PlayerCombat.SCORE_DEFENSE_SUCCESS, "successful defense");
+            if (dmgToP2 > 0) p1.AddScore(PlayerCombat.SCORE_COUNTER_BONUS, "counter reversal");
+        }
 
         int p1State = (p1Result == 1 || p1Result == -1) ? 1 : (p1DamageTaken > 0 ? -1 : 0);
         int p2State = (p2Result == 1 || p2Result == -1) ? 1 : (p2DamageTaken > 0 ? -1 : 0);
@@ -2643,6 +2679,8 @@ public class RhythmRoundManager : NetworkBehaviour
             float chainOffset = Mathf.Abs(targetBeat - pc.lastVocalSpikeTime);
             string chainRating = (chainOffset <= 0.1f) ? "EXCELLENT" : "GOOD";
             if (chainRating == "EXCELLENT") pc.roundExcellentCount++;
+            if (chainRating == "EXCELLENT") pc.AddScore(PlayerCombat.SCORE_ONBEAT_EXCELLENT, "EXCELLENT chain");
+            else pc.AddScore(PlayerCombat.SCORE_ONBEAT_GOOD, "GOOD chain");
             Debug.Log($"<color=cyan>[TIMING EVAL]</color> {pc.name} | CHAIN Beat: {targetBeat:F3}s | Spike: {pc.lastVocalSpikeTime:F3}s | Offset: {chainOffset:F3}s => <color=yellow>{chainRating}</color>");
             pc.TargetShowTimingFeedback(chainRating);
             return;
@@ -2676,6 +2714,11 @@ public class RhythmRoundManager : NetworkBehaviour
         else if (offset <= window) rating = "GOOD";
 
         if (rating == "EXCELLENT") pc.roundExcellentCount++;
+
+        // SCORE: base reward just for playing the move in rhythm. Landing/defending bonuses are added
+        // separately in the clash resolution (via AwardExchange). Big "thousands" numbers by design.
+        if (rating == "EXCELLENT") pc.AddScore(PlayerCombat.SCORE_ONBEAT_EXCELLENT, "EXCELLENT on-beat");
+        else if (rating == "GOOD") pc.AddScore(PlayerCombat.SCORE_ONBEAT_GOOD, "GOOD on-beat");
 
         Debug.Log($"<color=cyan>[TIMING EVAL]</color> {pc.name} | Beat: {targetBeat:F3}s | Voice Spike: {pc.lastVocalSpikeTime:F3}s | Offset: {offset:F3}s | Window: {window}s => <color=yellow>{rating}</color>");
         pc.TargetShowTimingFeedback(rating);
@@ -2750,29 +2793,31 @@ public class RhythmRoundManager : NetworkBehaviour
         // registry + inspector clips. Same source as the VR picker, so both builds match.
         var allMapNames = AllPlayableMapNames();
 
-        // Build the full button list (Slow, then each playable custom map).
+        // Build the button list — custom maps only (Slow round removed from the picker).
         var cards = new List<(string name, Texture2D art, Color color, System.Action onClick)>();
 
-        bool slowUsed = _usedRoundTypes.Contains(RoundType.SlowRhythm);
-        cards.Add((NameForButton(0), ArtForButton(0), slowUsed ? Color.gray : new Color(0.2f, 0.9f, 1f),
-            () => { if (!slowUsed && isServer) SelectRoundType(RoundType.SlowRhythm); }));
-
-        // Fast round removed — its button is gone. Custom-map art/name slots still start at index 2
+        // Slow + Fast rounds removed — their buttons are gone. Custom-map art/name slots still start at
+        // index 2 (btn = idx + 2) so existing Inspector artwork assignments keep lining up.
         // (btn = idx + 2) so existing Inspector artwork assignments keep lining up.
         for (int idx = 0; idx < allMapNames.Count; idx++)
         {
             string mapName = allMapNames[idx];
             AudioClip clip = GetClipForMap(mapName);
-            bool hasPath = PlayerPrefs.HasKey("CustomMapPath_" + mapName);
+            bool hasPath = PlayerPrefs.HasKey("CustomMapPath_" + mapName)
+                        || !string.IsNullOrEmpty(BeatMapStore.FindSongFile(mapName));
             bool loading = _isLoadingClip && _loadingClipName == mapName;
             bool mapUsed = _usedCustomMaps.Contains(mapName);
             int btn = idx + 2;
+
+            // Label by the REAL map name (so songs you just mapped show their own name), falling back
+            // to the inspector display name only when one is assigned for this slot.
+            string label = PrettyMapLabel(mapName, btn);
 
             bool playable = clip != null || hasPath;
             if (loading)
                 cards.Add(("LOADING...", ArtForButton(btn), Color.yellow, () => { }));
             else if (playable)
-                cards.Add((NameForButton(btn), ArtForButton(btn), mapUsed ? Color.gray : new Color(0.3f, 1f, 0.5f),
+                cards.Add((label, ArtForButton(btn), mapUsed ? Color.gray : new Color(0.3f, 1f, 0.5f),
                     () => { if (!mapUsed && isServer) SelectRoundType(RoundType.CustomTrack, mapName); }));
             // No audio in the project for this beatmap → don't list it at all (a silent round can't be
             // played, so showing it just confuses the picker).
@@ -2889,7 +2934,12 @@ public class RhythmRoundManager : NetworkBehaviour
             }
             else
             {
-                StartCoroutine(LoadClipThenStartRound(mapName, PlayerPrefs.GetString("CustomMapPath_" + mapName)));
+                // Prefer the PlayerPrefs path; fall back to the durable in-game song copy by name so a
+                // mapped song still plays even if PlayerPrefs was cleared (the file alone is enough).
+                string path = PlayerPrefs.GetString("CustomMapPath_" + mapName, "");
+                if (string.IsNullOrEmpty(path) || !System.IO.File.Exists(path))
+                    path = BeatMapStore.FindSongFile(mapName);
+                StartCoroutine(LoadClipThenStartRound(mapName, path));
             }
         }
     }
@@ -2984,7 +3034,7 @@ public class RhythmRoundManager : NetworkBehaviour
                 style.normal.textColor = Color.yellow;
                 GUI.Label(new Rect(Screen.width / 2 - 125, 50, 250, 70), "READY?", style);
             }
-            else if (currentType == RoundType.CustomTrack || currentType == RoundType.FastCombo)
+            else if (currentType == RoundType.CustomTrack)
             {
                 if (_upcomingImpacts.Count > 0)
                 {
@@ -3320,6 +3370,7 @@ public class RhythmRoundManager : NetworkBehaviour
         NetworkServer.Spawn(_activeBot);
         var botPc = _activeBot.GetComponent<PlayerController>();
         botPc.SetReady(true);
+        botPc.SetHome(BotHome); // anchor from the moment it spawns, so round 1 is pinned too
         // Force at least 6m so the bot never crowds the player (overrides any stale Inspector value).
         botPc.DesiredDistance = Mathf.Max(botStandDistance, 6f);
         _activeBotPrefab = desired;
@@ -3337,22 +3388,13 @@ public class RhythmRoundManager : NetworkBehaviour
     // One round-picker option, shared by the flat IMGUI picker and the VR world-space panel.
     public struct RoundOption { public string label; public Texture2D artwork; public Color color; public bool used; public System.Action select; }
 
-    // Build the current round choices (Slow, then each playable custom map) for the VR menu.
+    // Build the current round choices (custom maps only — Slow round removed) for the VR menu.
     public List<RoundOption> GetRoundOptionsForVR()
     {
         var list = new List<RoundOption>();
 
-        bool slowUsed = _usedRoundTypes.Contains(RoundType.SlowRhythm);
-        list.Add(new RoundOption
-        {
-            label = NameForButton(0),
-            artwork = ArtForButton(0),
-            color = slowUsed ? Color.gray : new Color(0.2f, 0.9f, 1f),
-            used = slowUsed,
-            select = () => { if (!slowUsed && isServer) SelectRoundType(RoundType.SlowRhythm); }
-        });
-
-        // Fast round removed — no Fast option. Custom maps still use art/name index btn = i + 2.
+        // Slow + Fast rounds removed — no built-in options. Custom maps still use art/name index
+        // btn = i + 2 so existing Inspector artwork assignments keep lining up.
         // Use the shared list so every baked Resources beatmap shows in the VR build (was only
         // reading registry + availableTracks, which are empty in a fresh build → too few buttons).
         var allMapNames = AllPlayableMapNames();
@@ -3363,13 +3405,14 @@ public class RhythmRoundManager : NetworkBehaviour
             int btn = i + 2;
             // No audio in the project for this beatmap → skip it entirely (a silent round can't play,
             // so don't even list it).
-            bool hasAudio = GetClipForMap(mapName) != null || PlayerPrefs.HasKey("CustomMapPath_" + mapName);
+            bool hasAudio = GetClipForMap(mapName) != null || PlayerPrefs.HasKey("CustomMapPath_" + mapName)
+                         || !string.IsNullOrEmpty(BeatMapStore.FindSongFile(mapName));
             if (!hasAudio) continue;
 
             bool mapUsed = _usedCustomMaps.Contains(mapName);
             list.Add(new RoundOption
             {
-                label = NameForButton(btn),
+                label = PrettyMapLabel(mapName, btn),
                 artwork = ArtForButton(btn),
                 color = mapUsed ? Color.gray : new Color(0.3f, 1f, 0.5f),
                 used = mapUsed,

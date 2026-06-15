@@ -9,9 +9,10 @@ using UnityEngine;
 ///   • If they then FAIL (mistime / fire too early) TWICE IN A ROW, it comes BACK to re-teach them,
 ///     and stays until they string together good hits again.
 ///
-/// It watches the same signals the rest of the game already produces:
-///   • PlayerCombat.VRTimingText / VRTimingTime  → a graded on-beat result (EXCELLENT/GOOD = success).
-///   • PlayerCombat.VREarlyTime                  → the player jumped the gun (fired before the window).
+/// It watches one signal:
+///   • PlayerCombat.VRGradeText / VRGradeTime    → a graded on-beat result (EXCELLENT/GOOD = success,
+///     anything else = a miss). "Too early" attempts are coached by BeatTutorialText but do NOT count
+///     toward this streak (they were wrongly wiping the good-streak on the same beat as a clean land).
 ///
 /// Pure logic + static state; nothing to place in a scene. Self-bootstraps a watcher so the streak
 /// is tracked even when neither visual is currently showing.
@@ -27,11 +28,9 @@ public class BeatCoach : MonoBehaviour
     }
 
     // How many clean on-beat hits in a row before we trust the player and hide coaching.
-    private const int GOOD_TO_HIDE = 3;
-    // How many failures (mistime / too-early) in a row before we bring coaching back.
+    private const int GOOD_TO_HIDE = 2;
+    // How many BAD graded hits in a row before we bring coaching back.
     private const int FAILS_TO_SHOW = 2;
-    // Ignore an "early" flag that lands right after a successful fire (debounce double-counting).
-    private const float EVENT_DEBOUNCE = 0.25f;
 
     // Visible until proven otherwise — new players see it immediately.
     private static bool _coachingVisible = true;
@@ -40,25 +39,19 @@ public class BeatCoach : MonoBehaviour
     private int   _goodStreak;
     private int   _failStreak;
     private float _lastTimingSeen = -999f;
-    private float _lastEarlySeen  = -999f;
 
     private void Update()
     {
-        // A fresh graded result arrived?
-        if (PlayerCombat.VRTimingTime > _lastTimingSeen + 0.001f)
+        // Only GRADED results drive the hide/show streak. We deliberately do NOT count "too early"
+        // attempts as failures here — an early shout often happens on the very same beat you then land
+        // cleanly, which was wrongly wiping the good-streak so coaching never hid. ("Too early" still
+        // shows its own coaching flash via BeatTutorialText; it just doesn't reset the streak.)
+        if (PlayerCombat.VRGradeTime > _lastTimingSeen + 0.001f)
         {
-            _lastTimingSeen = PlayerCombat.VRTimingTime;
-            string r = PlayerCombat.VRTimingText;
+            _lastTimingSeen = PlayerCombat.VRGradeTime;
+            string r = PlayerCombat.VRGradeText;
             if (r == "EXCELLENT" || r == "GOOD") RegisterSuccess();
-            else                                  RegisterFailure(); // bad timing grade
-        }
-
-        // A fresh "too early" attempt arrived (and not just an echo of a hit we already scored)?
-        if (PlayerCombat.VREarlyTime > _lastEarlySeen + 0.001f)
-        {
-            _lastEarlySeen = PlayerCombat.VREarlyTime;
-            if (Time.time - PlayerCombat.VRTimingTime > EVENT_DEBOUNCE)
-                RegisterFailure();
+            else                                  RegisterFailure(); // a graded BAD
         }
     }
 

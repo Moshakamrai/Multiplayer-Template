@@ -22,7 +22,7 @@ public class FloorBeatColorizer : MonoBehaviour
     public Renderer[] floorTiles;
 
     [Header("Base Colors (HDR)")]
-    [ColorUsage(false, true)] public Color idleColor = new Color(0.10f, 0.25f, 1.00f); // dim blue at rest
+    [ColorUsage(false, true)] public Color idleColor = new Color(0f, 0f, 0f); // BLACK at rest (no glow)
     [ColorUsage(false, true)] public Color hitColor  = new Color(0.15f, 1.00f, 0.25f); // green "SHOUT" flash
     [ColorUsage(false, true)] public Color hitPeak   = new Color(1.00f, 1.00f, 1.00f); // white-hot peak
 
@@ -41,7 +41,7 @@ public class FloorBeatColorizer : MonoBehaviour
     };
 
     [Header("Brightness")]
-    public float idleIntensity   = 0.5f;
+    public float idleIntensity   = 0f;
     public float bandIntensity   = 5.0f;
     [Tooltip("Glow of the tiles the wave has already passed (they stay lit until the beat).")]
     public float filledIntensity = 3.5f;

@@ -31,11 +31,17 @@ public class RhythmTestManager : MonoBehaviour
     private BeatAnalysisEngine _engine;
     private Texture2D          _px;
 
+    // Virtual screen dims — real screen on desktop, fixed 1920x1080 on Android
+    // (scaled via MobileGUI) so buttons stay tappable on phones. Set in OnGUI.
+    private float              _vw, _vh;
+    private Matrix4x4          _guiPrev;
+
     // File
     private string _filePath    = "";
     private string _fileStatus  = "";
     private bool   _fileError   = false;
     private string _pendingFile = null;
+    private NativeFileDialog.Pick _filePick = null; // in-flight Browse dialog (standalone)
 
     // Analysis
     private float   _progress = 0f;
@@ -82,6 +88,14 @@ public class RhythmTestManager : MonoBehaviour
     {
         if (_gradeT > 0f) _gradeT -= Time.deltaTime;
 
+        // A Browse dialog finished (standalone build, worker thread) — pull its result on the main thread.
+        if (_filePick != null && _filePick.Done)
+        {
+            if (!string.IsNullOrEmpty(_filePick.Error)) { _fileStatus = _filePick.Error; _fileError = true; }
+            else if (!string.IsNullOrEmpty(_filePick.Path)) { _pendingFile = _filePick.Path; }
+            _filePick = null;
+        }
+
         if (_pendingFile != null) { _filePath = _pendingFile; _pendingFile = null; StartCoroutine(LoadAudio(_filePath)); }
 
         if (_stage != Stage.Playing) return;
@@ -91,7 +105,9 @@ public class RhythmTestManager : MonoBehaviour
         _audio.GetSpectrumData(_spec, 0, FFTWindow.BlackmanHarris);
         _tlScroll = Mathf.Max(0f, _audio.time - _tlWin * 0.25f);
 
+#if ENABLE_LEGACY_INPUT_MANAGER
         if (Input.GetKeyDown(KeyCode.Space)) TestVoiceInput();
+#endif
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -100,31 +116,36 @@ public class RhythmTestManager : MonoBehaviour
         if (RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isShopPhase) return;
         if (_px == null) { _px = new Texture2D(1,1); _px.SetPixel(0,0,Color.white); _px.Apply(); }
 
+        // Scale the whole UI for phones (no-op on desktop).
+        _guiPrev = MobileGUI.Begin(out _vw, out _vh);
+
         // Background
-        Fill(0, 0, Screen.width, Screen.height, new Color(0.07f, 0.07f, 0.1f));
+        Fill(0, 0, _vw, _vh, new Color(0.07f, 0.07f, 0.1f));
 
         DrawHeader();
 
         float panelY = 52f;
-        float panelH = Screen.height - panelY - 90f;
+        float panelH = _vh - panelY - 90f;
 
         DrawLoadPanel(16f, panelY, 280f, panelH);
-        DrawTimeline(308f, panelY, Screen.width - 616f, panelH);
-        DrawStatsPanel(Screen.width - 300f, panelY, 284f, panelH);
+        DrawTimeline(308f, panelY, _vw - 616f, panelH);
+        DrawStatsPanel(_vw - 300f, panelY, 284f, panelH);
 
         DrawFooter();
         DrawGrade();
+
+        MobileGUI.End(_guiPrev);
     }
 
     // ── Header ────────────────────────────────────────────────────────────
     void DrawHeader()
     {
-        Fill(0, 0, Screen.width, 50, new Color(0.04f, 0.04f, 0.09f));
+        Fill(0, 0, _vw, 50, new Color(0.04f, 0.04f, 0.09f));
         string songInfo = _map != null
             ? $"   {_map.songName}   |   {_map.bpm:F1} BPM   |   {_map.TotalBeatCount} triggers   |   {_map.TotalChainCount} voice windows"
             : "   No song loaded";
         Lbl(10, 6,  300, 22, "RHYTHM MAPPER", 16, FontStyle.Bold, new Color(0f,1f,0.55f));
-        Lbl(10, 28, Screen.width - 20, 20, songInfo, 11, FontStyle.Normal, new Color(0.65f,0.65f,0.65f));
+        Lbl(10, 28, _vw - 20, 20, songInfo, 11, FontStyle.Normal, new Color(0.65f,0.65f,0.65f));
     }
 
     // ── Left: load panel ──────────────────────────────────────────────────
@@ -367,13 +388,13 @@ public class RhythmTestManager : MonoBehaviour
     // ── Footer: spectrum + back ───────────────────────────────────────────
     void DrawFooter()
     {
-        float fy = Screen.height - 88f;
-        Fill(0, fy, Screen.width, 88, new Color(0.03f,0.03f,0.07f));
+        float fy = _vh - 88f;
+        Fill(0, fy, _vw, 88, new Color(0.03f,0.03f,0.07f));
 
         // Spectrum bars
         const int BARS = 52;
-        float sw = Screen.width * 0.48f, sh = 52f;
-        float sx = Screen.width/2f - sw/2f, sy = fy + 8f;
+        float sw = _vw * 0.48f, sh = 52f;
+        float sx = _vw/2f - sw/2f, sy = fy + 8f;
         float bw = sw / BARS - 1f;
 
         bool winOpen = _stage == Stage.Playing && _map != null && _map.ActiveChainAt(_audio.time) != null;
@@ -391,10 +412,10 @@ public class RhythmTestManager : MonoBehaviour
         Lbl(sx, sy+sh+2, sw, 14, specLabel,
             10, FontStyle.Bold, winOpen ? Color.green : new Color(0.3f,0.5f,0.3f), TextAnchor.MiddleCenter);
 
-        if (GUI.Button(new Rect(14, Screen.height - 44f, 150, 36), "← BACK TO MENU"))
+        if (GUI.Button(new Rect(14, _vh - 44f, 150, 36), "← BACK TO MENU"))
         { _audio.Stop(); SceneManager.LoadScene("Menu"); }
 
-        Lbl(Screen.width/2f-180, Screen.height-42f, 360, 18,
+        Lbl(_vw/2f-180, _vh-42f, 360, 18,
             "SPACE = simulate voice input (preview only)", 10, FontStyle.Italic,
             new Color(0.4f,0.4f,0.45f), TextAnchor.MiddleCenter);
     }
@@ -405,7 +426,7 @@ public class RhythmTestManager : MonoBehaviour
         if (_gradeT <= 0f) return;
         float a = _gradeT / 0.65f;
         GUI.color = new Color(_gradeC.r, _gradeC.g, _gradeC.b, a);
-        GUI.Label(new Rect(Screen.width/2f-160, Screen.height/2f-55, 320, 110),
+        GUI.Label(new Rect(_vw/2f-160, _vh/2f-55, 320, 110),
             _grade, Sty(56, FontStyle.Bold, _gradeC, TextAnchor.MiddleCenter));
         GUI.color = Color.white;
     }
@@ -428,15 +449,9 @@ public class RhythmTestManager : MonoBehaviour
         string clipName = _map.songName;
         string data     = string.Join("|", times.ConvertAll(t => t.ToString(CultureInfo.InvariantCulture)));
 
-        PlayerPrefs.SetString("CustomMap_" + clipName, data);
-        if (!string.IsNullOrEmpty(_filePath))
-            PlayerPrefs.SetString("CustomMapPath_" + clipName, _filePath);
-
-        string reg  = PlayerPrefs.GetString("CustomMapRegistry", "");
-        var    keys = new HashSet<string>(reg.Split(new[]{'|'}, System.StringSplitOptions.RemoveEmptyEntries));
-        keys.Add(clipName);
-        PlayerPrefs.SetString("CustomMapRegistry", string.Join("|", keys));
-        PlayerPrefs.Save();
+        // Durable save: writes a real .txt (Resources in editor, persistentDataPath in builds) so the
+        // map survives quitting Unity AND ships in builds — not just a fragile PlayerPrefs entry.
+        BeatMapStore.Save(clipName, data, string.IsNullOrEmpty(_filePath) ? null : _filePath);
 
         _saveMsg = $"Saved {times.Count} triggers for \"{clipName}\"";
         _saveErr = false;
@@ -501,27 +516,21 @@ public class RhythmTestManager : MonoBehaviour
         _engine.Analyze(clip);
     }
 
+    // Uses the shared NativeFileDialog: native panel in the Editor, a properly-shown PowerShell dialog
+    // in a standalone Windows build. The old inline version ran PowerShell with -NonInteractive +
+    // CreateNoWindow, so the dialog never appeared and Browse "did nothing".
     void OpenFileDlg()
     {
-#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
-        new System.Threading.Thread(() =>
+        var pick = NativeFileDialog.OpenAudio(out string editorImmediate);
+
+        if (pick == null)
         {
-            const string ps = @"Add-Type -AssemblyName System.Windows.Forms
-$d=New-Object System.Windows.Forms.OpenFileDialog
-$d.Filter='Audio|*.mp3;*.wav;*.ogg;*.aiff;*.aif|All|*.*'
-if($d.ShowDialog()-eq'OK'){Write-Output $d.FileName}";
-            var psi = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = "powershell", Arguments = $"-NoProfile -NonInteractive -Command \"{ps.Replace("\"","\\\"")}\"",
-                UseShellExecute = false, RedirectStandardOutput = true, CreateNoWindow = true
-            };
-            using var p = System.Diagnostics.Process.Start(psi);
-            string r = p.StandardOutput.ReadToEnd().Trim(); p.WaitForExit();
-            if (!string.IsNullOrEmpty(r)) _pendingFile = r;
-        }).Start();
-#else
-        _fileStatus = "Browse not supported — paste path manually"; _fileError = true;
-#endif
+            if (!string.IsNullOrEmpty(editorImmediate)) _pendingFile = editorImmediate;
+            return;
+        }
+
+        _filePick = pick;
+        _fileStatus = "Opening file browser…"; _fileError = false;
     }
 
     // ── GUI helpers ───────────────────────────────────────────────────────

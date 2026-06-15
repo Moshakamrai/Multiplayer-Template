@@ -230,5 +230,11 @@ public class CardDatabase : MonoBehaviour
         return c != null ? c.family : CardFamily.Support;
     }
 
+    public static TraitCardData GetTraitCard(string traitId)
+    {
+        foreach (var t in TraitCards) if (t.traitId == traitId) return t;
+        return null;
+    }
+
     void Awake() { if (Instance == null) Instance = this; }
 }

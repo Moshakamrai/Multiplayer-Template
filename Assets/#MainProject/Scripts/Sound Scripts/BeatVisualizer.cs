@@ -20,8 +20,12 @@ public class BeatVisualizer : MonoBehaviour
     [Range(16, 64)] public int barCount = 32;
     [Range(30f, 400f)] public float maxBarLength = 140f;
     [Range(5f, 30f)]  public float barAmplitudeScale = 18f;
-    public Color barColorBase = new Color(0.85f, 0.05f, 0.03f, 0.90f);
-    public Color barColorPeak = new Color(1.00f, 0.72f, 0.00f, 1.00f);
+    [Tooltip("Spectrum bars gradient from low (left) to high (right) frequency. Lerp by bar index.")]
+    public Gradient barSpectrumGradient = GetDefaultSpectrumGradient();
+    [Tooltip("How hard the bars glow at peak. Higher = more bloom.")]
+    [Range(0.5f, 2.0f)] public float barGlowIntensity = 1.2f;
+    [Tooltip("Thickness of the black border around each bar (pixels).")]
+    [Range(0f, 4f)] public float barBorderThickness = 1f;
 
     [Header("Beat Detection (ambient pulse)")]
     [Range(0.005f, 0.3f)] public float beatThreshold = 0.05f;
@@ -62,6 +66,27 @@ public class BeatVisualizer : MonoBehaviour
     private Texture2D _px;
 
     // ─────────────────────────────────────────────────────────────────────
+
+    /// Default spectrum gradient: cyan (low freq) → blue → magenta → yellow → orange → red (high freq).
+    static Gradient GetDefaultSpectrumGradient()
+    {
+        var g = new Gradient();
+        g.SetKeys(
+            new GradientColorKey[]
+            {
+                new GradientColorKey(new Color(0f, 1f, 1f), 0.00f),      // cyan
+                new GradientColorKey(new Color(0f, 0.5f, 1f), 0.20f),    // blue
+                new GradientColorKey(new Color(1f, 0f, 1f), 0.40f),      // magenta
+                new GradientColorKey(new Color(1f, 1f, 0f), 0.60f),      // yellow
+                new GradientColorKey(new Color(1f, 0.5f, 0f), 0.80f),    // orange
+                new GradientColorKey(new Color(1f, 0f, 0f), 1.00f)       // red
+            },
+            new GradientAlphaKey[] { new GradientAlphaKey(1f, 0f), new GradientAlphaKey(1f, 1f) }
+        );
+        return g;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
     void Awake()
     {
         _spectrum       = new float[512];
@@ -76,7 +101,9 @@ public class BeatVisualizer : MonoBehaviour
     {
         if (targetAudio == null || !targetAudio.isPlaying) return;
 
-        targetAudio.GetSpectrumData(_spectrum, 0, FFTWindow.BlackmanHarris);
+        // Shared FFT: one GetSpectrumData per frame across all visualizers (see SharedSpectrum).
+        _spectrum = SharedSpectrum.Get(targetAudio);
+        if (_spectrum == null) return;
 
         UpdateBars();
         DetectAmbientBeat();
@@ -192,15 +219,40 @@ public class BeatVisualizer : MonoBehaviour
             float y   = i * slot;
             float h   = Mathf.Max(1f, slot - 1f);
 
-            // During spike: bars shift toward spike color (gold/white)
-            Color col = spiking
-                ? Color.Lerp(Color.Lerp(barColorBase, barColorPeak, boosted),
-                             spikeFlashColor, _spikeAlpha * 0.5f)
-                : Color.Lerp(barColorBase, barColorPeak, boosted);
+            // Spectrum gradient: low freq (cyan) → high freq (red). Lerp by bar index.
+            Color specCol = barSpectrumGradient.Evaluate((float)i / barCount);
 
+            // Brighten at peak, add spike color on attack.
+            Color col = Color.Lerp(specCol * 0.6f, specCol, boosted);
+            if (spiking)
+                col = Color.Lerp(col, spikeFlashColor, _spikeAlpha * 0.4f);
+            col *= barGlowIntensity;
+
+            // Draw left bar
             GUI.color = col;
-            GUI.DrawTexture(new Rect(0,        y, len, h), _px);
+            GUI.DrawTexture(new Rect(0, y, len, h), _px);
+            // Black border
+            if (barBorderThickness > 0f)
+            {
+                GUI.color = Color.black;
+                GUI.DrawTexture(new Rect(0,                  y,                 len,                 barBorderThickness), _px); // top
+                GUI.DrawTexture(new Rect(0,                  y + h - barBorderThickness, len,                 barBorderThickness), _px); // bottom
+                GUI.DrawTexture(new Rect(0,                  y,                 barBorderThickness, h), _px); // left
+                GUI.DrawTexture(new Rect(len - barBorderThickness, y,                 barBorderThickness, h), _px); // right
+            }
+
+            // Draw right bar
+            GUI.color = col;
             GUI.DrawTexture(new Rect(sw - len, y, len, h), _px);
+            // Black border
+            if (barBorderThickness > 0f)
+            {
+                GUI.color = Color.black;
+                GUI.DrawTexture(new Rect(sw - len,          y,                 len,                 barBorderThickness), _px); // top
+                GUI.DrawTexture(new Rect(sw - len,          y + h - barBorderThickness, len,                 barBorderThickness), _px); // bottom
+                GUI.DrawTexture(new Rect(sw - len,          y,                 barBorderThickness, h), _px); // left
+                GUI.DrawTexture(new Rect(sw - barBorderThickness, y,                 barBorderThickness, h), _px); // right
+            }
         }
 
         // ── Edge glow ─────────────────────────────────────────────────

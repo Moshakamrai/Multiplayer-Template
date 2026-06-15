@@ -25,6 +25,11 @@ public class SmartBeatMapper : MonoBehaviour
     private List<float> _quantizedBeats = new List<float>();
     private bool        _isRecording    = false;
 
+    // Virtual screen dims — real screen on desktop, fixed 1920x1080 on Android
+    // (scaled via MobileGUI) so buttons stay tappable on phones. Set in OnGUI.
+    private float       _vw, _vh;
+    private Matrix4x4   _guiPrev;
+
     // ── Visualizer ────────────────────────────────────────────────────────
     private float       _tapFlashTimer  = 0f;
     private const float FLASH_DURATION  = 0.15f;
@@ -36,6 +41,7 @@ public class SmartBeatMapper : MonoBehaviour
     private string _loadStatus        = "";
     private bool   _loadStatusIsError = false;
     private string _pendingFilePath   = null;
+    private NativeFileDialog.Pick _filePick = null; // in-flight Browse dialog (standalone)
 
     // ── BPM ───────────────────────────────────────────────────────────────
     private string _bpmInput     = "";
@@ -83,6 +89,20 @@ public class SmartBeatMapper : MonoBehaviour
         if (_tapFlashTimer > 0f)
             _tapFlashTimer -= Time.deltaTime;
 
+        // A Browse dialog finished (standalone build, worker thread) — pull its result on the main thread.
+        if (_filePick != null && _filePick.Done)
+        {
+            if (!string.IsNullOrEmpty(_filePick.Error))
+            {
+                _loadStatus = _filePick.Error; _loadStatusIsError = true;
+            }
+            else if (!string.IsNullOrEmpty(_filePick.Path))
+            {
+                _pendingFilePath = _filePick.Path;
+            }
+            _filePick = null;
+        }
+
         if (_pendingFilePath != null)
         {
             _filePath = _pendingFilePath;
@@ -92,6 +112,7 @@ public class SmartBeatMapper : MonoBehaviour
 
         if (!_isRecording || audioSource == null || !audioSource.isPlaying) return;
 
+#if ENABLE_LEGACY_INPUT_MANAGER
         if (Input.GetKeyDown(KeyCode.Space))
         {
             float t = audioSource.time;
@@ -102,6 +123,7 @@ public class SmartBeatMapper : MonoBehaviour
 
             Debug.Log($"Raw Tap: {t:F3}s | Beat offset: {_lastTapOffset * 1000f:+0.0;-0.0}ms");
         }
+#endif
 
         audioSource.GetSpectrumData(_spectrumData, 0, FFTWindow.BlackmanHarris);
     }
@@ -197,19 +219,24 @@ public class SmartBeatMapper : MonoBehaviour
             _vizTex.Apply();
         }
 
+        // Scale the whole mapper UI for phones (no-op on desktop).
+        _guiPrev = MobileGUI.Begin(out _vw, out _vh);
+
         DrawVisualizer();
         DrawInfoPanel();
         DrawControlPanel();
         DrawHowToPanel();
         DrawLoadPanel();
         DrawBackButton();
+
+        MobileGUI.End(_guiPrev);
     }
 
     // ── Control panel (center-top) ────────────────────────────────────────
     private void DrawControlPanel()
     {
         float pw = 440f, py = 20f;
-        float px = Screen.width / 2f - pw / 2f;
+        float px = _vw / 2f - pw / 2f;
 
         GUI.Label(new Rect(px, py, pw, 36f), "BEAT MAPPER",
             Style(26, FontStyle.Bold, Color.yellow, TextAnchor.MiddleCenter));
@@ -257,7 +284,7 @@ public class SmartBeatMapper : MonoBehaviour
     private void DrawHowToPanel()
     {
         float pw = 440f;
-        float px = Screen.width / 2f - pw / 2f;
+        float px = _vw / 2f - pw / 2f;
         float py = 215f;
         float lh = 24f;
         float y  = py;
@@ -370,10 +397,10 @@ public class SmartBeatMapper : MonoBehaviour
     private void DrawVisualizer()
     {
         const int BARS = 32;
-        float vizW   = Screen.width * 0.45f;
+        float vizW   = _vw * 0.45f;
         float vizH   = 80f;
-        float startX = Screen.width / 2f - vizW / 2f;
-        float startY = Screen.height - vizH - 30f;
+        float startX = _vw / 2f - vizW / 2f;
+        float startY = _vh - vizH - 30f;
         float barW   = vizW / BARS - 2f;
 
         bool  flash  = _tapFlashTimer > 0f;
@@ -401,7 +428,7 @@ public class SmartBeatMapper : MonoBehaviour
     // ── Back button (bottom-left) ─────────────────────────────────────────
     private void DrawBackButton()
     {
-        if (GUI.Button(new Rect(20f, Screen.height - 55f, 170f, 42f), "← BACK TO MENU"))
+        if (GUI.Button(new Rect(20f, _vh - 55f, 170f, 42f), "← BACK TO MENU"))
         {
             if (_isRecording) { audioSource.Stop(); _isRecording = false; }
             SceneManager.LoadScene("Menu");
@@ -435,7 +462,7 @@ public class SmartBeatMapper : MonoBehaviour
     private void DrawLoadPanel()
     {
         float pw = 360f;
-        float px = Screen.width - pw - 20f;
+        float px = _vw - pw - 20f;
         float py = 20f;
         float lh = 24f;
         float y  = py;
@@ -691,36 +718,24 @@ public class SmartBeatMapper : MonoBehaviour
     }
 
     // ── File dialog ───────────────────────────────────────────────────────
+    // Uses the shared NativeFileDialog: native panel in the Editor, a properly-shown PowerShell
+    // dialog in a standalone Windows build. The old inline version ran PowerShell with
+    // -NonInteractive + CreateNoWindow, so the dialog never appeared and Browse "did nothing".
     private void OpenFileDialog()
     {
-#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
-        var t = new System.Threading.Thread(() =>
+        var pick = NativeFileDialog.OpenAudio(out string editorImmediate);
+
+        if (pick == null)
         {
-            const string ps = @"
-Add-Type -AssemblyName System.Windows.Forms
-$d = New-Object System.Windows.Forms.OpenFileDialog
-$d.Title  = 'Select Audio File'
-$d.Filter = 'Audio Files|*.mp3;*.wav;*.ogg;*.aiff;*.aif|All Files|*.*'
-if ($d.ShowDialog() -eq 'OK') { Write-Output $d.FileName }
-";
-            var psi = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName               = "powershell",
-                Arguments              = $"-NoProfile -NonInteractive -Command \"{ps.Replace("\"", "\\\"")}\"",
-                UseShellExecute        = false,
-                RedirectStandardOutput = true,
-                CreateNoWindow         = true
-            };
-            using var proc = System.Diagnostics.Process.Start(psi);
-            string result  = proc.StandardOutput.ReadToEnd().Trim();
-            proc.WaitForExit();
-            if (!string.IsNullOrEmpty(result)) _pendingFilePath = result;
-        });
-        t.Start();
-#else
-        _loadStatus = "Browse not supported — paste path manually.";
-        _loadStatusIsError = true;
-#endif
+            // Editor: result resolved synchronously.
+            if (!string.IsNullOrEmpty(editorImmediate))
+                _pendingFilePath = editorImmediate;
+            return;
+        }
+
+        // Standalone: poll it in Update().
+        _filePick = pick;
+        _loadStatus = "Opening file browser…"; _loadStatusIsError = false;
     }
 
     // ── Audio loader ──────────────────────────────────────────────────────
@@ -778,18 +793,13 @@ if ($d.ShowDialog() -eq 'OK') { Write-Output $d.FileName }
     private void SaveCustomTrack()
     {
         string clipName = audioSource.clip.name;
-        PlayerPrefs.SetString("CustomMap_" + clipName, string.Join("|", _quantizedBeats));
+        // Durable save: writes a real .txt (Resources in editor, persistentDataPath in builds) so the
+        // map survives quitting Unity AND ships in builds — not just a fragile PlayerPrefs entry.
+        BeatMapStore.Save(clipName, string.Join("|", _quantizedBeats),
+            string.IsNullOrEmpty(_filePath) ? null : _filePath);
 
-        if (!string.IsNullOrEmpty(_filePath))
-            PlayerPrefs.SetString("CustomMapPath_" + clipName, _filePath);
-
-        string raw   = PlayerPrefs.GetString("CustomMapRegistry", "");
-        var    names = new HashSet<string>(
-            raw.Split(new char[] { '|' }, System.StringSplitOptions.RemoveEmptyEntries));
-        names.Add(clipName);
-        PlayerPrefs.SetString("CustomMapRegistry", string.Join("|", names));
-
-        PlayerPrefs.Save();
-        Debug.Log($"<color=green>SAVED MAP:</color> CustomMap_{clipName}  ({_quantizedBeats.Count} beats)");
+        _loadStatus = $"Saved \"{clipName}\" — {_quantizedBeats.Count} beats (permanent).";
+        _loadStatusIsError = false;
+        Debug.Log($"<color=green>SAVED MAP:</color> {clipName}  ({_quantizedBeats.Count} beats)");
     }
 }

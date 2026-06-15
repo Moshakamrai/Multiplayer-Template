@@ -54,6 +54,13 @@ public class FloatingDamageTextManager : MonoBehaviour
     // Kept the same signature so existing callers (PlayerCombat) work unchanged.
     public void ShowDamage(int damage, Color color, Vector3 worldPosition)
     {
+        // VR: IMGUI doesn't render in stereo, so spawn a real 3D text popup instead.
+        if (VRCameraDriver.VRActive)
+        {
+            SpawnWorldPopup(damage, color, worldPosition);
+            return;
+        }
+
         _popups.Add(new Popup
         {
             worldPos = worldPosition,
@@ -62,6 +69,49 @@ public class FloatingDamageTextManager : MonoBehaviour
             startTime = Time.time,
             damage = damage
         });
+    }
+
+    // --- VR world-space popup: a billboarded 3D TextMesh that rises and fades, then self-destroys ---
+    private void SpawnWorldPopup(int damage, Color color, Vector3 worldPos)
+    {
+        var go = new GameObject("DmgPopup");
+        go.transform.position = worldPos + Vector3.up * 0.2f;
+
+        var tm = go.AddComponent<TextMesh>();
+        tm.text = damage.ToString();
+        tm.color = color;
+        tm.fontSize = 90;
+        tm.characterSize = 0.012f + Mathf.Clamp(damage, 0, 40) * 0.0004f; // bigger hits = bigger text
+        tm.anchor = TextAnchor.MiddleCenter;
+        tm.alignment = TextAlignment.Center;
+        tm.fontStyle = FontStyle.Bold;
+        go.GetComponent<MeshRenderer>().sortingOrder = 5000; // draw over the world
+
+        StartCoroutine(AnimateWorldPopup(go, tm, color));
+    }
+
+    private System.Collections.IEnumerator AnimateWorldPopup(GameObject go, TextMesh tm, Color color)
+    {
+        float t = 0f;
+        Vector3 start = go.transform.position;
+        while (t < DURATION && go != null)
+        {
+            t += Time.deltaTime;
+            float n = t / DURATION;
+
+            // Rise upward and fade out (slow at first).
+            go.transform.position = start + Vector3.up * (n * 0.6f);
+            float alpha = 1f - Mathf.Clamp01(n * n);
+            tm.color = new Color(color.r, color.g, color.b, alpha);
+
+            // Billboard toward the camera so it's readable from any angle.
+            var cam = GetCamera();
+            if (cam != null)
+                go.transform.rotation = Quaternion.LookRotation(go.transform.position - cam.transform.position);
+
+            yield return null;
+        }
+        if (go != null) Destroy(go);
     }
 
     private void OnGUI()

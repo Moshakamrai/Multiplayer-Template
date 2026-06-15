@@ -28,6 +28,9 @@ public class PowerMeterReactor : MonoBehaviour
     [Tooltip("The group holding the Fill + Border (and ideally the meter's Canvas). Disabled on REMOTE clones so their Overlay canvas never covers your screen. Leave empty to disable just this GameObject.")]
     [SerializeField] private GameObject meterGroup;
 
+    // The group VR docking should move (the whole cone). Falls back to this object.
+    public Transform MeterRoot => meterGroup != null ? meterGroup.transform : transform;
+
     [Header("Fill per grade (the on-beat shout rating)")]
     [Tooltip("BAD / off-beat shout.")]
     public float badFill = 0.25f;
@@ -39,8 +42,8 @@ public class PowerMeterReactor : MonoBehaviour
     [Header("Fill motion")]
     [Tooltip("Seconds to ease toward a new target. Bigger = smoother/slower rise.")]
     public float riseSmoothTime = 0.25f;
-    [Tooltip("Seconds the meter HOLDS at its level after an attack before it starts draining.")]
-    public float holdTime = 1.0f;
+    [Tooltip("Seconds the meter HOLDS at its locked level after a shout before it starts draining.")]
+    public float holdTime = 1.5f;
     [Tooltip("How fast the meter drains toward the idle floor once the hold ends (units/sec). Lower = slower fade.")]
     public float fillDecay = 0.12f;
     [Tooltip("Fill the meter sags to at rest (0 = empties fully).")]
@@ -73,6 +76,7 @@ public class PowerMeterReactor : MonoBehaviour
     private float _holdTimer;
     private float _beatFlash;
     private float _lastBeat = -1f;
+    private float _liveCharge; // real-time trigger-charge fed by VRHands (decays with no motion)
 
     static readonly int ID_Fill  = Shader.PropertyToID("_FillAmount");
     static readonly int ID_Glow  = Shader.PropertyToID("_GlowIntensity");
@@ -106,6 +110,17 @@ public class PowerMeterReactor : MonoBehaviour
             return;
         }
 
+        // Position the meter on the RIGHT side of the screen (flat builds only).
+        // VR positioning is handled by VRWorldHud docking.
+        var rt = GetComponent<RectTransform>();
+        if (rt != null && !UnityEngine.XR.XRSettings.isDeviceActive)
+        {
+            rt.anchorMin = new Vector2(1f, 0.5f);
+            rt.anchorMax = new Vector2(1f, 0.5f);
+            rt.pivot = new Vector2(1f, 0.5f);
+            rt.anchoredPosition = new Vector2(-24f, 0f);
+        }
+
         var mask = GetComponentInParent<Mask>();
         var rectMask = GetComponentInParent<RectMask2D>();
         Debug.Log($"[PowerMeter] LIVE on '{name}'. Shader='{_mat.shader.name}', maskInParent={(mask != null || rectMask != null)}");
@@ -131,6 +146,59 @@ public class PowerMeterReactor : MonoBehaviour
         _beatFlash  = 1f;       // pop the glow on the shout
 
         Debug.Log($"[PowerMeter] Grade '{rating}' -> fill {grade:F2} (target now {_fillTarget:F2})");
+    }
+
+    /// <summary>
+    /// Stamp the meter from the raw combined power value (0.0–1.25).
+    /// This reflects VR swing speed + mic shout volume combined.
+    /// Called alongside RegisterGrade so the meter shows BOTH timing quality AND input power.
+    /// </summary>
+    public void RegisterPower(float power)
+    {
+        // Map 0.0–1.25 power onto the meter's 0.0–1.0 fill range
+        float powerFill = Mathf.Clamp01(power / 1.25f);
+
+        // Power fill can push the meter higher than the grade alone
+        // (e.g. GOOD timing + max power = higher meter than EXCELLENT timing + weak power)
+        _fillTarget = Mathf.Clamp01(Mathf.Max(_fillTarget, powerFill));
+        _holdTimer  = holdTime;
+        _beatFlash  = Mathf.Max(_beatFlash, 0.5f + powerFill * 0.5f); // stronger flash for more power
+
+        Debug.Log($"[PowerMeter] Power {power:F2} -> fill {powerFill:F2} (target now {_fillTarget:F2})");
+    }
+
+    /// Real-time charge (0–1) the player is building by holding the trigger and pulsing the
+    /// controller (VR). Pushed every frame by VRHands; shown live and dissolves when motion stops.
+    public void SetLiveCharge(float charge01)
+    {
+        _liveCharge = Mathf.Clamp01(charge01);
+    }
+
+    /// Locks the meter in on a shout/trigger-release. closeness 0→1 (1 = dead-on the beat):
+    ///   tight  → lock at your charge + a closeness boost (up to +0.30), held for holdTime.
+    ///   sloppy → bleed a bit of power as a penalty (no lock).
+    [Tooltip("Below this closeness (0–1) a lock-in is judged 'bad' and drains power instead of locking.")]
+    public float goodLockCloseness = 0.4f;
+    [Tooltip("Power drained on a sloppy (bad-timed) lock-in.")]
+    public float badLockPenalty = 0.20f;
+
+    public void LockIn(float power, float closeness)
+    {
+        closeness = Mathf.Clamp01(closeness);
+        if (closeness >= goodLockCloseness)
+        {
+            float boost = (closeness - goodLockCloseness) / Mathf.Max(0.01f, 1f - goodLockCloseness) * 0.30f;
+            _fillTarget = Mathf.Clamp01(Mathf.Max(_fillTarget, power + boost));
+            _holdTimer  = holdTime; // ~1.5s lock before it dissolves
+            _beatFlash  = 1f;       // pop the glow on the lock-in
+        }
+        else
+        {
+            // Sloppy lock-in: bleed power and let it keep draining.
+            _fillTarget  = Mathf.Max(0f, _fillTarget  - badLockPenalty);
+            _fillCurrent = Mathf.Max(0f, _fillCurrent - badLockPenalty);
+            _holdTimer   = 0f;
+        }
     }
 
     void Update()
@@ -181,7 +249,9 @@ public class PowerMeterReactor : MonoBehaviour
             _beatFlash = Mathf.Max(0f, _beatFlash - Time.deltaTime * flashDecay);
         glow += flashGlow * _beatFlash;
 
-        _mat.SetFloat(ID_Fill, _fillCurrent);
+        // Show whichever is higher: the locked-in grade fill, or the LIVE trigger-charge the
+        // player is building right now (VRHands pushes this each frame; it dissolves with no motion).
+        _mat.SetFloat(ID_Fill, Mathf.Max(_fillCurrent, _liveCharge));
         _mat.SetFloat(ID_Glow, glow);
         _mat.SetFloat(ID_Shift, colorShiftAmount * _beatFlash);
 

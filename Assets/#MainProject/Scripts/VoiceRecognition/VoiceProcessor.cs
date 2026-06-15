@@ -23,6 +23,12 @@ public class VoiceProcessor : MonoBehaviour
     public List<string> Devices { get; private set; }
     public int CurrentDeviceIndex { get; private set; }
     public float CurrentRawVolume { get; private set; }
+    /// <summary>
+    /// Volume with the festival floor subtracted. Used for shout-on-beat detection.
+    /// In loud environments, raise _volumeFloor so crowd noise reads as 0.
+    /// Vosk speech recognition still uses the raw audio — this only affects timing spikes.
+    /// </summary>
+    public float CurrentFestivalVolume => Mathf.Max(0f, CurrentRawVolume - _volumeFloor);
     public bool IsClipping { get; private set; }
 
     public string CurrentDeviceName
@@ -43,6 +49,12 @@ public class VoiceProcessor : MonoBehaviour
     [Tooltip("How long silence must persist before audio transmission stops. Keep low for rhythm games (0.2–0.3s).")]
     [SerializeField] private float _silenceTimer = 0.30f;
     [SerializeField] private bool _autoDetect;
+
+    [Header("Festival / Loud Environment")]
+    [Tooltip("In loud environments (festivals, expos), raise this to make the mic less sensitive to background noise. " +
+             "This is a simple offset subtracted from the reported volume — the mic still hears everything, " +
+             "but quiet sounds read as 0. Does NOT affect Vosk speech recognition.")]
+    [SerializeField, Range(0.0f, 0.5f)] private float _volumeFloor = 0.0f;
 
     // Fast volume peek — reads a tiny window every Unity frame so CurrentRawVolume
     // is never more than one frame stale (~16ms), instead of one Vosk frame (32ms).

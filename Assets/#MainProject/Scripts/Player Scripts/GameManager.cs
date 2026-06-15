@@ -340,6 +340,11 @@ public override void Start()
 
     if (_soundSlider != null) _soundSlider.RegisterValueChangedCallback(SoundChanged);
     if (_sensitivityFloatField != null) _sensitivityFloatField.RegisterValueChangedCallback(SensitivityChanged);
+
+    // Ensure options panel starts hidden so it doesn't cover the menu on first load.
+    _optionsOpen = false;
+    _optionsRoot.visible = false;
+    _optionsRoot.style.display = DisplayStyle.None;
 }
 
     public override void OnDestroy()
@@ -464,7 +469,8 @@ public override void Start()
 
         if (CameraPosition != null)
         {
-            // Apply base camera follow position
+            // Apply base camera follow position. In VR, VRCameraDriver (runs last)
+            // overrides this with the eye-socket position + the live tuning offset.
             camTransform.position = CameraPosition.position;
 
             // Apply shake and head bob offsets from CameraShake
@@ -474,8 +480,14 @@ public override void Start()
                 camTransform.position += shakeComponent.CurrentShakeOffset;
             }
 
-            camTransform.rotation = CameraPosition.rotation;
-            _cam.fieldOfView = 90; // Wider for First Person
+            // In VR the XR system owns the camera rotation AND projection.
+            // We must NOT set rotation or fieldOfView on an XR camera — doing so
+            // replaces the per-eye stereo projection and the two views stop fusing.
+            if (!VRCameraDriver.VRActive)
+            {
+                camTransform.rotation = CameraPosition.rotation;
+                _cam.fieldOfView = 90f; // Wider for First Person (flat mode only)
+            }
 
             // Hide our own body so we don't see our neck/shoulders
             if (localPlayer != null)
@@ -568,7 +580,11 @@ public override void Start()
     private void HandleCursor()
     {
         // Visible if in the menu, options are open, or the player is holding Tab.
+#if ENABLE_LEGACY_INPUT_MANAGER
         bool holdingFreeLook = Input.GetKey(KeyCode.Tab);
+#else
+        bool holdingFreeLook = false;
+#endif
         bool visible = !IsServer && !IsClient || _optionsOpen || holdingFreeLook;
         Cursor.visible = visible;
         Cursor.lockState = visible ? CursorLockMode.None : CursorLockMode.Locked;
@@ -647,6 +663,12 @@ public override void Start()
     /// <param name="initial">If this is the initial configuration</param>
     private static void SetResolution(bool fullscreen, bool initial = false)
     {
+#if UNITY_ANDROID || UNITY_IOS
+        // On mobile the OS owns the display resolution. Forcing one here (e.g.
+        // the 512x512 desktop default) stretches the whole game across the
+        // screen and breaks both the menu layout and touch hit-testing.
+        return;
+#else
         // Get the saved width and height.
         int width = PlayerPrefs.GetInt(WidthKey);
         int height = PlayerPrefs.GetInt(HeightKey);
@@ -683,6 +705,7 @@ public override void Start()
         
         // Set the window to the size.
         Screen.SetResolution(width, height, FullScreenMode.Windowed);
+#endif
     }
 
     /// <summary>
@@ -690,6 +713,10 @@ public override void Start()
     /// </summary>
     private static void SaveResolution()
     {
+#if UNITY_ANDROID || UNITY_IOS
+        // Nothing to save — mobile resolution is fixed by the OS.
+        return;
+#else
         // Save the fullscreen value.
         PlayerPrefs.SetInt(FullscreenKey, Screen.fullScreenMode == FullScreenMode.Windowed ? 0 : 1);
 
@@ -701,6 +728,7 @@ public override void Start()
         
         PlayerPrefs.SetInt(WidthKey, Screen.width);
         PlayerPrefs.SetInt(HeightKey, Screen.height);
+#endif
     }
 
     /// <summary>
@@ -745,7 +773,15 @@ public override void Start()
     /// <param name="value">Escape input.</param>
     private void OnEscape(InputValue value)
     {
+#if UNITY_ANDROID || UNITY_IOS
+        // On Android the system Back button fires Escape. Don't open the options
+        // panel — it has no close gesture on mobile and covers the whole menu.
+        // If options are already open (opened via another path), close them.
+        if (_optionsOpen) _optionsOpen = false;
+        return;
+#else
         _optionsOpen = !_optionsOpen;
+#endif
     }
 
     /// <summary>

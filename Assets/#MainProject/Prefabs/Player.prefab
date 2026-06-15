@@ -269,6 +269,11 @@ MonoBehaviour:
   shimmerSpeed: 3
   punchScale: 0.12
   punchDuration: 0.25
+  useCalledPop: 1
+  popOvershoot: 0.32
+  popDuration: 0.55
+  popTilt: 9
+  popGlowPeak: 2.6
   dissolveColor: {r: 1, g: 0.55, b: 0.1, a: 1}
   dissolveEdge: 0.08
   dissolveScale: 14
@@ -493,6 +498,11 @@ MonoBehaviour:
   shimmerSpeed: 3
   punchScale: 0.12
   punchDuration: 0.25
+  useCalledPop: 1
+  popOvershoot: 0.32
+  popDuration: 0.55
+  popTilt: 9
+  popGlowPeak: 2.6
   dissolveColor: {r: 1, g: 0.55, b: 0.1, a: 1}
   dissolveEdge: 0.08
   dissolveScale: 14
@@ -992,6 +1002,11 @@ MonoBehaviour:
   shimmerSpeed: 3
   punchScale: 0.12
   punchDuration: 0.25
+  useCalledPop: 1
+  popOvershoot: 0.32
+  popDuration: 0.55
+  popTilt: 9
+  popGlowPeak: 2.6
   dissolveColor: {r: 1, g: 0.55, b: 0.1, a: 1}
   dissolveEdge: 0.08
   dissolveScale: 14
@@ -1141,6 +1156,11 @@ MonoBehaviour:
   shimmerSpeed: 3
   punchScale: 0.12
   punchDuration: 0.25
+  useCalledPop: 1
+  popOvershoot: 0.32
+  popDuration: 0.55
+  popTilt: 9
+  popGlowPeak: 2.6
   dissolveColor: {r: 1, g: 0.55, b: 0.1, a: 1}
   dissolveEdge: 0.08
   dissolveScale: 14
@@ -1691,6 +1711,8 @@ MonoBehaviour:
   flashDecay: 5
   colorShiftAmount: 0.12
   debugOscillate: 0
+  goodLockCloseness: 0.4
+  badLockPenalty: 0.2
 --- !u!1 &6036092921495172170
 GameObject:
   m_ObjectHideFlags: 0
@@ -2068,6 +2090,11 @@ MonoBehaviour:
   shimmerSpeed: 3
   punchScale: 0.12
   punchDuration: 0.25
+  useCalledPop: 1
+  popOvershoot: 0.32
+  popDuration: 0.55
+  popTilt: 9
+  popGlowPeak: 2.6
   dissolveColor: {r: 1, g: 0.55, b: 0.1, a: 1}
   dissolveEdge: 0.08
   dissolveScale: 14
@@ -2271,6 +2298,8 @@ MonoBehaviour:
   roundDamageDealt: 0
   roundExcellentCount: 0
   roundCounterCount: 0
+  Score: 0
+  MatchScore: 0
   availableCardsString: 
   animator: {fileID: 7078697320674753406}
   isAttacking: 0
@@ -2297,6 +2326,8 @@ MonoBehaviour:
   activeTraitId: 
   ConsecutiveHitsChain: 0
   HasStalwartBuff: 0
+  StatusElement: 0
+  StatusBeatsRemaining: 0
   weaponGloveLeft: {fileID: 4246265404567632835}
   weaponGloveRight: {fileID: 6838551958696098282}
   localShopSelection: []
@@ -2305,6 +2336,7 @@ MonoBehaviour:
   flashMaterial: {fileID: 2100000, guid: 53ba7b32d17e498438356150ba39ed0f, type: 2}
   _originalMaterial: {fileID: 2100000, guid: d3b488fade9d5bf48b05a6346500e4c7, type: 2}
   vp: {fileID: 3402618379187400785}
+  stickyMoveEnabled: 1
   lastVocalSpikeTime: -1
   lastVocalSpikeVolume: 0
   swordImpactVfx: {fileID: 0}
@@ -2312,10 +2344,13 @@ MonoBehaviour:
   parryVfx: {fileID: 8393281142797502702}
   defenseVfxDuration: 0.6
   slashProjectilePrefab: {fileID: 6209466568701909808, guid: 14e5c617b24a4a748830c48e142b015b, type: 3}
+  throwSlashProjectilePrefab: {fileID: 0}
   slashSpawnPoint: {fileID: 0}
   slashSpawnDelay: 0.1
   slashViaAnimationEvent: 0
   slashRotationOffset: {x: 0, y: 0, z: 0}
+  slashSizeScale: 0.5
+  slashAimsAtOpponent: 1
 --- !u!114 &8845738990167672434
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2528,6 +2563,14 @@ MonoBehaviour:
   gloveRenderers:
   - {fileID: 5241757253209151205}
   - {fileID: 4508670261520271106}
+  rightGloveRenderers: []
+  leftGloveRenderers: []
+  offenseColor: {r: 1, g: 0.35, b: 0.05, a: 1}
+  defenseColor: {r: 0.1, g: 0.55, b: 1, a: 1}
+  supportColor: {r: 1, g: 1, b: 1, a: 1}
+  activeGlowIntensity: 2.2
+  idleGlowIntensity: 0.25
+  cuePulseSpeed: 3
   chargeColor: {r: 0, g: 0.85, b: 1, a: 1}
   chargeIntensity: 2.2
   chargeLead: 0.6
@@ -2536,6 +2579,13 @@ MonoBehaviour:
   hurtFlashColor: {r: 1, g: 0.15, b: 0.1, a: 1}
   flashIntensity: 8
   flashDecay: 6
+  selectionBloomIntensity: 4
+  selectionBloomPulseSpeed: 8
+  strikeBloomColor: {r: 1, g: 0.35, b: 0.05, a: 1}
+  throwBloomColor: {r: 1, g: 0.6, b: 0.1, a: 1}
+  blockBloomColor: {r: 0.1, g: 0.55, b: 1, a: 1}
+  parryBloomColor: {r: 0.5, g: 0.8, b: 1, a: 1}
+  supportBloomColor: {r: 1, g: 1, b: 1, a: 1}
 --- !u!1 &8782005603362053964
 GameObject:
   m_ObjectHideFlags: 0

@@ -18,7 +18,7 @@ public class PlayerController : NetworkBehaviour
     public float dashCooldown = 0.25f;
 
     [Header("Equidistance Settings")]
-    public float DesiredDistance = 2.5f;
+    public float DesiredDistance = 5.0f;
     public float SpacingSpeed = 2.0f;
     [SyncVar] private bool _isSpacingActive = false;
 
@@ -107,50 +107,43 @@ public class PlayerController : NetworkBehaviour
         Movement();
     }
 
-    private void FixedUpdate()
-    {
-        if (!isServer || !_isSpacingActive) return;
-
-        // Only the BOT closes distance — the player stands still.
-        bool isBot = GetComponent<BotController>() != null;
-        if (!isBot) return;
-
-        PlayerController opponent = GetOpponent();
-        if (opponent == null) return;
-
-        float currentDist = Vector3.Distance(transform.position, opponent.transform.position);
-
-        if (!_isDashing && !_combat.IsHurting && !opponent._isDashing && !opponent._combat.IsHurting)
-        {
-            if (Mathf.Abs(currentDist - DesiredDistance) > 0.1f)
-            {
-                Vector3 dir = (opponent.transform.position - transform.position).normalized;
-                float moveDir = (currentDist > DesiredDistance) ? 1f : -1f;
-                _characterController.Move(dir * moveDir * SpacingSpeed * Time.fixedDeltaTime);
-            }
-        }
-    }
+    // Bot auto-spacing DISABLED — both fighters are now hard-pinned to their spawn in LateUpdate, so
+    // the bot must never try to "close distance" (it just fought the pin and shoved the bot around).
+    private void FixedUpdate() { }
 
     // Hard-anchor each fighter to its spawn spot — applied AFTER animation root motion every
     // frame, so the body can NEVER drift (no snap, because nothing ever accumulates):
     //   • BOT    — fully pinned (X + Z). It never moves, so the gap stays exactly constant.
     //   • PLAYER — Z locked to spawn (no forward/back drift); X is free so sidestep dodges work.
     // Vertical (Y / gravity) is always left untouched.
+    // HARD-ANCHOR both fighters to their spawn spot, EVERY frame, ALWAYS (not just mid-round).
+    // Applied in LateUpdate (after animation root motion + the CharacterController.Move in Movement),
+    // so nothing — idle/hurt/dash/knockback root motion, gravity drift, bot spacing — can ever walk a
+    // fighter off its spawn. The body is pinned on ALL THREE axes; only the rotation is allowed to
+    // turn to face the opponent. Dodges still play their lean animation but never relocate the body.
     private void LateUpdate()
     {
         bool isBotOnServer = isServer && !isLocalPlayer;
         if (!(isLocalPlayer || isBotOnServer)) return;
         if (!_hasHome) return;
 
-        var rmm = RhythmRoundManager.Instance;
-        if (rmm == null || !rmm.isRoundActive) return;
-
-        Vector3 pos = transform.position;
+        // In VR the human is positioned by VRCameraDriver/their real body — don't fight it. The BOT is
+        // always pinned (even in VR), since it has no rig driving it.
         bool isBot = GetComponent<BotController>() != null;
+        if (!isBot && VRCameraDriver.VRActive) return;
 
-        transform.position = isBot
-            ? new Vector3(_homePosition.x, pos.y, _homePosition.z)  // bot: locked in place
-            : new Vector3(pos.x,          pos.y, _homePosition.z);  // player: Z locked, X free
+        // Full pin to spawn on every axis.
+        transform.position = _homePosition;
+
+        // Face the opponent (animations can twist the rig; enforce the facing here).
+        PlayerController opp = GetOpponent();
+        if (opp != null)
+        {
+            Vector3 dir = opp.transform.position - transform.position;
+            dir.y = 0f;
+            if (dir.sqrMagnitude > 0.001f)
+                transform.rotation = Quaternion.LookRotation(dir);
+        }
     }
 
     [Command]
@@ -265,8 +258,8 @@ public class PlayerController : NetworkBehaviour
             UpdateLookRotationCmd(_rotationYLocal);
         }
 
-        // Only rotate the camera holder if it is actually assigned in the inspector (Reference Fix)
-        if (cameraPosition != null)
+        // In VR, VRCameraDriver overwrites this in LateUpdate — skip to avoid fighting it.
+        if (cameraPosition != null && !VRCameraDriver.VRActive)
         {
             cameraPosition.localRotation = Quaternion.Euler(_rotationYLocal, 0, 0);
         }
@@ -285,8 +278,9 @@ public class PlayerController : NetworkBehaviour
             playerCollider.enabled = true;
         }
 
-        // 4. Home anchoring is handled continuously in LateUpdate (after animation root
-        //    motion), so the body can't drift via hurt/attack clips. Nothing to add here.
+        // 4. Home anchoring is handled in LateUpdate (full pin to spawn, every frame). The bot used to
+        //    "auto-space" toward the player here in VR, but that fought the pin and shoved it around —
+        //    removed. Both fighters now simply hold their spawn.
         Vector3 autoSpacingVelocity = Vector3.zero;
 
         // 5. Visual Cleanup
@@ -303,10 +297,15 @@ public class PlayerController : NetworkBehaviour
         // 6. Final Movement Calculation
         _velocityY += Physics.gravity.y * Time.deltaTime;
 
-        // WASD movement removed — fighters hold position; only voice dodges (dashes) move them
-        // on X, and home pinning (player Z-lock / bot full-lock) is handled in LateUpdate.
-        Vector3 targetVelocity = autoSpacingVelocity; // currently zero
-        targetVelocity.y = _velocityY;                // keep gravity so they stay grounded
+        // VR: strafe only (left/right). Flat-screen: NO WASD — fighters hold position, only voice
+        // dodges move them on X, and home pinning is handled in LateUpdate.
+        Vector3 inputMovement = (isLocalPlayer && VRCameraDriver.VRActive)
+            ? GameManager.Move.x * transform.right
+            : Vector3.zero;
+
+        Vector3 targetVelocity = inputMovement * GameManager.Speed;
+        targetVelocity += autoSpacingVelocity;
+        targetVelocity.y = _velocityY;
 
         _characterController.Move(targetVelocity * Time.deltaTime);
     }

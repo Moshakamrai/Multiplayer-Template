@@ -1,4 +1,6 @@
 using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 
 /// 3D world-space music visualizer — spawns two rows of cubes (left + right of arena)
 /// that scale and glow in response to the audio spectrum and attack triggers.
@@ -20,15 +22,25 @@ public class BeatVisualizerWorld : MonoBehaviour
     public BeatMap beatMap;
 
     [Header("Bar Layout")]
-    [Range(8, 64)] public int barCount = 24;
+    [Range(8, 256)] public int barCount = 20;
     [Tooltip("Distance between bar centers along the row (Z axis).")]
-    public float barSpacing = 0.5f;
+    public float barSpacing = 0.1f;
     [Tooltip("Base width and depth of each bar cube. Height is driven by audio.")]
-    public Vector2 barFootprint = new Vector2(0.22f, 0.22f);
+    public Vector2 barFootprint = new Vector2(0.05f, 0.05f);
     [Tooltip("Maximum height a bar can reach.")]
-    public float maxBarHeight = 4f;
+    public float maxBarHeight = 0.8f;
     [Tooltip("Minimum height so bars are always visible.")]
-    public float minBarHeight = 0.05f;
+    public float minBarHeight = 0.04f;
+
+    [Header("Waveform Look (Picture-1 style)")]
+    [Tooltip("ON: bars grow symmetrically up AND down from a center line — the classic " +
+             "soundwave strip. OFF: bars rise from the floor like an equalizer.")]
+    public bool waveformMode = true;
+    [Tooltip("Height of the waveform's horizontal center line (waveform mode only).")]
+    public float waveCenterY = 1.5f;
+    [Tooltip("Blends each bar toward its neighbours so the wave flows smoothly " +
+             "instead of jumping. 0 = raw spectrum, 1 = very smooth.")]
+    [Range(0f, 1f)] public float neighbourSmoothing = 0.55f;
 
     [Header("Positioning")]
     [Tooltip("X distance from this GameObject's origin to each bar row.")]
@@ -41,10 +53,25 @@ public class BeatVisualizerWorld : MonoBehaviour
     [Range(5f, 40f)] public float amplitudeScale = 22f;
 
     [Header("Bar Colors (URP)")]
-    public Color barColorBase = new Color(0.85f, 0.04f, 0.02f);
-    public Color barColorPeak = new Color(1.00f, 0.72f, 0.00f);
+    [Tooltip("Spectrum gradient across the bars: low freq (start) → high freq (end). Cyan→magenta→yellow→red by default.")]
+    public Gradient barSpectrumGradient = DefaultSpectrumGradient();
+    [Tooltip("How much darker a bar is at rest vs. at peak (0 = always full color, 1 = goes black when idle).")]
+    [Range(0f, 1f)] public float idleDarken = 0.45f;
     [Tooltip("Emission multiplier — raise this for bloom glow. Requires Bloom post-process.")]
-    [Range(0f, 8f)] public float emissionIntensity = 3f;
+    [Range(0f, 20f)] public float emissionIntensity = 5.625f;
+
+    [Header("Auto Bloom (glow)")]
+    [Tooltip("If no Bloom is found in the scene at Start, spawn a global Volume with Bloom so the " +
+             "emissive bars actually glow. Turn OFF if your scene already has a tuned Bloom volume.")]
+    public bool autoAddBloom = true;
+    [Range(0f, 10f)] public float bloomIntensity = 0.48f;
+    [Tooltip("Brightness a pixel must exceed to bloom. Low = more things glow.")]
+    [Range(0f, 2f)] public float bloomThreshold = 0.6f;
+
+    [Header("Bar Separation (black borders)")]
+    [Tooltip("Shrinks each bar's width/depth so there's a dark GAP between neighbours — the segmented " +
+             "'black outline' look. 0 = bars touch, 0.4 = chunky gaps.")]
+    [Range(0f, 0.9f)] public float barGap = 0.35f;
 
     [Header("Beat Detection (ambient)")]
     [Range(0.005f, 0.3f)] public float beatThreshold = 0.05f;
@@ -63,6 +90,7 @@ public class BeatVisualizerWorld : MonoBehaviour
     // ── Runtime ───────────────────────────────────────────────────────────
     private float[]   _spectrum;
     private float[]   _bars;
+    private float[]   _barsScratch; // neighbour-smoothing work buffer
 
     private Transform[]  _leftT,  _rightT;
     private Renderer[]   _leftR,  _rightR;
@@ -76,18 +104,65 @@ public class BeatVisualizerWorld : MonoBehaviour
     private float _spikeGlow  = 0f;
     private int   _nextBeatIdx;
 
+    /// Default spectrum gradient: cyan (low) → blue → magenta → yellow → orange → red (high).
+    static Gradient DefaultSpectrumGradient()
+    {
+        var g = new Gradient();
+        g.SetKeys(
+            new GradientColorKey[]
+            {
+                new GradientColorKey(new Color(0f, 1f, 1f),    0.00f), // cyan
+                new GradientColorKey(new Color(0f, 0.5f, 1f),  0.20f), // blue
+                new GradientColorKey(new Color(1f, 0f, 1f),    0.40f), // magenta
+                new GradientColorKey(new Color(1f, 1f, 0f),    0.60f), // yellow
+                new GradientColorKey(new Color(1f, 0.5f, 0f),  0.80f), // orange
+                new GradientColorKey(new Color(1f, 0f, 0f),    1.00f), // red
+            },
+            new GradientAlphaKey[] { new GradientAlphaKey(1f, 0f), new GradientAlphaKey(1f, 1f) }
+        );
+        return g;
+    }
+
     // ─────────────────────────────────────────────────────────────────────
     void Start()
     {
-        _spectrum = new float[512];
-        _bars     = new float[barCount];
-        _mpb      = new MaterialPropertyBlock();
+        _spectrum    = new float[512];
+        _bars        = new float[barCount];
+        _barsScratch = new float[barCount];
+        _mpb         = new MaterialPropertyBlock();
 
         if (targetAudio == null)
             targetAudio = GetComponent<AudioSource>();
 
         BuildMaterial();
         SpawnBars();
+        if (autoAddBloom) EnsureBloom();
+    }
+
+    /// Make sure the scene has a Bloom post-process so the emissive bars actually glow. If a Bloom
+    /// override already exists anywhere, leave it alone; otherwise spawn a global Volume with one.
+    void EnsureBloom()
+    {
+        // Already have a Bloom somewhere? Don't double up.
+        var existing = FindObjectsOfType<Volume>();
+        foreach (var v in existing)
+            if (v.profile != null && v.profile.Has<Bloom>())
+                return;
+
+        var go = new GameObject("BeatVisualizer Bloom (auto)");
+        var vol = go.AddComponent<Volume>();
+        vol.isGlobal = true;
+        vol.priority = 10f; // sit above any default global so our Bloom wins
+
+        var profile = ScriptableObject.CreateInstance<VolumeProfile>();
+        vol.profile = profile;
+
+        var bloom = profile.Add<Bloom>(true);
+        bloom.intensity.Override(bloomIntensity);
+        bloom.threshold.Override(bloomThreshold);
+        bloom.scatter.Override(0.7f);
+
+        Debug.Log("[BeatVisualizerWorld] No Bloom found in scene — added a global Bloom volume so bars glow.", this);
     }
 
     void BuildMaterial()
@@ -152,9 +227,12 @@ public class BeatVisualizerWorld : MonoBehaviour
     {
         if (targetAudio == null || !targetAudio.isPlaying) return;
 
-        targetAudio.GetSpectrumData(_spectrum, 0, FFTWindow.BlackmanHarris);
+        // Shared FFT: one GetSpectrumData per frame across all visualizers (see SharedSpectrum).
+        _spectrum = SharedSpectrum.Get(targetAudio);
+        if (_spectrum == null) return;
 
         UpdateBars();
+        SmoothBarsSpatially();
         DetectAmbientBeat();
         TickBeatMapSpikes();
         ApplyToScene();
@@ -182,6 +260,23 @@ public class BeatVisualizerWorld : MonoBehaviour
             float target = Mathf.Clamp01(peak * amplitudeScale);
             float speed  = target > _bars[i] ? riseSpeed : fallSpeed;
             _bars[i]     = Mathf.Lerp(_bars[i], target, Time.deltaTime * speed);
+        }
+    }
+
+    // Blends each bar toward the average of its neighbours so the heights form a
+    // flowing wave envelope (picture-1 look) instead of jagged, independent spikes.
+    void SmoothBarsSpatially()
+    {
+        if (neighbourSmoothing <= 0f) return;
+
+        System.Array.Copy(_bars, _barsScratch, barCount);
+        for (int i = 0; i < barCount; i++)
+        {
+            float l = _barsScratch[Mathf.Max(0, i - 1)];
+            float c = _barsScratch[i];
+            float r = _barsScratch[Mathf.Min(barCount - 1, i + 1)];
+            float blurred = (l + c + r) / 3f;
+            _bars[i] = Mathf.Lerp(c, blurred, neighbourSmoothing);
         }
     }
 
@@ -219,7 +314,9 @@ public class BeatVisualizerWorld : MonoBehaviour
             float boosted = Mathf.Clamp01(_bars[i] * _spikeBoost);
             float height  = Mathf.Max(minBarHeight, boosted * maxBarHeight);
 
-            Color col      = Color.Lerp(barColorBase, barColorPeak, boosted);
+            // Spectrum gradient across the row (low→high freq), darkened at rest so peaks pop.
+            Color specCol = barSpectrumGradient.Evaluate(barCount > 1 ? (float)i / (barCount - 1) : 0f);
+            Color col      = specCol * Mathf.Lerp(1f - idleDarken, 1f, boosted);
             Color emission = Color.Lerp(col, spikeColor, _spikeGlow) * emissionIntensity;
 
             ApplyBar(_leftT[i], _leftR[i], _leftBase[i], height, col, emission);
@@ -231,9 +328,17 @@ public class BeatVisualizerWorld : MonoBehaviour
 
     void ApplyBar(Transform t, Renderer r, Vector3 basePos, float height, Color col, Color emission)
     {
-        // Bottom-anchor: cube pivot is center, so shift Y up by half height
-        t.localPosition = basePos + new Vector3(0f, height * 0.5f, 0f);
-        t.localScale = new Vector3(barFootprint.x, height, barFootprint.y);
+        if (waveformMode)
+            // Center-anchor: cube center sits on the wave line, so the bar grows
+            // equally up AND down — the symmetric soundwave strip from picture 1.
+            t.localPosition = new Vector3(basePos.x, waveCenterY, basePos.z);
+        else
+            // Bottom-anchor: cube pivot is center, so shift Y up by half height.
+            t.localPosition = basePos + new Vector3(0f, height * 0.5f, 0f);
+
+        // barGap shrinks width/depth so a dark gap shows between neighbours (the "black border" look).
+        float shrink = 1f - barGap;
+        t.localScale = new Vector3(barFootprint.x * shrink, height, barFootprint.y * shrink);
 
         // MaterialPropertyBlock avoids creating per-instance material copies
         _mpb.SetColor("_BaseColor",     col);      // URP Lit

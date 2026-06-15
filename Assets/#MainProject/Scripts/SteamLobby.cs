@@ -1,17 +1,21 @@
 using Mirror;
+#if !UNITY_ANDROID
 using Steamworks;
+#endif
 using UnityEngine;
 
 public class SteamLobby : MonoBehaviour
 {
     private NetworkManager networkManager;
-    
+
+#if !UNITY_ANDROID
     // Callback for when a lobby is created
     protected Callback<LobbyCreated_t> lobbyCreated;
     // Callback for when a game join request (Invite) is received
     protected Callback<GameLobbyJoinRequested_t> gameLobbyJoinRequested;
     // Callback for when a lobby is entered
     protected Callback<LobbyEnter_t> lobbyEntered;
+#endif
 
     private const string HostAddressKey = "HostAddress";
 
@@ -21,8 +25,9 @@ public class SteamLobby : MonoBehaviour
         if (networkManager == null)
             networkManager = NetworkManager.singleton;
 
+#if !UNITY_ANDROID
         // DEBUG LOGS
-        if (SteamManager.Initialized) 
+        if (SteamManager.Initialized)
         {
             Debug.Log("Steam IS active! User: " + SteamFriends.GetPersonaName());
         }
@@ -36,8 +41,10 @@ public class SteamLobby : MonoBehaviour
         lobbyCreated = Callback<LobbyCreated_t>.Create(OnLobbyCreated);
         gameLobbyJoinRequested = Callback<GameLobbyJoinRequested_t>.Create(OnGameLobbyJoinRequested);
         lobbyEntered = Callback<LobbyEnter_t>.Create(OnLobbyEntered);
+#endif
     }
 
+#if !UNITY_ANDROID
     // 1. HOST: Call this when you click "Host Game" button
     public void HostSteamLobby()
     {
@@ -87,4 +94,5 @@ public class SteamLobby : MonoBehaviour
         networkManager.networkAddress = hostAddress;
         networkManager.StartClient();
     }
+#endif
 }

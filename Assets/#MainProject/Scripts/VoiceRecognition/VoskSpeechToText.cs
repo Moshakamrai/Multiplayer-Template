@@ -126,13 +126,22 @@ public class VoskSpeechToText : MonoBehaviour
     {
         if (!VoiceProcessor.IsRecording && _didInit)
         {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            AndroidPermissionHandler.RequestMicrophonePermission();
+            if (!AndroidPermissionHandler.HasMicrophonePermission())
+            {
+                Debug.LogError("Microphone permission denied on Android");
+                return;
+            }
+#endif
+
             _running = true;
-            
+
             // --- FASTER POLLING FIX ---
-            // We force the frameSize to 256 instead of the default 512. 
+            // We force the frameSize to 256 instead of the default 512.
             // This makes the microphone feed Vosk twice as often!
             VoiceProcessor.StartRecording(16000, 64);
-            
+
             StartCoroutine(ThreadedWorkCoroutine());
         }
     }

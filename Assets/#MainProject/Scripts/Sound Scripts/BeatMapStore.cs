@@ -122,6 +122,17 @@ public static class BeatMapStore
         return PlayerPrefs.HasKey(key) ? PlayerPrefs.GetString(key) : "";
     }
 
+    /// STRICT existence: does this map have a real beatmap FILE on disk (persistentDataPath .txt or a
+    /// baked Resources TextAsset)? Ignores PlayerPrefs entirely. Use this for the Level UI so a map you
+    /// deleted from disk never lingers as a ghost button just because stale beat data is still in prefs.
+    public static bool ExistsOnDisk(string mapName)
+    {
+        if (string.IsNullOrEmpty(mapName)) return false;
+        string safe = SafeName(mapName);
+        if (File.Exists(Path.Combine(PersistentDir, safe + ".txt"))) return true;
+        return Resources.Load<TextAsset>("BeatMaps/" + safe) != null;
+    }
+
     /// Every custom map name we can find on disk (persistent + baked Resources), de-duped.
     public static IEnumerable<string> AllNames()
     {

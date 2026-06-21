@@ -1114,7 +1114,19 @@ public class ShopUI : MonoBehaviour
         if (GUI.Button(new Rect(btnX, btnY, btnW, btnH), "", GUIStyle.none))
         {
             var localPc = GameManager.localPlayer?.GetComponent<PlayerCombat>();
-            if (localPc != null) localPc.CmdLockInPostRoundShop();
+            var localInv = GameManager.localPlayer?.GetComponent<PlayerInventory>();
+            if (localPc != null)
+            {
+                Debug.Log("[ShopUI] Lock In clicked — sending CmdLockInPostRoundShop");
+                localPc.CmdLockInPostRoundShop();
+            }
+            // Fallback for host / single-player: lock in immediately on the local
+            // instance so the shop always closes even if the command path stalls.
+            if (localInv != null)
+            {
+                Debug.Log("[ShopUI] Lock In clicked — local fallback LockInShop");
+                ShopPhaseManager.Instance?.LockInShop(localInv);
+            }
         }
         GUI.color = Color.white;
     }

@@ -27,45 +27,44 @@ public class BeatCoach : MonoBehaviour
         go.AddComponent<BeatCoach>();
     }
 
-    // How many clean on-beat hits in a row before we trust the player and hide coaching.
+    // How many clean on-beat hits in a row before we trust the player and hide coaching FOR GOOD.
     private const int GOOD_TO_HIDE = 2;
-    // How many BAD graded hits in a row before we bring coaching back.
-    private const int FAILS_TO_SHOW = 2;
 
     // Visible until proven otherwise — new players see it immediately.
     private static bool _coachingVisible = true;
-    public static bool CoachingVisible => _coachingVisible;
+    // Once dismissed, it stays gone for the rest of the run — it does NOT come back on later misses
+    // (the reappearing coaching was jamming the view). Persists across rounds (static).
+    private static bool _dismissedForGood;
+    // Tutorial coaching (approach RING + tutorial TEXT) is DISABLED entirely per design — it was
+    // jamming the player's view. Always off; the streak logic below is kept but inert.
+    public static bool CoachingVisible => false;
 
     private int   _goodStreak;
-    private int   _failStreak;
     private float _lastTimingSeen = -999f;
 
     private void Update()
     {
-        // Only GRADED results drive the hide/show streak. We deliberately do NOT count "too early"
-        // attempts as failures here — an early shout often happens on the very same beat you then land
-        // cleanly, which was wrongly wiping the good-streak so coaching never hid. ("Too early" still
-        // shows its own coaching flash via BeatTutorialText; it just doesn't reset the streak.)
+        if (_dismissedForGood) return; // nothing more to track once it's permanently off
+
+        // Only GRADED results drive the hide streak. ("Too early" attempts are coached by
+        // BeatTutorialText but don't count here.)
         if (PlayerCombat.VRGradeTime > _lastTimingSeen + 0.001f)
         {
             _lastTimingSeen = PlayerCombat.VRGradeTime;
             string r = PlayerCombat.VRGradeText;
-            if (r == "EXCELLENT" || r == "GOOD") RegisterSuccess();
-            else                                  RegisterFailure(); // a graded BAD
+            if (r == "EXCELLENT" || r == "GOOD")
+            {
+                _goodStreak++;
+                if (_goodStreak >= GOOD_TO_HIDE)
+                {
+                    _coachingVisible = false;
+                    _dismissedForGood = true; // they've got it — gone for the rest of the run
+                }
+            }
+            else
+            {
+                _goodStreak = 0; // a miss just resets progress toward hiding; never re-shows it
+            }
         }
-    }
-
-    private void RegisterSuccess()
-    {
-        _failStreak = 0;
-        _goodStreak++;
-        if (_goodStreak >= GOOD_TO_HIDE) _coachingVisible = false; // they've got it — fade the help out
-    }
-
-    private void RegisterFailure()
-    {
-        _goodStreak = 0;
-        _failStreak++;
-        if (_failStreak >= FAILS_TO_SHOW) _coachingVisible = true; // struggling again — bring help back
     }
 }

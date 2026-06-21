@@ -138,8 +138,15 @@ public class VoiceCommandManager : NetworkBehaviour
     {
         if (_myCombat.IsHurting || _myCombat.IsDead || _myCombat.IsStaggered) return true;
         if (TiebreakerManager.Instance != null && TiebreakerManager.Instance.IsTiebreakerActive) return true;
+
         string lowerSegment = segment.ToLower().Trim();
         bool isRhythm = RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive;
+
+        // FALSE-POSITIVE GUARD: a real card command is a SHORT utterance (one word, maybe a filler).
+        // Conversation ("yeah I think we should block him out") is long — reject it outright so chatter
+        // can't trip a card. Cap at 3 words.
+        int wordCount = lowerSegment.Length == 0 ? 0 : lowerSegment.Split(' ').Length;
+        if (wordCount == 0 || wordCount > 3) return true;
 
         // Echo guard applies in ALL modes — shout tail after any executed command is silently consumed
         if (Time.time < _echoGuardUntil) return true;
@@ -185,39 +192,44 @@ public class VoiceCommandManager : NetworkBehaviour
             Vector3 dashDir = Vector3.zero;
 
             // 1. RECOGNITION MAPPING
-            if (word == "cancel" || word == "clear" || GetSimilarity(word, "cancel") > 0.72f)
+            if (word == "cancel" || word == "clear" || Match(word, "cancel"))
             {
                 _myCombat.CancelLastInput();
                 LogExecution("CANCELLED");
                 continue;
             }
 
-            if (word == "jab" || GetSimilarity(word, "jab") > 0.82f || GetSimilarity(word, "punch") > 0.7f ) { trigger = "Jab"; recognized = true; }
-            else if (GetSimilarity(word, "cross") > 0.78f || word == "flank" || word == "blank" || word == "frank" || GetSimilarity(word, "flank") > 0.75f) { trigger = "Cross"; recognized = true; }
-            else if (GetSimilarity(word, "hook") > 0.75f) { trigger = "Hook"; recognized = true; }
-            else if (GetSimilarity(word, "block") > 0.75f || GetSimilarity(word, "guard") > 0.75f) { trigger = "Block"; recognized = true; }
-            else if (GetSimilarity(word, "reflect") > 0.68f || word == "deflect" || GetSimilarity(word, "parry") > 0.75f) { trigger = "ParryIntent"; recognized = true; }
-            else if (word == "boom" || GetSimilarity(word, "boom") > 0.78f || word == "crush" || word == "crash" || word == "crushing" || word == "crashing" || GetSimilarity(word, "crush") > 0.75f) { trigger = "UnbreakablePunch"; recognized = true; }
-            else if (GetSimilarity(word, "left") > 0.75f) { trigger = "Left"; dashDir = Vector3.left; recognized = true; }
-            else if (GetSimilarity(word, "right") > 0.75f) { trigger = "Right"; dashDir = Vector3.right; recognized = true; }
+            // STRICT matching (Match): an exact word, OR a near-exact fuzzy match where the bar is
+            // higher for SHORT words (short words false-trigger easily). Loose junk aliases like
+            // "near"/"tall"/"sweet"/"over" were removed — they were what casual talk kept tripping.
+            if      (Match(word, "jab")     || Match(word, "punch"))   { trigger = "Jab"; recognized = true; }
+            else if (Match(word, "cross"))                            { trigger = "Cross"; recognized = true; }
+            else if (Match(word, "hook"))                             { trigger = "Hook"; recognized = true; }
+            else if (Match(word, "block"))                            { trigger = "Block"; recognized = true; }
+            else if (Match(word, "reflect") || Match(word, "parry"))  { trigger = "ParryIntent"; recognized = true; }
+            else if (Match(word, "boom")    || Match(word, "crush"))  { trigger = "UnbreakablePunch"; recognized = true; }
+            else if (Match(word, "left"))   { trigger = "Left";  dashDir = Vector3.left;  recognized = true; }
+            else if (Match(word, "right"))  { trigger = "Right"; dashDir = Vector3.right; recognized = true; }
             // ── NEW CARDS (Basic) ──
-            else if (GetSimilarity(word, "grapple") > 0.75f || word == "grab" || word == "wrap") { trigger = "Grapple"; recognized = true; }
-            else if (GetSimilarity(word, "fake") > 0.70f || word == "faint" || word == "paint") { trigger = "Fake"; recognized = true; }
-            else if (GetSimilarity(word, "clutch") > 0.75f || word == "catch" || word == "crunch") { trigger = "Clutch"; recognized = true; }
+            else if (Match(word, "grapple"))                          { trigger = "Grapple"; recognized = true; }
+            else if (Match(word, "fake"))                             { trigger = "Fake"; recognized = true; }
+            else if (Match(word, "clutch"))                           { trigger = "Clutch"; recognized = true; }
             // ── NEW CARDS (Advanced) ──
-            else if (GetSimilarity(word, "uppercut") > 0.75f || word == "upper" || word == "cutter") { trigger = "Uppercut"; recognized = true; }
-            else if (GetSimilarity(word, "sweep") > 0.75f || word == "swipe" || word == "sweet") { trigger = "Sweep"; recognized = true; }
-            else if (GetSimilarity(word, "focus") > 0.75f || word == "charge" || word == "power") { trigger = "Focus"; recognized = true; }
-            else if (GetSimilarity(word, "taunt") > 0.75f || word == "taught" || word == "tall") { trigger = "Taunt"; recognized = true; }
+            else if (Match(word, "uppercut"))                         { trigger = "Uppercut"; recognized = true; }
+            else if (Match(word, "sweep"))                            { trigger = "Sweep"; recognized = true; }
+            else if (Match(word, "focus"))                            { trigger = "Focus"; recognized = true; }
+            else if (Match(word, "taunt"))                            { trigger = "Taunt"; recognized = true; }
             // ── NEW CARDS (Legendary) ──
-            else if (GetSimilarity(word, "overclock") > 0.70f || word == "over" || word == "clock" || word == "overload") { trigger = "Overclock"; recognized = true; }
-            else if (GetSimilarity(word, "reverse") > 0.75f || word == "revert") { trigger = "Reverse"; recognized = true; }
-            else if (GetSimilarity(word, "trap") > 0.75f || word == "trip" || word == "track") { trigger = "Trap"; recognized = true; }
-            else if (GetSimilarity(word, "mirror") > 0.75f || word == "mere" || word == "near") { trigger = "Mirror"; recognized = true; }
-            else if (GetSimilarity(word, "cage") > 0.75f || word == "lock" || word == "seal") { trigger = "Cage"; recognized = true; }
+            else if (Match(word, "overclock"))                        { trigger = "Overclock"; recognized = true; }
+            else if (Match(word, "reverse"))                          { trigger = "Reverse"; recognized = true; }
+            else if (Match(word, "trap"))                             { trigger = "Trap"; recognized = true; }
+            else if (Match(word, "mirror"))                           { trigger = "Mirror"; recognized = true; }
+            else if (Match(word, "cage"))                             { trigger = "Cage"; recognized = true; }
             // Combo card selection — "one/two/three/four"
 
 
+
+            if (!recognized) continue;
 
             if (recognized)
             {
@@ -306,6 +318,24 @@ public class VoiceCommandManager : NetworkBehaviour
     }
 
 
+
+    // Length-aware strict matcher. Exact word = instant. Otherwise the fuzzy bar scales with the
+    // TARGET length: short words ("jab","hook","left") demand near-exact (≥0.88) because a single
+    // mis-heard phoneme there is the whole word and casual talk hits them by accident; longer words
+    // ("uppercut","overclock") can tolerate a touch more (≥0.80). This is the core false-positive
+    // fix — random chatter no longer clears the bar for short cards like "block".
+    private bool Match(string word, string target)
+    {
+        if (string.IsNullOrEmpty(word)) return false;
+        if (word == target) return true;
+        // A spoken word much shorter/longer than the target is not a mishearing of it.
+        if (Mathf.Abs(word.Length - target.Length) > 2) return false;
+
+        float bar = target.Length <= 4 ? 0.88f
+                  : target.Length <= 6 ? 0.84f
+                                       : 0.80f;
+        return GetSimilarity(word, target) >= bar;
+    }
 
     private void SetEchoGuard()
     {

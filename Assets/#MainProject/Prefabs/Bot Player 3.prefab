@@ -1240,6 +1240,9 @@ PrefabInstance:
     - targetCorrespondingSourceObject: {fileID: 8718707839533561219, guid: 094ee12588f16e344a7950cec231df77, type: 3}
       insertIndex: -1
       addedObject: {fileID: 3320593121200890117}
+    - targetCorrespondingSourceObject: {fileID: 8718707839533561219, guid: 094ee12588f16e344a7950cec231df77, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 6273521252918748459}
   m_SourcePrefab: {fileID: 100100000, guid: 094ee12588f16e344a7950cec231df77, type: 3}
 --- !u!4 &1196059692255734450 stripped
 Transform:
@@ -1281,10 +1284,38 @@ MonoBehaviour:
   bladeBase: {fileID: 3794902472138106318}
   bladeTip: {fileID: 3468954239273844454}
   arcMaterial: {fileID: 2100000, guid: 80c5fdae11fc6a24e92fc34cf7ca045f, type: 2}
-  arcColor: {r: 0.020442102, g: 0.10134714, b: 0.12382075, a: 1}
+  arcColor: {r: 0.0025552628, g: 0.012668393, b: 0.015477594, a: 1}
   trailDuration: 0
   swingDuration: 0
   maxSamples: 30
+--- !u!114 &6273521252918748459
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1196059692255734455}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0ddc2baf47d25b94bbed946dcb6f5e04, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  syncDirection: 0
+  syncMode: 0
+  syncInterval: 0
+  runState: Run
+  knockbackState: Knockback
+  backDashState: BackDash
+  idleState: Boxing Idle
+  approachStop: 0
+  maxApproachDistance: 0.9
+  runAnimSpeed: 0.6
+  maxRunAnimSpeed: 3
+  fastBeatBoost: 1.8
+  arriveEarly: 0.28
+  maxLeadTime: 2
+  postBeatHold: 0.4
+  returnSlideTime: 0.18
 --- !u!1 &2025704897926748122 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 8393281142797502702, guid: 094ee12588f16e344a7950cec231df77, type: 3}

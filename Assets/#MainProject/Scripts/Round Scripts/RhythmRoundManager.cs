@@ -23,11 +23,17 @@ public class RhythmRoundManager : NetworkBehaviour
     [SyncVar] public int currentChainPosition = 0;
     [SyncVar] public float lastBeatFireTime = 0f;
     private int _clusterBeatsLeftToFire = 0;
+    private bool _botMoveChosenForBeat = false;
 
     [SyncVar] private double _startTime;
 
     [Header("Animation Sync")]
     public float windUpTime = 0.53f;
+    [Tooltip("How many seconds before the beat the bot decides its move and starts approaching. " +
+             "Must be >= windUpTime so the attack animation can still fire at wind-up. Raise this if " +
+             "the bot spawns FAR from the player so it has enough runway to reach the attack point on " +
+             "the beat without sprinting. Capped to the actual gap between beats at runtime.")]
+    public float botApproachLeadTime = 1.6f;
 
     [Header("Round Music")]
     public AudioClip slowRhythmMusic;
@@ -48,6 +54,13 @@ public class RhythmRoundManager : NetworkBehaviour
     // We now use this exact same list for ALL 3 game modes!
     private List<float> _upcomingImpacts = new List<float>();
     private List<int> _clusterSizes = new List<int>();
+
+    // FORCED drone segments from beatmap density: runs of 3+ beats each <1.0s apart. Each entry is the
+    // list of beat times in that dense run. When the song reaches one, a drone segment fires with one
+    // drone per beat. Detected at map load; consumed (removed) as each fires so it only triggers once.
+    private const float DENSE_GAP = 1.35f;      // beats closer than this count as part of a dense run
+    private const int   DENSE_MIN = 2;          // a run needs at least this many beats (2+ beats <1.2s = drones)
+    private readonly List<List<float>> _denseRuns = new List<List<float>>();
 
     private bool _heavyHitThisBeat  = false;
     private bool _tiebreakerPaused  = false;
@@ -117,6 +130,11 @@ public class RhythmRoundManager : NetworkBehaviour
     [Tooltip("The bot's fixed home — assign 'Start Position (24)'.")]
     public Transform botStartPosition;
 
+    [Header("Bot Attack Position")]
+    [Tooltip("Optional manual point the bot steps to for its attack. Assign an empty GameObject in the scene. " +
+             "If empty, the bot computes a point in front of the player instead.")]
+    public Transform botAttackPosition;
+
     // Human + bot home spots. Use the assigned Start Position Transforms; fall back to the old
     // fixed coords if unassigned. Drive round setup, the bot spawn, AND the LateUpdate home-lock.
     private Vector3 _spawnP1 => playerStartPosition != null ? playerStartPosition.position : new Vector3(0f, 0f, -2.5f);
@@ -165,9 +183,11 @@ public class RhythmRoundManager : NetworkBehaviour
     // show in the picker — they're no longer forced through the fixed buttonNames array.
     private string PrettyMapLabel(string mapName, int btn)
     {
-        if (buttonNames != null && btn >= 0 && btn < buttonNames.Length && !string.IsNullOrEmpty(buttonNames[btn]))
-            return buttonNames[btn];
-        string s = mapName.Replace('_', ' ').Replace('-', ' ').Trim();
+        // Always show the ACTUAL song name (the map/file name), prettied up — not the made-up inspector
+        // button names. Strips a trailing file extension and turns _/- into spaces.
+        if (string.IsNullOrEmpty(mapName)) return "";
+        string s = System.IO.Path.GetFileNameWithoutExtension(mapName);
+        s = s.Replace('_', ' ').Replace('-', ' ').Trim();
         return string.IsNullOrEmpty(s) ? mapName : s.ToUpper();
     }
 
@@ -247,7 +267,83 @@ public class RhythmRoundManager : NetworkBehaviour
             Debug.Log($"<color=green>STARTER DECK:</color> {player.PlayerName} starts with {string.Join(",", inv.ownedCombatCards)}");
         }
 
-        // Go straight to the round picker — no first shop.
+#if UNITY_EDITOR
+        // PC TEST AUTO-START: in the Editor on flat (non-VR), skip the menus — random name, random
+        // mapped song, auto-start ~5s after entering. Set editorAutoStart=false to use the normal flow.
+        if (editorAutoStart && !VRCameraDriver.VRActive)
+        {
+            StartCoroutine(EditorAutoStart());
+            return;
+        }
+#endif
+
+        // VR: pause on a 3D "Play" + leaderboard entry screen first (breathing room). The VRStartMenu
+        // shows for the local player; pressing Play calls CmdBeginFromStartMenu → ShowRoundPicker.
+        // Flat: go straight to the round picker as before.
+        if (VRCameraDriver.VRActive)
+        {
+            WaitingForVRStart = true;
+        }
+        else
+        {
+            ShowRoundPicker();
+        }
+    }
+
+#if UNITY_EDITOR
+    [Header("PC Test (Editor only)")]
+    [Tooltip("Editor + flat only: random name, random mapped song, auto-start ~5s after entering. " +
+             "Skips the start menu / picker for quick testing. Off in VR and all builds.")]
+    public bool editorAutoStart = true;
+
+    [Server]
+    private IEnumerator EditorAutoStart()
+    {
+        // Random test name for the local player.
+        string[] names = { "ACE", "NEO", "VYX", "KAI", "ZED", "JET", "RIO", "MAX", "FOX", "NYX" };
+        string rnd = names[Random.Range(0, names.Length)] + Random.Range(10, 99);
+        GameManager.SetPlayerName(rnd);
+        var lp = GameManager.localPlayer;
+        if (lp != null) lp.SetNameNetworked(rnd);
+        Debug.Log($"<color=cyan>[EditorAutoStart]</color> name = {rnd}");
+
+        // Pick a random PLAYABLE mapped song (has audio).
+        var playable = new List<string>();
+        foreach (var n in AllPlayableMapNames())
+        {
+            bool hasAudio = GetClipForMap(n) != null || PlayerPrefs.HasKey("CustomMapPath_" + n)
+                         || !string.IsNullOrEmpty(BeatMapStore.FindSongFile(n));
+            if (hasAudio) playable.Add(n);
+        }
+
+        // Countdown ~5s after entering the scene so you can see it spin up.
+        yield return new WaitForSeconds(5f);
+
+        if (playable.Count > 0)
+        {
+            string song = playable[Random.Range(0, playable.Count)];
+            Debug.Log($"<color=cyan>[EditorAutoStart]</color> song = {song}");
+            ShowRoundPicker();                 // arm the picker so SelectRoundType is accepted
+            SelectRoundType(RoundType.CustomTrack, song);
+        }
+        else
+        {
+            Debug.LogWarning("[EditorAutoStart] no playable songs found — falling back to Slow round.");
+            ShowRoundPicker();
+            SelectRoundType(RoundType.SlowRhythm);
+        }
+    }
+#endif
+
+    // True while the VR entry screen (Play button + leaderboard) is up, before the first round picker.
+    [SyncVar] public bool WaitingForVRStart = false;
+
+    // Called by the VR Play button (client → server). Dismisses the entry screen and opens the picker.
+    [Command(requiresAuthority = false)]
+    public void CmdBeginFromStartMenu()
+    {
+        if (!WaitingForVRStart) return;
+        WaitingForVRStart = false;
         ShowRoundPicker();
     }
 
@@ -515,6 +611,7 @@ public class RhythmRoundManager : NetworkBehaviour
         _upcomingImpacts.Clear();
         _clusterSizes.Clear();
         _isWindUpFired = false;
+        _botMoveChosenForBeat = false;
 
         if (slowRhythmMusic != null && BeatAnalyzer.Instance != null)
             BeatAnalyzer.Instance.audioSource.clip = slowRhythmMusic;
@@ -545,6 +642,7 @@ public class RhythmRoundManager : NetworkBehaviour
         _pendingCustomAudioPlay = true;
 
         _isWindUpFired = false;
+        _botMoveChosenForBeat = false;
         SetupRound();
     }
 
@@ -552,6 +650,9 @@ public class RhythmRoundManager : NetworkBehaviour
     [Server]
     private void SetupRound()
     {
+        // A new round is starting: clear the end-of-round guard so the round can actually end.
+        _isEndingRound = false;
+
         EnsureBotExists();
 
         // Anchor BOTH fighters to their spawn at the start of EVERY round (including round 1, which
@@ -666,6 +767,7 @@ public class RhythmRoundManager : NetworkBehaviour
         _startTime = 0;
         _upcomingImpacts.Clear();
         _isWindUpFired = false;
+        _botMoveChosenForBeat = false;
         currentChainPosition = 0;
         lastBeatFireTime = 0f;
         _clusterBeatsLeftToFire = 0;
@@ -679,6 +781,13 @@ public class RhythmRoundManager : NetworkBehaviour
                 CardManager cm = player.GetComponent<CardManager>();
                 if (cm != null) cm.currentHandIndices.Clear();
             }
+        }
+
+        // Make sure a mid-approach bot doesn't stay stuck away from home when the round stops.
+        if (_activeBot != null)
+        {
+            _activeBot.GetComponent<PlayerController>()?.ClearApproachOverride();
+            _activeBot.GetComponent<BotBeatApproach>()?.CancelApproach();
         }
     }
 
@@ -800,26 +909,57 @@ public class RhythmRoundManager : NetworkBehaviour
 
         yield return new WaitForSeconds(3f);
 
-        if (p1RoundWins >= 5 || p2RoundWins >= 5 || currentRoundNumber > 9)
+        // MATCH ends after 2 rounds total. Otherwise: show the per-round WIN/LOSE panel, then the shop.
+        bool matchOver = currentRoundNumber > 2;
+
+        if (matchOver)
         {
             if (p1RoundWins > p2RoundWins) matchWinner = 1;
             else if (p2RoundWins > p1RoundWins) matchWinner = 2;
             else matchWinner = 3;
             isMatchOver = true;
 
+            // Big WIN/LOSE + leaderboard panel; MatchResultHud auto-LOGS the local player's run.
             RpcShowMatchResult(matchWinner, p1RoundWins, p2RoundWins, p1TotalCredits, p2TotalCredits);
-            // Hold on the WIN/LOSE + leaderboard panels long enough to read the board, then reload the
-            // scene — which fully resets the match (inventory/round wins/scores are all respawned) and
-            // starts fresh from round 1, win or lose.
+            // Hold on the panels long enough to read the board, then reload the scene — fully resets the
+            // match (inventory/round wins/scores all respawned) and starts fresh, win or lose.
             yield return new WaitForSeconds(8f);
             NetworkManager.singleton.ServerChangeScene(SceneManager.GetActiveScene().name);
             yield break;
         }
 
+        // Per-round result panel (WIN/LOSE by points) BEFORE the shop, then a short beat to read it.
+        // Also records each player's running match score to the leaderboard (overwrites their row).
+        RpcShowRoundResultPanel(roundWinner, p1.MatchScore, p2.MatchScore);
+        yield return new WaitForSeconds(3f);
+
         ResetPlayersForNextRound();
 
         // Post-round shop with credits. VR shows it as a world-space panel (VRMenus); flat as IMGUI.
         ShopPhaseManager.Instance?.StartShopPhase(currentRoundNumber);
+
+        // Coroutine is finished; clear the guard so the next round can end normally.
+        _isEndingRound = false;
+    }
+
+    // Per-round WIN/LOSE panel for the LOCAL player (by points). Match-end uses RpcShowMatchResult.
+    // Also records the local player's running match score to the leaderboard (overwrites their row).
+    [ClientRpc]
+    private void RpcShowRoundResultPanel(int roundWinner, int p1MatchScore, int p2MatchScore)
+    {
+        var lp = GameManager.localPlayer;
+        if (lp == null) return;
+        var pc = lp.GetComponent<PlayerCombat>();
+        if (pc == null) return;
+        int myIndex = GetPlayerIndex(pc);
+        bool iWon = (myIndex >= 0 && roundWinner == myIndex + 1);
+        bool draw = (roundWinner == 0);
+        MatchResultHud.ShowRoundResult(iWon, draw, 3f);
+
+        // Fill the leaderboard with this player's running score each round (Record upserts by name).
+        int myScore = (myIndex == 1) ? p2MatchScore : p1MatchScore;
+        string myName = string.IsNullOrEmpty(lp.PlayerName) ? "PLAYER" : lp.PlayerName;
+        LeaderboardStore.Record(myName, myScore);
     }
 
     [Server]
@@ -827,6 +967,7 @@ public class RhythmRoundManager : NetworkBehaviour
     {
         _p1RoundDamageDealt = 0;
         _p2RoundDamageDealt = 0;
+        DroneRushSegment.Instance?.ResetForNewRound(); // re-arm the drone-rush trigger each round
 
         int idx = 0;
         foreach (var player in GameManager.players)
@@ -866,6 +1007,7 @@ public class RhythmRoundManager : NetworkBehaviour
             if (botCombat != null) botCombat.ResetRoundStats();
             _activeBot.transform.position = BotHome;
             _activeBot.GetComponent<PlayerController>().SetHome(BotHome); // bot anchor → fixed, equal distance + Y lift
+            _activeBot.GetComponent<PlayerController>().ClearApproachOverride(); // ensure it isn't stuck mid-run-in
 
             PlayerController botController = _activeBot.GetComponent<PlayerController>();
             PlayerController human = null;
@@ -915,6 +1057,32 @@ public class RhythmRoundManager : NetworkBehaviour
 
     private void Update()
     {
+#if UNITY_EDITOR && ENABLE_INPUT_SYSTEM
+        // --- EDITOR FAST-TEST SHORTCUT (Space) — uses the NEW Input System (the project's active one;
+        // the old UnityEngine.Input.GetKeyDown threw an exception every frame and broke Update). ---
+        var _kb = UnityEngine.InputSystem.Keyboard.current;
+        if (_kb != null && _kb.spaceKey.wasPressedThisFrame)
+        {
+            if (WaitingForVRStart)
+            {
+                string randomName = "";
+                for (int i = 0; i < 3; i++) randomName += (char)('A' + Random.Range(0, 26));
+                GameManager.SetPlayerName(randomName);
+                var lp = GameManager.localPlayer;
+                if (lp != null) lp.SetNameNetworked(randomName);
+                CmdBeginFromStartMenu();
+                return;
+            }
+            if (isServer && isRoundPickerActive)
+            {
+                string map = FirstUnusedCustomMap();
+                if (!string.IsNullOrEmpty(map)) SelectRoundType(RoundType.CustomTrack, map);
+                else SelectRoundType(RoundType.SlowRhythm);
+                return;
+            }
+        }
+#endif
+
         // --- ROUND PICKER AUTO-SELECT ---
         // Runs BEFORE the round-active early-return and independently of OnGUI, so it
         // still fires in VR where the IMGUI picker is suppressed.
@@ -986,10 +1154,27 @@ public class RhythmRoundManager : NetworkBehaviour
                 return;
             }
 
+            // FORCED drone segment: when the song reaches a dense beat run, hand it to DroneRushSegment
+            // (one drone per beat). Skipped if a drone segment is already running.
+            CheckForcedDroneRun(currentTime);
+
             if (_upcomingImpacts.Count == 0) return;
 
             {
                 float targetBeat = _upcomingImpacts[0];
+
+                // Bot early think: decide the move and start approaching well before the beat so
+                // the bot reaches the attack point in time and the animation reads cleanly.
+                if (!_botMoveChosenForBeat && currentTime >= targetBeat - Mathf.Max(botApproachLeadTime, windUpTime))
+                {
+                    _botMoveChosenForBeat = true;
+                    foreach (var player in GameManager.players)
+                    {
+                        if (player == null) continue;
+                        BotController bot = player.GetComponent<BotController>();
+                        if (bot != null) bot.ThinkNextMove();
+                    }
+                }
 
                 // Wind Up Logic
                 if (!_isWindUpFired && currentTime >= targetBeat - windUpTime)
@@ -1001,9 +1186,7 @@ public class RhythmRoundManager : NetworkBehaviour
                         {
                             BotController bot = player.GetComponent<BotController>();
                             PlayerCombat pc = player.GetComponent<PlayerCombat>();
-                            if (bot != null)
-                                bot.ThinkNextMove();
-                            else if (!IsSingleMoveMode())
+                            if (bot == null && !IsSingleMoveMode())
                                 AssignRandomComboMove(pc);
                             pc.ExecuteRhythmWindUp();
                         }
@@ -1017,6 +1200,7 @@ public class RhythmRoundManager : NetworkBehaviour
                 if (currentTime >= targetBeat)
                 {
                     _isWindUpFired = false;
+                    _botMoveChosenForBeat = false;
                     ExecutePulseImpact();
 
                     _upcomingImpacts.RemoveAt(0);
@@ -1084,16 +1268,28 @@ public class RhythmRoundManager : NetworkBehaviour
         foreach (var n in BeatMapStore.AllNames())
             if (!string.IsNullOrEmpty(n) && !names.Contains(n)) names.Add(n);
 
-        // 2) Live editor registry (PlayerPrefs) — covers a map just saved this session.
+        // 2) Live editor registry (PlayerPrefs) — covers a map just saved this session. STRICT: only if
+        //    the beatmap FILE still exists on disk. (Was MapExists, which also trusted stale PlayerPrefs
+        //    beat data — so a map you deleted from disk kept showing as a ghost button. ExistsOnDisk
+        //    ignores prefs, so the Level UI reflects exactly the .txt/songs you kept.)
         string registry = PlayerPrefs.GetString("CustomMapRegistry", "");
         if (!string.IsNullOrEmpty(registry))
             foreach (string n in registry.Split('|'))
-                if (!string.IsNullOrEmpty(n) && MapExists(n) && !names.Contains(n)) names.Add(n);
+                if (!string.IsNullOrEmpty(n) && BeatMapStore.ExistsOnDisk(n) && !names.Contains(n)) names.Add(n);
 
-        // 3) Inspector-assigned clips.
+        // 3) Inspector-assigned clips — same strict, disk-only existence check.
         if (availableTracks != null)
             foreach (AudioClip t in availableTracks)
-                if (t != null && MapExists(t.name) && !names.Contains(t.name)) names.Add(t.name);
+                if (t != null && BeatMapStore.ExistsOnDisk(t.name) && !names.Contains(t.name)) names.Add(t.name);
+
+        // Push the Chabi map to the LAST spot in the picker (it loaded first alphabetically).
+        int chabi = names.FindIndex(n => n != null && n.ToLower().Contains("chabi"));
+        if (chabi >= 0 && chabi < names.Count - 1)
+        {
+            string c = names[chabi];
+            names.RemoveAt(chabi);
+            names.Add(c);
+        }
 
         return names;
     }
@@ -1131,6 +1327,36 @@ public class RhythmRoundManager : NetworkBehaviour
         return null;
     }
 
+    // Fire a forced drone segment when the song nears the first beat of the next dense run. Hands the
+    // run's beat times to DroneRushSegment (one drone per beat). Each run triggers once (removed after).
+    [Server]
+    private void CheckForcedDroneRun(float currentTime)
+    {
+        if (_denseRuns.Count == 0) return;
+        if (DroneRushSegment.Instance == null) return;
+
+        var run = _denseRuns[0];
+        if (run == null || run.Count == 0) { _denseRuns.RemoveAt(0); return; }
+
+        // Lead in by the drone travel time so the first drone arrives ON the run's first beat.
+        float lead = DroneRushSegment.Instance.droneTravelTime;
+        if (currentTime < run[0] - lead) return;        // not time yet
+        _denseRuns.RemoveAt(0);                          // consume this run (only fires once)
+
+        // Convert the beat track-times into the arrival schedule and start a forced segment. If a drone
+        // segment is already running (e.g. score-triggered), DroneRushSegment ignores this.
+        var human = GetLocalHumanCombat();
+        if (human != null) DroneRushSegment.Instance.StartForcedSegment(human, run);
+    }
+
+    private PlayerCombat GetLocalHumanCombat()
+    {
+        foreach (var p in GameManager.players)
+            if (p != null && p.GetComponent<BotController>() == null)
+                return p.GetComponent<PlayerCombat>();
+        return null;
+    }
+
     [Server]
     private void LoadCustomMapData()
     {
@@ -1148,6 +1374,26 @@ public class RhythmRoundManager : NetworkBehaviour
             if (float.TryParse(tStr, out float t)) loadedTaps.Add(t);
         }
         loadedTaps.Sort(); // Ensure perfect chronological order
+
+        // Detect FORCED-segment dense runs: stretches of DENSE_MIN+ beats each <DENSE_GAP apart (tight rush).
+        _denseRuns.Clear();
+        int r = 0;
+        while (r < loadedTaps.Count)
+        {
+            int runEnd = r;
+            while (runEnd + 1 < loadedTaps.Count && (loadedTaps[runEnd + 1] - loadedTaps[runEnd]) < DENSE_GAP)
+                runEnd++;
+            int runLen = runEnd - r + 1;
+            if (runLen >= DENSE_MIN)
+            {
+                var run = new List<float>();
+                for (int k = r; k <= runEnd; k++) run.Add(loadedTaps[k]);
+                _denseRuns.Add(run);
+            }
+            r = runEnd + 1;
+        }
+        if (_denseRuns.Count > 0)
+            Debug.Log($"<color=magenta>[DRONE]</color> {_denseRuns.Count} forced drone run(s) detected in '{mapName}'.");
 
         int i = 0;
         while (i < loadedTaps.Count)
@@ -1276,6 +1522,14 @@ public class RhythmRoundManager : NetworkBehaviour
         if (p1Interrupted) { p1.TakeDamage(5); p1DamageTaken += 5; }
         if (p2Interrupted) { p2.TakeDamage(5); p2DamageTaken += 5; }
 
+        // BOT DODGE (visual only, no counter): when the HUMAN loses/mistimes the trade (gets
+        // interrupted), the bot slips left/right so the player's punch reads as "dodged". The bot still
+        // resolves its own move normally — this is just feedback juice, no extra damage.
+        bool p1IsBot = p1.GetComponent<BotController>() != null;
+        bool p2IsBot = p2.GetComponent<BotController>() != null;
+        if (p1Interrupted && !p1IsBot && p2IsBot) p2.PlayDodgeAnim();      // human p1 lost → bot p2 dodges
+        else if (p2Interrupted && !p2IsBot && p1IsBot) p1.PlayDodgeAnim(); // human p2 lost → bot p1 dodges
+
         // PROCESS ACTUAL HITS
         int p1Result = ProcessDamage(p1, m1, p2, m2, p1Interrupted, out int dmgToP2, out string p1Reason);
         int p2Result = ProcessDamage(p2, m2, p1, m1, p2Interrupted, out int dmgToP1, out string p2Reason);
@@ -1286,6 +1540,28 @@ public class RhythmRoundManager : NetworkBehaviour
         // Track damage dealt for round economy
         if (dmgToP2 > 0) _p1RoundDamageDealt += dmgToP2;
         if (dmgToP1 > 0) _p2RoundDamageDealt += dmgToP1;
+
+        // ── Tell the bot's run-in how the trade went, so it picks the right RETURN animation ──
+        // (got-hit → knockback carries it home; landed → back-dash; otherwise neutral). Only matters
+        // while the bot is mid run-in.
+        {
+            PlayerCombat botPc = p1IsBot ? p1 : (p2IsBot ? p2 : null);
+            if (botPc != null)
+            {
+                int botTook  = p1IsBot ? p1DamageTaken : p2DamageTaken;
+                int botDealt = p1IsBot ? p2DamageTaken : p1DamageTaken;
+                var botMove  = p1IsBot ? m1 : m2;
+                bool botPlayedDefense = IsDefensiveMove(botMove);
+                var approach = botPc.GetComponent<BotBeatApproach>();
+                if (approach != null && approach.IsApproaching)
+                {
+                    if (botTook > 0)              approach.ReportOutcome(BotBeatApproach.Outcome.GotHit);
+                    else if (botDealt > 0)        approach.ReportOutcome(BotBeatApproach.Outcome.LandedHit);
+                    else if (botPlayedDefense)    approach.ReportOutcome(BotBeatApproach.Outcome.Defended); // blocked/parried/dodged a hit → confident retreat
+                    else                          approach.ReportOutcome(BotBeatApproach.Outcome.Clash);    // neutral whiff
+                }
+            }
+        }
 
         // ── SCORE the exchange outcome (the "who benefited" rewards) ──────────────────────────────
         // ProcessDamage(attacker, defender) returns: -1 = the DEFENDER countered the attack (defender
@@ -1941,8 +2217,10 @@ public class RhythmRoundManager : NetworkBehaviour
                 if (attacker.connectionToClient != null) attacker.TargetPlaySuccessSound("Attack");
                 if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Hurt");
                 attacker.GloveStrikeFlash(atk); // gloves flare + haptic on the striking hand
-                attacker.SpawnSwordImpact(defender.transform.position + Vector3.up); // sword slash burst (no-op for glove fighters)
-                attacker.SpawnFamilyHit(atk, defender.transform.position + Vector3.up); // per-family HIT effect from the attacker's FighterCardVFX
+                // ON-HIT VFX REMOVED — only BLOOD plays on a landed hit now (BloodOnHit watches the
+                // damage). The sword-impact burst and the per-family hit spark are disabled per design.
+                // attacker.SpawnSwordImpact(defender.transform.position + Vector3.up);
+                // attacker.SpawnFamilyHit(atk, defender.transform.position + Vector3.up);
 
                 // ── POST-HIT PERK EFFECTS ──────────────────────────────────
                 if (perkOn)
@@ -2182,6 +2460,16 @@ public class RhythmRoundManager : NetworkBehaviour
 
     private bool IsOffense(CardFamily f) => f == CardFamily.Strike || f == CardFamily.Throw;
 
+    // A move counts as "defensive" if it's a Block/Parry card or a left/right dodge dash. Used to give
+    // the bot a confident back-dash recovery when it successfully defends (took no damage), instead of
+    // the neutral idle.
+    private bool IsDefensiveMove(PlayerCombat.RhythmAction move)
+    {
+        if (move.dash != Vector3.zero) return true; // a dodge
+        CardFamily f = GetFamily(move.attack);
+        return f == CardFamily.Block || f == CardFamily.Parry;
+    }
+
     // Taunt enforcement: if a player was ordered to Strike this beat and didn't, punish them.
     [Server]
     private void CheckMustStrike(PlayerCombat p, PlayerCombat.RhythmAction move)
@@ -2409,6 +2697,7 @@ public class RhythmRoundManager : NetworkBehaviour
                 {
                     pc.lastVocalSpikeTime   = -1f;
                     pc.lastVocalSpikeVolume = 0f;
+                    pc.lastVocalSpikeOffset = -1f;
                 }
                 pc.IsParryActive = false;
 
@@ -2552,17 +2841,12 @@ public class RhythmRoundManager : NetworkBehaviour
     }
 
     [Server]
-    private void PlayHitParticle(Vector3 worldPosition)
-    {
-        RpcPlayHitParticle(worldPosition);
-    }
+    // ON-HIT VFX REMOVED — the generic "Hit" particle no longer spawns on a landed hit. Only BLOOD
+    // plays now (BloodOnHit reacts to the damage). Kept as a no-op so the ~14 call sites stay valid.
+    private void PlayHitParticle(Vector3 worldPosition) { }
 
     [ClientRpc]
-    private void RpcPlayHitParticle(Vector3 worldPosition)
-    {
-        if (ParticlePoolManager.Instance != null)
-            ParticlePoolManager.Instance.PlayParticle("Hit", worldPosition);
-    }
+    private void RpcPlayHitParticle(Vector3 worldPosition) { }
 
     [Server]
     private void PlayCardActivationEffect(PlayerCombat player, string cardName)
@@ -2676,8 +2960,12 @@ public class RhythmRoundManager : NetworkBehaviour
                 pc.TargetShowTimingFeedback("BAD");
                 return;
             }
-            float chainOffset = Mathf.Abs(targetBeat - pc.lastVocalSpikeTime);
-            string chainRating = (chainOffset <= 0.1f) ? "EXCELLENT" : "GOOD";
+            // Prefer the TRUE offset the client measured at shout time (clock-independent); fall back
+            // to the absolute-time diff only if it wasn't recorded.
+            float chainOffset = pc.lastVocalSpikeOffset >= 0f
+                ? pc.lastVocalSpikeOffset
+                : Mathf.Abs(targetBeat - pc.lastVocalSpikeTime);
+            string chainRating = (chainOffset <= 0.18f) ? "EXCELLENT" : "GOOD";
             if (chainRating == "EXCELLENT") pc.roundExcellentCount++;
             if (chainRating == "EXCELLENT") pc.AddScore(PlayerCombat.SCORE_ONBEAT_EXCELLENT, "EXCELLENT chain");
             else pc.AddScore(PlayerCombat.SCORE_ONBEAT_GOOD, "GOOD chain");
@@ -2694,23 +2982,30 @@ public class RhythmRoundManager : NetworkBehaviour
             return;
         }
 
-        float offset = Mathf.Abs(targetBeat - pc.lastVocalSpikeTime);
+        // Prefer the TRUE offset the client measured at shout time (clock-independent) — this is the
+        // fix for "shouted right on the beat but it showed BAD": comparing the server beat clock to the
+        // client audio clock could drift. Fall back to the absolute diff only if no offset was recorded.
+        float offset = pc.lastVocalSpikeOffset >= 0f
+            ? pc.lastVocalSpikeOffset
+            : Mathf.Abs(targetBeat - pc.lastVocalSpikeTime);
 
+        // GOOD-window per move — widened to be more forgiving (was as tight as 0.15s). The harder
+        // counter cards still need tighter timing, but everything's looser than before.
         float window = move.attack switch
         {
-            "Block"            => 0.4f,
-            "Clutch"           => 0.15f,
-            "Reverse"          => 0.2f,
-            "Mirror"           => 0.2f,
-            "Trap"             => 0.35f,
-            "Cage"             => 0.35f,
-            "UnbreakablePunch" => 0.2f,
-            "Overclock"        => 0.2f,
-            _                  => 0.3f
+            "Block"            => 0.55f,
+            "Clutch"           => 0.30f,
+            "Reverse"          => 0.35f,
+            "Mirror"           => 0.35f,
+            "Trap"             => 0.50f,
+            "Cage"             => 0.50f,
+            "UnbreakablePunch" => 0.35f,
+            "Overclock"        => 0.35f,
+            _                  => 0.45f
         };
 
         string rating = "BAD";
-        if (offset <= 0.1f) rating = "EXCELLENT";
+        if (offset <= 0.18f) rating = "EXCELLENT"; // wider EXCELLENT sweet-spot (was 0.1)
         else if (offset <= window) rating = "GOOD";
 
         if (rating == "EXCELLENT") pc.roundExcellentCount++;
@@ -3404,8 +3699,12 @@ public class RhythmRoundManager : NetworkBehaviour
             string mapName = allMapNames[i];
             int btn = i + 2;
             // No audio in the project for this beatmap → skip it entirely (a silent round can't play,
-            // so don't even list it).
-            bool hasAudio = GetClipForMap(mapName) != null || PlayerPrefs.HasKey("CustomMapPath_" + mapName)
+            // so don't even list it). Only count audio that ACTUALLY exists: a project clip, a durable
+            // song file on disk, or a CustomMapPath pref whose file is still present (a bare leftover
+            // pref key for a deleted song no longer keeps a silent ghost in the list).
+            string pathPref = PlayerPrefs.GetString("CustomMapPath_" + mapName, "");
+            bool prefAudioExists = !string.IsNullOrEmpty(pathPref) && System.IO.File.Exists(pathPref);
+            bool hasAudio = GetClipForMap(mapName) != null || prefAudioExists
                          || !string.IsNullOrEmpty(BeatMapStore.FindSongFile(mapName));
             if (!hasAudio) continue;
 
@@ -3426,6 +3725,23 @@ public class RhythmRoundManager : NetworkBehaviour
     public float GetNextBeatTime()
     {
         return (_upcomingImpacts.Count > 0) ? _upcomingImpacts[0] : 0f;
+    }
+
+    /// <summary>
+    /// Returns all upcoming beat track-times in [fromTrackTime, toTrackTime].
+    /// Used by DroneRushSegment to schedule drones on real mapped beats.
+    /// </summary>
+    public List<float> GetUpcomingBeats(float fromTrackTime, float toTrackTime)
+    {
+        var list = new List<float>();
+        if (fromTrackTime >= toTrackTime) return list;
+        foreach (float t in _upcomingImpacts)
+        {
+            if (t < fromTrackTime) continue;
+            if (t > toTrackTime) break;
+            list.Add(t);
+        }
+        return list;
     }
 
     public float GetCurrentTrackTime()
@@ -3462,6 +3778,7 @@ public class RhythmRoundManager : NetworkBehaviour
             pc.ConsumeNextMove();
             pc.lastVocalSpikeTime   = -1f;
             pc.lastVocalSpikeVolume = 0f;
+            pc.lastVocalSpikeOffset = -1f;
             pc.IsParryActive        = false;
         }
 

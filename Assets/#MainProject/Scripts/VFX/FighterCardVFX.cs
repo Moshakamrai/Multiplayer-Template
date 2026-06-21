@@ -96,7 +96,7 @@ public class FighterCardVFX : MonoBehaviour
     public float effectHeight = 1.2f;
     [Tooltip("Seconds before one-shot VFX instances are cleaned up.")]
     public float oneShotLifetime = 3f;
-    [Tooltip("Uniform scale applied to spawned hit / status / reaction VFX. Lower this if the imported effects look too big (1 = prefab's own size).")]
+    [Tooltip("Uniform scale applied to spawned status / reaction VFX. Lower this if the imported effects look too big (1 = prefab's own size).")]
     [Range(0.05f, 3f)] public float effectSizeScale = 0.5f;
 
     // Apply the global size scale to a freshly-spawned one-shot VFX instance.
@@ -217,14 +217,9 @@ public class FighterCardVFX : MonoBehaviour
     }
 
     /// 3) Hit effect: this fighter's attack of `family` landed on `victimPos` — burst there.
-    public void PlayHit(CardFamily family, Vector3 victimPos)
-    {
-        var set = SetForFamily(family);
-        if (set?.hitVfx == null) return;
-        var go = Instantiate(set.hitVfx, victimPos, Quaternion.identity);
-        ScaleEffect(go);
-        Destroy(go, oneShotLifetime);
-    }
+    // DISABLED: the project already has a dedicated blood effect, so these imported hit bursts are
+    // skipped entirely.
+    public void PlayHit(CardFamily family, Vector3 victimPos) { }
 
     private IEnumerator TintRoutine(FamilyVfx set)
     {

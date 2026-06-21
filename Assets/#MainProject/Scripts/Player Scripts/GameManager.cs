@@ -319,7 +319,19 @@ public class GameManager : NetworkManager
 public override void Start()
 {
     base.Start();
-    
+
+#if UNITY_EDITOR
+    // PC TEST: if you hit Play directly into the rhythm gameplay scene (which normally only runs after
+    // the lobby calls StartHost), auto-start a host so the round flow actually runs. Editor-only;
+    // never in builds. Skipped if networking is already active (real lobby flow) or in VR.
+    if (!NetworkServer.active && !NetworkClient.active && !VRCameraDriver.VRActive
+        && FindObjectOfType<RhythmRoundManager>() != null)
+    {
+        Debug.Log("<color=cyan>[GameManager]</color> Editor PC test — auto-starting host for the rhythm scene.");
+        StartHost();
+    }
+#endif
+
     // 3. UI Protection: Since GameManager persists, we must find the UI of the current scene.
     UIDocument uiDoc = GetComponent<UIDocument>();
     if (uiDoc == null || uiDoc.rootVisualElement == null) return;

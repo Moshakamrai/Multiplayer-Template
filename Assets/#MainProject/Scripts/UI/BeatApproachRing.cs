@@ -74,16 +74,30 @@ public class BeatApproachRing : MonoBehaviour
         float closeness = 1f - Mathf.Clamp01(t);
         Color appCol = Color.Lerp(ApproachColor, FlashColor, _flash) * (1f + closeness * 1.5f + _flash * 2f);
 
-        // Vertical ring that FACES the player: build it from the camera's right axis (horizontal) and
-        // world up (vertical), so it stands upright like a portal around the bot instead of lying flat.
-        Camera cam = Camera.main;
-        Vector3 right = cam != null ? cam.transform.right : Vector3.right;
-        right.y = 0f;
-        right = right.sqrMagnitude > 0.001f ? right.normalized : Vector3.right;
+        // Vertical ring that faces the player from a FIXED orientation. Use the spawn-to-spawn axis
+        // instead of the camera's right so it doesn't spin as the bot/camera move.
+        Vector3 right = FixedRightAxis();
         Vector3 up = Vector3.up;
 
         DrawCircle(_approach, center, radius, appCol, right, up);
         DrawCircle(_target,   center, TARGET_RADIUS, Color.Lerp(TargetColor, FlashColor, _flash), right, up);
+    }
+
+    // Stable horizontal axis perpendicular to the bot-to-player spawn direction.
+    private Vector3 FixedRightAxis()
+    {
+        var rmm = RhythmRoundManager.Instance;
+        if (rmm != null && rmm.playerStartPosition != null && rmm.botStartPosition != null)
+        {
+            Vector3 toPlayer = rmm.playerStartPosition.position - rmm.botStartPosition.position;
+            toPlayer.y = 0f;
+            if (toPlayer.sqrMagnitude > 0.0001f)
+            {
+                Vector3 right = Vector3.Cross(Vector3.up, toPlayer.normalized);
+                if (right.sqrMagnitude > 0.0001f) return right.normalized;
+            }
+        }
+        return Vector3.right;
     }
 
     private void Build()

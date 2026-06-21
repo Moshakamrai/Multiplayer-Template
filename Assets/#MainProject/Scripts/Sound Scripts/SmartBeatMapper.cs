@@ -13,7 +13,10 @@ public class SmartBeatMapper : MonoBehaviour
 
     [Header("Beat-Snap Settings")]
     [Tooltip("Max distance (seconds) a tap can be from a detected beat and still snap to it. Taps farther than this keep their raw time.")]
-    [Range(0.03f, 0.4f)] public float maxSnapDistance = 0.12f;
+    [Range(0.03f, 0.333f)] public float maxSnapDistance = 0.12f;
+
+    // Hard cap: a quantized beat must never be moved more than 1/3 of a second from the raw tap.
+    private const float MAX_QUANTIZE_SHIFT = 1f / 3f;
 
     [Header("BPM Reference (fallback if analysis not ready)")]
     public float targetBPM = 100f;
@@ -112,8 +115,10 @@ public class SmartBeatMapper : MonoBehaviour
 
         if (!_isRecording || audioSource == null || !audioSource.isPlaying) return;
 
-#if ENABLE_LEGACY_INPUT_MANAGER
-        if (Input.GetKeyDown(KeyCode.Space))
+        // Tap = Spacebar (works under either input backend) OR left mouse click as a fallback so it
+        // taps even if the keyboard read is unavailable. Previously this was only compiled under the
+        // LEGACY input manager — with the new Input System active it was stripped, so Space did nothing.
+        if (TapPressed())
         {
             float t = audioSource.time;
             _rawTaps.Add(t);
@@ -123,7 +128,6 @@ public class SmartBeatMapper : MonoBehaviour
 
             Debug.Log($"Raw Tap: {t:F3}s | Beat offset: {_lastTapOffset * 1000f:+0.0;-0.0}ms");
         }
-#endif
 
         audioSource.GetSpectrumData(_spectrumData, 0, FFTWindow.BlackmanHarris);
     }
@@ -131,6 +135,7 @@ public class SmartBeatMapper : MonoBehaviour
     // ── Beat-snap: snaps each tap to the nearest analyzed beat ───────────
     // Falls back to BPM grid if analysis hasn't completed yet.
     // Taps farther than maxSnapDistance from any beat keep their raw time.
+    // Also hard-clamped so a beat is never moved more than MAX_QUANTIZE_SHIFT (1/3 s).
     private void SnapTapsToBeats()
     {
         _quantizedBeats.Clear();
@@ -168,6 +173,14 @@ public class SmartBeatMapper : MonoBehaviour
                 fallback++;
             }
 
+            // Hard clamp: never move a tap more than 1/3 s from its raw time. If either snap mode
+            // would push it farther, keep the raw tap instead.
+            if (Mathf.Abs(raw - result) > MAX_QUANTIZE_SHIFT)
+            {
+                result = raw;
+                unanchored++;
+            }
+
             _lastRawTime     = raw;
             _lastSnappedTime = result;
 
@@ -193,25 +206,26 @@ public class SmartBeatMapper : MonoBehaviour
         return nearest;
     }
 
-    // Returns signed offset from wherever this tap will actually snap to
+    // Returns signed offset from wherever this tap will actually snap to (respects the 1/3 s cap).
     private float NearestBeatOffset(float tapTime)
     {
         if (_analysisReady && _analyzedBeats.Count > 0)
         {
             float nearest = FindNearestBeat(tapTime);
-            if (Mathf.Abs(tapTime - nearest) <= maxSnapDistance)
-                return tapTime - nearest;
+            float off = tapTime - nearest;
+            if (Mathf.Abs(off) <= maxSnapDistance && Mathf.Abs(off) <= MAX_QUANTIZE_SHIFT)
+                return off;
         }
 
         float snapGrid = (60f / targetBPM) / quantizeDivisor;
-        return tapTime - Mathf.Round(tapTime / snapGrid) * snapGrid;
+        float gridOff = tapTime - Mathf.Round(tapTime / snapGrid) * snapGrid;
+        return Mathf.Abs(gridOff) <= MAX_QUANTIZE_SHIFT ? gridOff : 0f;
     }
 
     // ─────────────────────────────────────────────────────────────────────
     private void OnGUI()
     {
         if (RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isShopPhase) return;
-        if (audioSource == null || audioSource.clip == null) return;
         if (_vizTex == null)
         {
             _vizTex = new Texture2D(1, 1);
@@ -222,12 +236,26 @@ public class SmartBeatMapper : MonoBehaviour
         // Scale the whole mapper UI for phones (no-op on desktop).
         _guiPrev = MobileGUI.Begin(out _vw, out _vh);
 
-        DrawVisualizer();
-        DrawInfoPanel();
-        DrawControlPanel();
-        DrawHowToPanel();
+        // The LOAD panel (Browse/Load + BPM) and Back button ALWAYS draw — otherwise the whole screen
+        // is blank before a song is loaded and you can't even reach the Browse button.
         DrawLoadPanel();
         DrawBackButton();
+
+        // Audio-dependent panels only draw once a clip is loaded.
+        bool hasClip = audioSource != null && audioSource.clip != null;
+        if (hasClip)
+        {
+            DrawVisualizer();
+            DrawInfoPanel();
+            DrawControlPanel();
+            DrawHowToPanel();
+        }
+        else
+        {
+            GUI.Label(new Rect(_vw / 2f - 220f, _vh / 2f - 20f, 440f, 40f),
+                "Load a song (Browse → Load) to start mapping.",
+                Style(18, FontStyle.Bold, Color.yellow, TextAnchor.MiddleCenter));
+        }
 
         MobileGUI.End(_guiPrev);
     }
@@ -801,5 +829,19 @@ public class SmartBeatMapper : MonoBehaviour
         _loadStatus = $"Saved \"{clipName}\" — {_quantizedBeats.Count} beats (permanent).";
         _loadStatusIsError = false;
         Debug.Log($"<color=green>SAVED MAP:</color> {clipName}  ({_quantizedBeats.Count} beats)");
+    }
+
+    // True on the frame a tap is pressed — Spacebar (or left mouse) — under EITHER input backend.
+    private bool TapPressed()
+    {
+#if ENABLE_INPUT_SYSTEM
+        var kb = UnityEngine.InputSystem.Keyboard.current;
+        if (kb != null && kb.spaceKey.wasPressedThisFrame) return true;
+        var ms = UnityEngine.InputSystem.Mouse.current;
+        if (ms != null && ms.leftButton.wasPressedThisFrame) return true;
+        return false;
+#else
+        return Input.GetKeyDown(KeyCode.Space) || Input.GetMouseButtonDown(0);
+#endif
     }
 }

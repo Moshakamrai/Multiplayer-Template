@@ -101,6 +101,23 @@ public class VoskSpeechToText : MonoBehaviour
     private IEnumerator DoStartVoskStt(bool startMicrophone)
     {
         _isInitializing = true;
+
+#if UNITY_ANDROID && !UNITY_EDITOR
+        // Ask for the mic permission FIRST — on Android the mic device often won't appear in
+        // Microphone.devices until the user has granted RECORD_AUDIO, so WaitForMicrophoneInput would
+        // otherwise stall forever on a fresh install.
+        if (!AndroidPermissionHandler.HasMicrophonePermission())
+        {
+            AndroidPermissionHandler.RequestMicrophonePermission();
+            float pt = 0f;
+            while (!AndroidPermissionHandler.HasMicrophonePermission() && pt < 30f)
+            {
+                pt += Time.unscaledDeltaTime;
+                yield return null;
+            }
+        }
+#endif
+
         yield return WaitForMicrophoneInput();
         yield return Decompress();
 
@@ -124,26 +141,56 @@ public class VoskSpeechToText : MonoBehaviour
 
     public void StartRecordingManual()
     {
-        if (!VoiceProcessor.IsRecording && _didInit)
-        {
+        if (VoiceProcessor.IsRecording || !_didInit) return;
+
 #if UNITY_ANDROID && !UNITY_EDITOR
-            AndroidPermissionHandler.RequestMicrophonePermission();
-            if (!AndroidPermissionHandler.HasMicrophonePermission())
-            {
-                Debug.LogError("Microphone permission denied on Android");
-                return;
-            }
+        // On Quest/Android the mic permission must be granted at RUNTIME. RequestUserPermission is
+        // ASYNCHRONOUS — it pops the dialog and returns immediately, so the old code that requested and
+        // then checked HasPermission on the SAME frame always failed (the user hadn't tapped Allow yet)
+        // and bailed forever. That's why VR had no voice while PC did. Now we wait for the grant, then
+        // start recording. If already granted (replays), this proceeds instantly.
+        if (!AndroidPermissionHandler.HasMicrophonePermission())
+        {
+            StartCoroutine(RequestMicThenRecord());
+            return;
+        }
+#endif
+        BeginRecording();
+    }
+
+#if UNITY_ANDROID && !UNITY_EDITOR
+    private IEnumerator RequestMicThenRecord()
+    {
+        AndroidPermissionHandler.RequestMicrophonePermission();
+        // Poll until the user grants it (or a generous timeout). Don't give up on the first frame.
+        float t = 0f;
+        while (!AndroidPermissionHandler.HasMicrophonePermission() && t < 30f)
+        {
+            t += Time.unscaledDeltaTime;
+            yield return null;
+        }
+        if (!AndroidPermissionHandler.HasMicrophonePermission())
+        {
+            Debug.LogError("[VOSK] Microphone permission not granted — voice disabled.");
+            yield break;
+        }
+        // Permission can take a moment to register the mic device — wait for it too.
+        while (Microphone.devices.Length <= 0 && t < 35f) { t += Time.unscaledDeltaTime; yield return null; }
+        BeginRecording();
+    }
 #endif
 
-            _running = true;
+    private void BeginRecording()
+    {
+        if (VoiceProcessor.IsRecording) return;
+        _running = true;
 
-            // --- FASTER POLLING FIX ---
-            // We force the frameSize to 256 instead of the default 512.
-            // This makes the microphone feed Vosk twice as often!
-            VoiceProcessor.StartRecording(16000, 64);
+        // --- FASTER POLLING FIX ---
+        // We force the frameSize to 256 instead of the default 512.
+        // This makes the microphone feed Vosk twice as often!
+        VoiceProcessor.StartRecording(16000, 64);
 
-            StartCoroutine(ThreadedWorkCoroutine());
-        }
+        StartCoroutine(ThreadedWorkCoroutine());
     }
 
     public void StopRecordingManual()

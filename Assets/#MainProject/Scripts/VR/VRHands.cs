@@ -38,9 +38,9 @@ public class VRHands : MonoBehaviour
 
     [Header("Trigger-charge power (VR)")]
     [Tooltip("Hold the trigger and pulse the controller to BUILD power. Charge gained per (m/s of motion · second) while the trigger is held. Higher = fills faster.")]
-    public float chargeGain = 0.85f;
+    public float chargeGain = 0.5f;
     [Tooltip("How fast the power charge dissolves (per second) when you stop moving or release the trigger.")]
-    public float chargeDecay = 0.45f;
+    public float chargeDecay = 0.55f;
     [Tooltip("Controller speed (m/s) above which motion counts as a 'pulse' that builds charge.")]
     public float motionThreshold = 0.4f;
 
@@ -69,6 +69,35 @@ public class VRHands : MonoBehaviour
     // what fires the move and LOCKS IN this charge as the punch's power.
     private static float _charge; // 0..1 accumulated power
     public static float Charge => _charge;
+
+    // ── Live hand + head tracking (exposed for the drone-rush punch/dodge checks) ──────────────
+    // World positions + per-hand speed, updated every frame in UpdateChargeInput(). Other systems
+    // (e.g. DroneRushSegment) read these to test "hand near drone + moving forward fast = a punch"
+    // and "head moved aside = a dodge", without re-reading XR input themselves.
+    private static Vector3 _leftHandPos, _rightHandPos, _headPos;
+    private static float   _leftSpeed, _rightSpeed;
+    private static bool    _tracking;
+
+    public static bool  Tracking      => _tracking;
+    public static Vector3 LeftHandPos => _leftHandPos;
+    public static Vector3 RightHandPos=> _rightHandPos;
+    public static float LeftSpeed     => _leftSpeed;
+    public static float RightSpeed    => _rightSpeed;
+    public static Vector3 HeadPos     => _headPos;
+
+    /// True if either hand is within `radius` of `worldPos` while moving at least `minSpeed` (m/s) —
+    /// i.e. a punch landed on something there. Outputs which hand and that hand's speed (punch power).
+    public static bool PunchedAt(Vector3 worldPos, float radius, float minSpeed,
+                                 out bool rightHand, out float speed)
+    {
+        rightHand = false; speed = 0f;
+        if (!_tracking) return false;
+        bool lHit = Vector3.Distance(_leftHandPos,  worldPos) <= radius && _leftSpeed  >= minSpeed;
+        bool rHit = Vector3.Distance(_rightHandPos, worldPos) <= radius && _rightSpeed >= minSpeed;
+        if (rHit && (_rightSpeed >= _leftSpeed || !lHit)) { rightHand = true;  speed = _rightSpeed; return true; }
+        if (lHit)                                          { rightHand = false; speed = _leftSpeed;  return true; }
+        return false;
+    }
 
     /// Take the current charge as punch power and reset it (called when the lock-in fires on the beat).
     public static float ConsumeCharge()
@@ -150,7 +179,7 @@ public class VRHands : MonoBehaviour
 
         UpdateChargeInput();
 
-        Camera cam = Camera.main;
+        Camera cam = CachedCamera.Main;
         if (cam == null) return;
 
         InputDevice hmd = InputDevices.GetDeviceAtXRNode(XRNode.Head);
@@ -159,6 +188,13 @@ public class VRHands : MonoBehaviour
 
         PlaceGlove(_leftAnchor, InputDevices.GetDeviceAtXRNode(XRNode.LeftHand), cam, headPos, _rotOffsetL);
         PlaceGlove(_rightAnchor, InputDevices.GetDeviceAtXRNode(XRNode.RightHand), cam, headPos, _rotOffsetR);
+
+        // Publish the gloves' real WORLD positions (where the player sees their fists) + head world
+        // position for the drone-rush proximity/dodge checks. (Speed comes from UpdateChargeInput.)
+        if (_leftAnchor  != null) _leftHandPos  = _leftAnchor.position;
+        if (_rightAnchor != null) _rightHandPos = _rightAnchor.position;
+        _headPos = cam.transform.position;
+        _tracking = true;
     }
 
     /// Creates an empty anchor at the glove's true mesh center and reparents the glove under it.
@@ -203,6 +239,10 @@ public class VRHands : MonoBehaviour
             rspeed = (rpos - _prevRPos).magnitude / dt;
         }
         _prevLPos = lpos; _prevRPos = rpos; _havedPrevPos = true;
+
+        // Publish live hand SPEED for the drone-rush punch check (world POSITIONS + head are published
+        // in LateUpdate from the glove anchors, which match where the fists visually are).
+        _leftSpeed = lspeed; _rightSpeed = rspeed;
 
         bool ltrig = ReadBtn(lh, CommonUsages.triggerButton);
         bool rtrig = ReadBtn(rh, CommonUsages.triggerButton);

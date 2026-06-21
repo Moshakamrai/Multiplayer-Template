@@ -176,8 +176,10 @@ public class CardManager : NetworkBehaviour
 
         // Only show the per-family hand during an active single-move round.
         // (Menus/shop = no hand; combo rounds use the combo HUD instead.)
+        // Also hidden during the drone-rush segment — you only punch drones then, cards aren't usable.
         var rmm = RhythmRoundManager.Instance;
-        bool showHand = rmm != null && rmm.isRoundActive && rmm.IsSingleMoveMode();
+        bool droneRush = DroneRushSegment.Instance != null && DroneRushSegment.Instance.SegmentActive;
+        bool showHand = rmm != null && rmm.isRoundActive && rmm.IsSingleMoveMode() && !droneRush;
 
         if (!showHand)
         {
@@ -194,6 +196,53 @@ public class CardManager : NetworkBehaviour
         UpdateHandButton(blockCardButton, handBlock, CardFamily.Block);
         UpdateHandButton(parryCardButton, handParry, CardFamily.Parry);
         UpdateHandButton(supportCardButton, handSupport, CardFamily.Support);
+
+        DriveActiveCardGlow(rmm);
+    }
+
+    // Persistent "this card is the chosen/playing move" glow. The active move (PendingMoveTrigger,
+    // which the sticky system keeps re-armed every beat) maps to a family → that family's card glows
+    // and pulses up to each beat; the rest stay un-glowed. Persists until you pick a different card.
+    private void DriveActiveCardGlow(RhythmRoundManager rmm)
+    {
+        if (_myPCombat == null) _myPCombat = GetComponent<PlayerCombat>();
+        string active = _myPCombat != null ? _myPCombat.PendingMoveTrigger : "";
+        CardFamily activeFam = string.IsNullOrEmpty(active) ? (CardFamily)(-1) : FamilyOfTrigger(active);
+        bool hasActive = !string.IsNullOrEmpty(active);
+
+        // Beat charge 0→1 in the last chargeLead seconds before the beat, eased so it climbs hard near it.
+        float charge = 0f;
+        if (hasActive && rmm != null)
+        {
+            float toBeat = rmm.GetNextBeatTime() - rmm.GetCurrentTrackTime();
+            const float lead = 0.6f;
+            if (toBeat >= 0f && toBeat <= lead) charge = Mathf.Pow(1f - toBeat / lead, 2f);
+        }
+
+        SetCardGlow(strikeCardButton, hasActive && activeFam == CardFamily.Strike, charge, CardFamily.Strike);
+        SetCardGlow(throwCardButton,  hasActive && activeFam == CardFamily.Throw,  charge, CardFamily.Throw);
+        SetCardGlow(blockCardButton,  hasActive && activeFam == CardFamily.Block,  charge, CardFamily.Block);
+        SetCardGlow(parryCardButton,  hasActive && activeFam == CardFamily.Parry,  charge, CardFamily.Parry);
+        SetCardGlow(supportCardButton,hasActive && activeFam == CardFamily.Support,charge, CardFamily.Support);
+    }
+
+    private void SetCardGlow(UnityEngine.UI.Button b, bool active, float charge, CardFamily fam)
+    {
+        if (b == null) return;
+        var fx = b.GetComponent<CardShineEffect>();
+        if (fx != null) fx.SetActiveGlow(active, charge, ActiveGlowColor(fam));
+    }
+
+    private Color ActiveGlowColor(CardFamily fam)
+    {
+        switch (fam)
+        {
+            case CardFamily.Strike: return new Color(1f, 0.4f, 0.15f, 1f);
+            case CardFamily.Throw:  return new Color(1f, 0.55f, 0.15f, 1f);
+            case CardFamily.Block:  return new Color(0.2f, 0.6f, 1f, 1f);
+            case CardFamily.Parry:  return new Color(0.5f, 0.85f, 1f, 1f);
+            default:                return new Color(0.9f, 0.95f, 1f, 1f);
+        }
     }
 
     // Show/hide a card slot. Uses the CardShineEffect dissolve if present, else a plain toggle.

@@ -47,6 +47,10 @@ public class FloorBeatColorizer : MonoBehaviour
     public float filledIntensity = 3.5f;
     public float hitIntensity    = 12f;
 
+    [Tooltip("How much to dim the floor during the drone-rush segment (1 = normal, 0.4 = much darker). " +
+             "Only applies while the drone segment is active; the floor is full brightness otherwise.")]
+    public float droneSegmentDim = 0.4f;
+
     [Header("Timing / Feel")]
     [Tooltip("The wave spans the real gap between beats, up to this many seconds. Slow songs → " +
              "the wave starts at most this early (so it never crawls forever on very slow beats).")]
@@ -148,6 +152,11 @@ public class FloorBeatColorizer : MonoBehaviour
         // Head gets a hot white core as it nears the player; trail is the plain wave colour.
         Color headCol = Color.Lerp(_waveColor, hitPeak, progress * 0.30f);
 
+        // Dim the floor during the drone-rush segment so its glow doesn't overpower the drones; full
+        // brightness any other time.
+        float dim = (DroneRushSegment.Instance != null && DroneRushSegment.Instance.SegmentActive)
+            ? droneSegmentDim : 1f;
+
         // ── Light every tile ───────────────────────────────────────────────
         for (int i = 0; i < n; i++)
         {
@@ -190,7 +199,7 @@ public class FloorBeatColorizer : MonoBehaviour
                 intensity = Mathf.Max(intensity, Mathf.Lerp(idleIntensity, hitIntensity, f));
             }
 
-            _mats[i].SetColor(ID_Emission, col * intensity);
+            _mats[i].SetColor(ID_Emission, col * (intensity * dim));
         }
     }
 

@@ -46,7 +46,6 @@ public class ScoreHud : MonoBehaviour
         public Transform root;
         public TextMesh face;     // bright front
         public TextMesh shadow;   // dark copy behind, offset for depth
-        public TextMesh label;    // "YOU" / "BOT" header above the number
         public int   displayed;   // the number currently shown
         public int   from, to;    // animation endpoints
         public float t;           // 0..1 animation progress
@@ -86,23 +85,29 @@ public class ScoreHud : MonoBehaviour
         tag.nextTick = 0f;
     }
 
-    private void Update()
+    // LateUpdate (not Update): run AFTER the bot's pin and the camera have finalized their positions for
+    // the frame, so the scoreboards read settled values and don't vibrate against them.
+    private void LateUpdate()
     {
         // BOTH scoreboards live by the BOT (the local player's opponent), so you can actually read
         // your own — it's not stuck on your own head. They sit BACK behind the bot, up at HEIGHT,
         // YOUR score offset to one side and the BOT's to the other, all facing you.
-        Transform anchor = BotAnchor();
-        Camera cam = Camera.main;
-        if (anchor == null) return;
+        //
+        // IMPORTANT: anchor on the bot's fixed SPAWN/home point, NOT its live transform. During a beat
+        // run-in the bot's transform charges toward the player and back every beat; anchoring to it made
+        // the scoreboards lurch/vibrate up-and-down with that motion. The home point is rock-steady.
+        Vector3 anchorPos = BotAnchorPos(out bool haveAnchor);
+        Camera cam = CachedCamera.Main;
+        if (!haveAnchor) return;
 
         // Build the left/right + back basis from the player→bot direction (flattened).
-        Vector3 fromPlayer = cam != null ? (anchor.position - cam.transform.position) : anchor.forward;
+        Vector3 fromPlayer = cam != null ? (anchorPos - cam.transform.position) : Vector3.forward;
         fromPlayer.y = 0f;
         if (fromPlayer.sqrMagnitude < 0.0001f) fromPlayer = Vector3.forward;
         fromPlayer.Normalize();
         Vector3 rightAxis = Vector3.Cross(Vector3.up, fromPlayer); // player's left/right across the bot
 
-        Vector3 basePos = anchor.position + Vector3.up * HEIGHT + fromPlayer * BEHIND_BOT;
+        Vector3 basePos = anchorPos + Vector3.up * HEIGHT + fromPlayer * BEHIND_BOT;
 
         foreach (var pc in FindFighters())
         {
@@ -119,16 +124,22 @@ public class ScoreHud : MonoBehaviour
         }
     }
 
-    // The bot = the local player's opponent. That's the spot we cluster both scoreboards around.
-    private Transform BotAnchor()
+    // The bot = the local player's opponent. We cluster both scoreboards around the bot's FIXED spawn
+    // (HomePosition), so they don't ride the bot's beat run-in motion. Falls back to the live transform
+    // only if home hasn't been set yet.
+    private Vector3 BotAnchorPos(out bool found)
     {
+        found = false;
         foreach (var p in GameManager.players)
         {
             if (p == null || !p.isLocalPlayer) continue;
             var opp = p.GetOpponent();
-            return opp != null ? opp.transform : null;
+            if (opp == null) return Vector3.zero;
+            found = true;
+            Vector3 home = opp.HomePosition;
+            return home != Vector3.zero ? home : opp.transform.position;
         }
-        return null;
+        return Vector3.zero;
     }
 
     private void AnimateTag(Tag tag)
@@ -183,14 +194,10 @@ public class ScoreHud : MonoBehaviour
         // Bright face in front.
         var face = MakeText(root, col, 1f);
         face.transform.localPosition = Vector3.zero;
-        // "YOU" / "BOT" header above the number so it's unmistakable whose score is whose.
-        var label = MakeText(root, isSelf ? SelfColor : OppColor, 0.42f);
-        label.text = isSelf ? "YOU" : "BOT";
-        label.transform.localPosition = new Vector3(0f, CHAR_SIZE * 5.5f, 0f);
 
         var tag = new Tag
         {
-            owner = pc, isSelf = isSelf, root = root, face = face, shadow = shadow, label = label,
+            owner = pc, isSelf = isSelf, root = root, face = face, shadow = shadow,
             displayed = pc.Score, from = pc.Score, to = pc.Score,
             baseScale = Vector3.one
         };

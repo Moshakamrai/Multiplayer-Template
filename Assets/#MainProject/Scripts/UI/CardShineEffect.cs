@@ -43,6 +43,18 @@ public class CardShineEffect : MonoBehaviour
     [Tooltip("Glow brightness at the flash peak (stacks on the shine glow).")]
     public float popGlowPeak = 2.6f;
 
+    [Header("Active-Card Glow (persists while this card is the chosen/playing move)")]
+    [Tooltip("Base glow held on the active card.")]
+    public float activeGlowBase = 1.2f;
+    [Tooltip("Extra glow added at the peak of the on-beat pulse.")]
+    public float activeGlowPulse = 1.8f;
+    [Tooltip("Slight scale-up of the active card so it stands out.")]
+    public float activeScaleBoost = 0.06f;
+    [Tooltip("Continuous gentle wobble (tilt degrees) on the active card. Keep small.")]
+    public float activeWobbleAngle = 3.5f;
+    [Tooltip("Wobble speed (cycles/sec-ish).")]
+    public float activeWobbleSpeed = 2.0f;
+
     [Header("Dissolve (exit / enter)")]
     public Color dissolveColor   = new Color(1f, 0.55f, 0.1f, 1f); // hot burning edge
     public float dissolveEdge    = 0.08f;
@@ -62,6 +74,20 @@ public class CardShineEffect : MonoBehaviour
     private Coroutine _punch;
     private Coroutine _anim;   // enter/exit dissolve
     private Coroutine _pop;    // "called" elastic pop
+
+    // Persistent "this is the active/chosen card" glow — driven each frame by CardManager.
+    private bool  _activeGlow;
+    private float _activeGlowAmt;   // 0..1 beat-charge for the pulse
+    private Color _activeGlowColor = new Color(0.3f, 0.9f, 1f, 1f);
+
+    /// CardManager calls this every frame: on = this card is the current move; amt = beat charge (0→1)
+    /// so the glow pulses up to each beat. Turns the chosen card into a glowing, beat-pulsing border.
+    public void SetActiveGlow(bool on, float amt, Color color)
+    {
+        _activeGlow = on;
+        _activeGlowAmt = Mathf.Clamp01(amt);
+        _activeGlowColor = color;
+    }
 
     static readonly int ID_ShineColor      = Shader.PropertyToID("_ShineColor");
     static readonly int ID_Shine           = Shader.PropertyToID("_Shine");
@@ -107,6 +133,39 @@ public class CardShineEffect : MonoBehaviour
         _mat.SetFloat(ID_Shine, 0f);
         _mat.SetFloat(ID_Glow, 0f);
         _mat.SetFloat(ID_Dissolve, 0f);
+    }
+
+    // Persistent active-card glow + gentle scale, applied each frame. Skips while the one-shot pop /
+    // shine coroutines are running (they own the glow then) so they don't fight.
+    void Update()
+    {
+        if (_mat == null || _state != State.Shown) return;
+        if (_pop != null || _shine != null) return; // let the "called" burst finish first
+
+        if (_activeGlow)
+        {
+            // Glow held at a base level, pulsing UP toward each beat (amt = beat charge 0→1).
+            float pulse = 0.7f + 0.3f * Mathf.Sin(Time.time * 6f * Mathf.PI);
+            float g = activeGlowBase + activeGlowPulse * _activeGlowAmt * pulse;
+            _mat.SetColor(ID_GlowColor, _activeGlowColor);
+            _mat.SetFloat(ID_Glow, g);
+            if (_rt != null)
+            {
+                _rt.localScale = _baseScale * (1f + activeScaleBoost * (0.5f + 0.5f * _activeGlowAmt));
+                // Continuous gentle wobble — a soft tilt sway (two slightly-offset sines so it doesn't
+                // look like a clean metronome) to read as "alive / chosen", without being distracting.
+                float wob = Mathf.Sin(Time.time * activeWobbleSpeed * Mathf.PI)
+                          + 0.4f * Mathf.Sin(Time.time * activeWobbleSpeed * 1.7f * Mathf.PI);
+                _rt.localRotation = _baseRot * Quaternion.Euler(0f, 0f, wob * activeWobbleAngle * 0.7f);
+            }
+        }
+        else
+        {
+            // Not the active card → make sure we're not leaving a stale glow/scale/rotation on it.
+            _mat.SetFloat(ID_Glow, 0f);
+            if (_rt != null && _rt.localScale != _baseScale) _rt.localScale = _baseScale;
+            if (_rt != null && _rt.localRotation != _baseRot) _rt.localRotation = _baseRot;
+        }
     }
 
     // ── Show / hide with dissolve, driven by CardManager ───────────────────

@@ -100,15 +100,7 @@ public class VRWorldHud : MonoBehaviour
 
     private void UpdateHealth()
     {
-        // Refresh the cached combatant refs at most a couple times a second, not every frame.
-        _combatantRefresh -= Time.unscaledDeltaTime;
-        if (_combatantRefresh <= 0f || _cachedSelf == null)
-        {
-            _combatantRefresh = 0.5f;
-            GetCombatants(out _cachedSelf, out _cachedOpp);
-        }
-        SetBar(_selfFill, _selfLabel, "YOU", _cachedSelf, ref _lastSelfPct);
-        SetBar(_oppFill,  _oppLabel,  "BOT", _cachedOpp,  ref _lastOppPct);
+        // Health bars removed (replaced by the 3D point scores). Nothing to update here anymore.
     }
 
     private const float BAR_FULL_W = 512f;
@@ -171,9 +163,8 @@ public class VRWorldHud : MonoBehaviour
         crt.localScale = Vector3.one * 0.001f; // 1200px -> 1.2m wide
         crt.localPosition = Vector3.zero;
 
-        // Health bars: YOU (left), BOT (right), pushed high up for visibility.
-        BuildBar(crt, new Vector2(-300, 570), out _selfFill, out _selfLabel);
-        BuildBar(crt, new Vector2( 300, 570), out _oppFill,  out _oppLabel);
+        // Health bars REMOVED — the 3D point scores (ScoreHud) replaced the YOU/BOT health %.
+        // (BuildBar left intact but no longer called.)
 
         // Timing feedback text, centred (a bit above eye-line).
         _timingLabel = MakeText(crt, "", 80, new Vector2(0, 120), new Vector2(900, 140));

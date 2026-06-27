@@ -43,7 +43,13 @@ public class PlayerCombat : NetworkBehaviour
     public void AddScore(int amount, string reason = "")
     {
         if (amount <= 0) return;
+        // POWER SURGE: while a surge is active, every point scored is multiplied (the PC reward segment).
+        var surge = PowerSurge.Instance;
+        if (surge != null && surge.SurgeActive && surge.Multiplier > 1)
+            amount *= surge.Multiplier;
         Score += amount;
+        // VR drone-rush reward segment (dormant on PC): fires once per round on a score threshold.
+        DroneRushSegment.Instance?.NotifyScore(this, Score);
     }
     [SyncVar] public string availableCardsString = "";
     public Animator animator;
@@ -269,12 +275,19 @@ public class PlayerCombat : NetworkBehaviour
 
     [SyncVar] public float lastVocalSpikeTime   = -1f;
     [SyncVar] public float lastVocalSpikeVolume = 0f;
+    // The TRUE distance-from-beat (seconds) measured CLIENT-SIDE the instant the shout/release fired.
+    // The grader uses this directly instead of recomputing |beat - spikeTime| from absolute times,
+    // which was unreliable because the client's audio clock and the server's beat clock can drift —
+    // that drift made on-the-beat shouts read BAD. -1 = none this beat.
+    [SyncVar] public float lastVocalSpikeOffset = -1f;
 
     // Spike detection guards — prevent holding voice from gaming timing
     private bool  _spikeLockedThisBeat   = false;
     private float _lastTrackedBeatFire   = -1f;
-    private const float BEAT_DEAD_ZONE   = 0.2f;
-    private const float SHOUT_WINDOW     = 0.5f;
+    // Smaller dead zone = a shout RIGHT ON / just-after the beat still registers (was 0.2s, which ate
+    // on-the-beat shouts and made them read BAD). Wider shout window = more forgiving pre-beat timing.
+    private const float BEAT_DEAD_ZONE   = 0.08f;
+    private const float SHOUT_WINDOW     = 0.6f;
 
     // Pressure system — recent hits shrink the shout window
     private float _pressureLevel = 0f;
@@ -314,6 +327,7 @@ public class PlayerCombat : NetworkBehaviour
         IsParryActive = false;
         lastVocalSpikeTime = -1f;
         lastVocalSpikeVolume = 0f;
+        lastVocalSpikeOffset = -1f;
         _pendingAttackTrigger = "";
         _pendingDashDirection = Vector3.zero;
         // Sticky move carries across rounds: re-arm the pending move from it so the player's last
@@ -326,7 +340,7 @@ public class PlayerCombat : NetworkBehaviour
         _staggerRecoveryCharge = 0f;
         _staggerTimingEscaped = false;
         _spikeLockedThisBeat = false;
-        EndGloveSelectionBloom();
+
         HasPendingTrap = false;
         HasPendingCage = false;
         HasFocusBuff = false;
@@ -446,7 +460,7 @@ public class PlayerCombat : NetworkBehaviour
     [Tooltip("One-time correction for however your slash art is oriented (applied on top of the auto blade angle).")]
     public Vector3 slashRotationOffset = Vector3.zero;
     [Tooltip("Uniform scale applied to the spawned main/slash VFX. Lower this if your VFX look too big (1 = prefab's own size, 0.5 = half).")]
-    [Range(0.05f, 3f)] public float slashSizeScale = 0.5f;
+    [Range(0.05f, 3f)] public float slashSizeScale = 0.3f;
     [Tooltip("ON = the slash always flies straight at the opponent (recommended). OFF = it flies along the fighter's facing direction.")]
     public bool slashAimsAtOpponent = true;
 
@@ -467,6 +481,11 @@ public class PlayerCombat : NetworkBehaviour
     // Animation Event (via SlashAnimationEvent.Slash) can fire it at the exact swing frame.
     public void SpawnSlashNow()
     {
+        // No slash projectile when the BOT has run in to melee range (it's close enough to hit with the
+        // sword directly). Block/Parry/Support and the human (who attacks from range) still spawn it.
+        var approach = GetComponent<BotBeatApproach>();
+        if (approach != null && approach.IsApproaching) return;
+
         Vector3 fwd = transform.forward; fwd.y = 0f;
         if (fwd.sqrMagnitude < 0.0001f) fwd = Vector3.forward;
         fwd.Normalize();
@@ -589,8 +608,6 @@ public class PlayerCombat : NetworkBehaviour
         _cardVfx   = GetComponent<FighterCardVFX>();
     }
 
-    public void TriggerGloveSelectionBloom(string trigger) => _gloveGlow?.TriggerSelectionBloom(trigger);
-    public void EndGloveSelectionBloom()                   => _gloveGlow?.EndSelectionBloom();
 
     // ── Glove juice hooks (server triggers, all clients flash) ──────────────
     // moveTrigger passed so the haptic hits the correct hand (Strike/Throw = right, else both).
@@ -686,6 +703,21 @@ public class PlayerCombat : NetworkBehaviour
 
     private void Update()
     {
+        // Drone-rush HELD stagger: keep the bot in the stagger state if something pulls it off, WITHOUT
+        // restarting the clip (the old version called Play(..., 0f) every off-frame, which rewound the
+        // looping clip to frame 0 → the visible fidget). We only re-issue Play when the animator is
+        // genuinely on a DIFFERENT state and not already transitioning INTO the stagger, and we don't
+        // pass a normalizedTime so a re-issue can't rewind it.
+        if (HeldStaggerActive && animator != null && !string.IsNullOrEmpty(heldStaggerState))
+        {
+            var cur  = animator.GetCurrentAnimatorStateInfo(0);
+            bool onState = cur.IsName(heldStaggerState);
+            bool goingTo = animator.IsInTransition(0) &&
+                           animator.GetNextAnimatorStateInfo(0).IsName(heldStaggerState);
+            if (!onState && !goingTo)
+                animator.Play(heldStaggerState); // no time arg = don't rewind if already there
+        }
+
         // Percentage system — no health bar UI updates needed here
 
         // --- Fade the timing text ---
@@ -730,6 +762,10 @@ public class PlayerCombat : NetworkBehaviour
     private void CheckLocalParryTiming()
     {
         if (RhythmRoundManager.Instance == null) return;
+
+        // During a drone-rush segment (VR or PC) the player only dodges/parries the rush — suppress all
+        // normal on-beat card moves (shout/trigger-release won't fire an attack/defense here).
+        if (PCDroneSegment.AnySegmentActive) return;
 
         var   rmm          = RhythmRoundManager.Instance;
         float currentTime  = rmm.GetCurrentTrackTime();
@@ -848,13 +884,13 @@ public class PlayerCombat : NetworkBehaviour
         if (VRCameraDriver.VRActive)
         {
             // Power = the trigger-charge you built (shout and release both consume the same charge;
-            // release also captured the charge at the let-go moment). A loud shout tops it up to +0.25.
+            // release also captured the charge at the let-go moment). A loud shout tops it up a little.
             float charge = VRHands.ConsumeCharge();
             if (gotRelease) charge = Mathf.Max(charge, releaseCharge);
             float shoutBonus = gotShout
                 ? Mathf.Clamp01((shoutVol - _vcm.parryVolumeThreshold) / Mathf.Max(0.01f, 1f - _vcm.parryVolumeThreshold))
                 : 0f;
-            currentVol = Mathf.Clamp(charge + shoutBonus * 0.25f, 0f, 1.25f);
+            currentVol = Mathf.Clamp(charge + shoutBonus * 0.15f, 0f, 1.25f);
         }
         else
         {
@@ -895,7 +931,7 @@ public class PlayerCombat : NetworkBehaviour
         }
         else
         {
-            CmdRegisterVocalSpike(currentTime, currentVol);
+            CmdRegisterVocalSpike(currentTime, currentVol, Mathf.Abs(timeUntilImpact));
             string label = isChainMode ? "CHAIN" : currentMove;
             Debug.Log($"<color=cyan>SPIKE [{label}]:</color> t={currentTime:F3}s  Δbeat={timeUntilImpact:F3}s  vol={currentVol:F2} shout={usedShout}");
         }
@@ -1008,7 +1044,7 @@ public class PlayerCombat : NetworkBehaviour
         lastVocalSpikeVolume = vol;
         IsParryActive = true;
 
-        EndGloveSelectionBloom();
+
         if (animator != null) animator.Play("ParryIntent");
 
         TargetAddEnergy(1);
@@ -1018,17 +1054,18 @@ public class PlayerCombat : NetworkBehaviour
     }
 
     [Command]
-    void CmdRegisterVocalSpike(float time, float vol)
+    void CmdRegisterVocalSpike(float time, float vol, float offset)
     {
         lastVocalSpikeTime   = time;
         lastVocalSpikeVolume = vol;
+        lastVocalSpikeOffset = offset;
     }
 
     [Command]
     void CmdConfirmSuccessfulParry()
     {
         IsParryActive = true;
-        EndGloveSelectionBloom();
+
 
         if (animator != null)
         {
@@ -1063,12 +1100,70 @@ public class PlayerCombat : NetworkBehaviour
     [Server]
     public void ClearStagger() { IsStaggered = false; StaggerBeatsRemaining = 0; }
 
+    // ── Drone-rush: enter/exit a HELD stagger pose for the whole segment ─────────────────────────
+    // The normal TriggerStagger fires a one-shot "Stagger" trigger that recovers on its own. For the
+    // drone segment we want the bot to drop into "Stagger New" and STAY there until told to recover.
+    // True (synced) while the drone-rush held stagger is active — drives a per-frame re-assert of the
+    // pose so transitions/Any-State can't snap the bot back to Boxing Idle.
+    [SyncVar] public bool HeldStaggerActive = false;
+
+    [Server]
+    public void EnterHeldStagger()
+    {
+        IsStaggered = true;
+        HeldStaggerActive = true;
+        StaggerBeatsRemaining = 9999; // pinned; the segment clears it explicitly
+        RpcPlayHeldStagger(true);
+    }
+
+    [Server]
+    public void ExitHeldStagger()
+    {
+        IsStaggered = false;
+        HeldStaggerActive = false;
+        StaggerBeatsRemaining = 0;
+        RpcPlayHeldStagger(false);
+    }
+
+    [Header("Drone-rush held stagger (match these to the bot's Animator state names)")]
+    [Tooltip("Animator STATE name for the held stagger pose.")]
+    public string heldStaggerState = "Held Stagger State";
+    [Tooltip("Animator STATE name to return to when the segment ends.")]
+    public string idleState = "Boxing Idle";
+    [Tooltip("THE single hurt animation everyone uses when taking a hit (the old random Hurt 1–4 is " +
+             "gone). Match this to the SAME state BotBeatApproach plays for got-hit recovery.")]
+    public string hurtState = "Knockback";
+    [Tooltip("Playback speed for the BOT's move/attack animation so its swing finishes before the beat " +
+             "(it arrives at the attack point only a hair early). ~2 = roughly double speed.")]
+    [Range(1f, 4f)] public float botMoveAnimSpeed = 2f;
+
+    [ClientRpc]
+    private void RpcPlayHeldStagger(bool on)
+    {
+        if (animator == null) return;
+        // animator.Play() forces the state immediately, IGNORING the controller's transition graph —
+        // this is what reliably FORCES and HOLDS the pose (CrossFade can be blocked if there's no
+        // transition into the state). If you don't see it, the state NAME below is wrong for this rig.
+        if (on)
+        {
+            animator.applyRootMotion = false; // stagger clip must NOT translate/rotate the body off spawn
+            animator.Play(heldStaggerState, 0, 0f);
+            if (isLocalPlayer) VRHaptics.StaggerStart();
+        }
+        else
+        {
+            animator.applyRootMotion = false; // keep it off — combat anims here are in-place
+            animator.Play(idleState, 0, 0f);
+        }
+    }
+
     IEnumerator ResetParryFlag()
     {
         yield return new WaitForSeconds(0.6f);
         IsParryActive        = false;
         lastVocalSpikeTime   = -1f;
         lastVocalSpikeVolume = 0f;
+        lastVocalSpikeOffset = -1f;
     }
 
     // Maps a logical move trigger to the Animator state/trigger name.
@@ -1247,8 +1342,7 @@ public class PlayerCombat : NetworkBehaviour
             }
         }
 
-        // Hard glove bloom from card chosen until the attack animation starts.
-        TriggerGloveSelectionBloom(attackTrigger);
+
     }
 
     public RhythmAction PeekNextMove()
@@ -1317,6 +1411,10 @@ public class PlayerCombat : NetworkBehaviour
     [Server]
     public void ExecuteRhythmWindUp()
     {
+        // A staggered fighter does nothing this beat — no windup/move animation, so a held stagger pose
+        // (e.g. the drone-rush segment) isn't overridden every beat. Hurt/dead also skip.
+        if (IsStaggered || IsHurting || IsDead) return;
+
         var move = PeekNextMove();
         if (connectionToClient == null) ExecuteMoveEffect(move.attack, move.dash);
         else TargetTriggerRhythmWindUp(move.attack, move.dash);
@@ -1335,8 +1433,8 @@ public class PlayerCombat : NetworkBehaviour
 
     private void ExecuteMoveEffect(string attack, Vector3 dash)
     {
-        // Attack/dash animation is starting — kill the selection bloom now.
-        EndGloveSelectionBloom();
+        // Held-stagger fighter never plays a move — keeps the bot frozen in the stagger pose.
+        if (HeldStaggerActive) return;
 
         if (!string.IsNullOrEmpty(attack))
         {
@@ -1379,7 +1477,17 @@ public class PlayerCombat : NetworkBehaviour
     [ClientRpc] void RpcTriggerAttack(string t)
     {
         if (isLocalPlayer) return;
-        if (animator != null) animator.SetTrigger(AnimName(t));
+        // A held-stagger fighter (drone segment) must never play a move anim — that's what made the bot
+        // stand up + swing on the beat then snap back. Ignore attack anims entirely while held.
+        if (HeldStaggerActive) return;
+        // BOT: its move ANIMATION is driven by BotBeatApproach (Attack1 for Strike, Attack2 for Throw,
+        // fired exactly on the beat at the attack point) — do NOT also SetTrigger here or the two fight
+        // and the swing skips/flickers. We still run the VFX/aura/blade-arc below for the bot.
+        bool isBot = GetComponent<BotController>() != null;
+        if (animator != null && !isBot)
+        {
+            animator.SetTrigger(AnimName(t));
+        }
         // Weapon aura + family sword tint for ANY card (this is the copy the human watches).
         _cardVfx?.OnCardTriggered(t);
         // Opponent/bot blade arc + slash VFX.
@@ -1392,6 +1500,17 @@ public class PlayerCombat : NetworkBehaviour
         TriggerDefenseVfx(t); // block/parry VFX (0.2s into the anim)
     }
 
+    // Drone-rush hit: the bot is in a held stagger and must NOT play the hurt anim or get knocked away
+    // (that flung it "to another world"). We only raise CurrentPercentage — which makes BloodOnHit spill
+    // blood automatically — and show the damage number. No hurt trigger, no knockback, no stagger reset.
+    [Server]
+    public void TakeDroneHit(int damage)
+    {
+        if (damage <= 0) return;
+        CurrentPercentage += damage;       // BloodOnHit watches this → blood spills on its own
+        RpcShowDamageNumber(damage, true); // green "dealt" number over the bot
+    }
+
     [Server]
     public void TakeDamage(int damage, Vector3 knockbackDir = default, bool isOpponentDamage = false, float hurtDelay = 0f)
     {
@@ -1402,10 +1521,18 @@ public class PlayerCombat : NetworkBehaviour
         // outcome: a normal landed hit (attacker scores), a mistimed defense (the attacker still
         // scores because the defender took damage), and a parry/reflect that turns a hit back on the
         // attacker (the original defender, now the dealer, scores — see AwardCounterBonus callers).
+        // How POWERFUL was this hit (0..1)? Combine the attacker's locked-in power (VR trigger-charge +
+        // shout, captured in lastVocalSpikeVolume which can reach ~1.25) so a hard, charged punch lands
+        // a heavier reaction (deeper slow-mo, bigger shake). Default 0.5 if there's no attacker power.
+        float hitPower01 = 0.5f;
         if (isServer && damage > 0)
         {
             var dealer = GetComponent<PlayerController>()?.GetOpponent()?.GetComponent<PlayerCombat>();
-            if (dealer != null) dealer.AddScore(damage * SCORE_HIT_PER_DAMAGE, "landed hit");
+            if (dealer != null)
+            {
+                dealer.AddScore(damage * SCORE_HIT_PER_DAMAGE, "landed hit");
+                hitPower01 = Mathf.Clamp01(dealer.lastVocalSpikeVolume / 1.25f);
+            }
         }
 
         float oldPct = CurrentPercentage;
@@ -1415,7 +1542,8 @@ public class PlayerCombat : NetworkBehaviour
             TriggerStagger(2);
         CancelDefenseVfx(); // kill any active block/parry VFX the moment a hit lands
         // hurtDelay > 0 (e.g. a parry reversal) holds the hurt/blood reaction until the flying VFX lands.
-        RpcTriggerHurt("Hurt " + Random.Range(1, 5), hurtDelay, damage);
+        // Single hurt animation now (was random Hurt 1–4) — the same Knockback state the bot recovers with.
+        RpcTriggerHurt(hurtState, hurtDelay, damage, hitPower01);
         RpcShowDamageNumber(damage, isOpponentDamage);
         RpcGloveHurt();
         if (knockbackDir != default) RpcNudgeBack(knockbackDir);
@@ -1436,14 +1564,23 @@ public class PlayerCombat : NetworkBehaviour
         if (isLocalPlayer) GetComponent<PlayerController>().ApplyKnockback(dir);
     }
 
+    // Bot dodge reaction (visual only) — plays a left/right slip when the human loses/mistimes the
+    // trade, so their punch reads as "dodged". No damage, no movement (the home-pin holds position).
+    [Server] public void PlayDodgeAnim() { RpcPlayDodge(Random.value < 0.5f); }
+    [ClientRpc]
+    private void RpcPlayDodge(bool left)
+    {
+        if (animator != null) animator.CrossFade(left ? "MoveLeft" : "MoveRight", 0.1f);
+    }
+
     [Server] private IEnumerator DelayedKnockout(float delay) { yield return new WaitForSeconds(delay); RpcKnockout(); }
 
     /// Server-only: make this fighter play the knockout animation right now. Called on the round
     /// LOSER when the timer ends (points decide the winner; the loser drops as the final beat).
     [Server] public void PlayKnockoutNow() { RpcKnockout(); }
-    [ClientRpc] void RpcTriggerHurt(string trigger, float delay, int damage) { StartCoroutine(DelayedHurtRoutine(trigger, delay, damage)); }
+    [ClientRpc] void RpcTriggerHurt(string trigger, float delay, int damage, float power01) { StartCoroutine(DelayedHurtRoutine(trigger, delay, damage, power01)); }
 
-    private IEnumerator DelayedHurtRoutine(string trigger, float delay, int damage)
+    private IEnumerator DelayedHurtRoutine(string trigger, float delay, int damage, float power01)
     {
         yield return new WaitForSeconds(delay);
 
@@ -1454,29 +1591,38 @@ public class PlayerCombat : NetworkBehaviour
             _staggerTimingEscaped = false;
         }
 
-        if (animator) animator.SetTrigger(trigger);
+        // CrossFade to the single hurt STATE (was SetTrigger on one of four). Using a state name keeps it
+        // consistent with BotBeatApproach's got-hit recovery and doesn't depend on Animator trigger params.
+        if (animator) { animator.applyRootMotion = false; animator.CrossFade(trigger, 0.05f); }
+
+        // power01 (0..1) = how hard the attacker hit (their charged power). Blend it with damage so the
+        // whole reaction — shake, flash, slow-mo — is bigger for a powerful, committed punch.
+        float p = Mathf.Clamp01(power01);
 
         if (isLocalPlayer)
         {
-            // Camera shake on hit with damage scaling
-            float shakeDur = damage > 15 ? 0.4f : damage > 8 ? 0.3f : 0.2f;
-            float shakeMag = damage > 15 ? 0.7f : damage > 8 ? 0.45f : 0.28f;
-            CameraShake.Instance?.Shake(shakeDur, shakeMag);
+            // Camera shake scaled by BOTH damage and the attacker's power.
+            float baseDur = damage > 15 ? 0.4f : damage > 8 ? 0.3f : 0.2f;
+            float baseMag = damage > 15 ? 0.7f : damage > 8 ? 0.45f : 0.28f;
+            CameraShake.Instance?.Shake(baseDur * (0.8f + 0.6f * p), baseMag * (0.7f + 0.8f * p));
 
-            _hurtFlashFade = Mathf.Max(_hurtFlashFade, Mathf.Min(1f, damage / 20f));
+            _hurtFlashFade = Mathf.Max(_hurtFlashFade, Mathf.Clamp01(Mathf.Max(damage / 20f, p)));
 
-            // HAPTIC: heavy rumble scaled by damage (big hits get a second shockwave).
-            VRHaptics.GotHit(damage / 20f);
+            // HAPTIC: heavy rumble scaled by the bigger of damage / power.
+            VRHaptics.GotHit(Mathf.Clamp01(Mathf.Max(damage / 20f, p)));
         }
 
-        // ── SINGLE MODE ONLY: hurt slow-mo effect ──
+        // ── SINGLE MODE ONLY: hurt slow-mo effect, DEPTH + LENGTH scaled by punch power ──
         var rmm = RhythmRoundManager.Instance;
         bool isSingleMode = rmm != null && rmm.IsSingleMoveMode();
         if (isSingleMode && animator != null)
         {
-            animator.speed = 0.15f;
-            Time.timeScale = 0.25f;
-            StartCoroutine(RestoreAnimatorSpeed(0.9f));
+            // Weak hit → shallow, brief dip. Full-power hit → deep, longer slow-mo.
+            float slowScale  = Mathf.Lerp(0.45f, 0.12f, p); // higher power = slower (lower timeScale)
+            float slowLength = Mathf.Lerp(0.5f, 1.1f, p);   // higher power = longer slow-mo
+            animator.speed = slowScale * 0.6f;
+            Time.timeScale = slowScale;
+            StartCoroutine(RestoreAnimatorSpeed(slowLength));
         }
 
         if (isLocalPlayer)
@@ -1491,7 +1637,7 @@ public class PlayerCombat : NetworkBehaviour
             RestickPendingMove();
             isAttacking = false;
             if (string.IsNullOrEmpty(_pendingAttackTrigger) && _pendingDashDirection == Vector3.zero)
-                EndGloveSelectionBloom();
+        
             GetComponent<PlayerController>().InterruptMovement();
             StartCoroutine(HurtStunTimer());
         }
@@ -1501,6 +1647,13 @@ public class PlayerCombat : NetworkBehaviour
     {
         yield return new WaitForSecondsRealtime(delay);
         Time.timeScale = 1.0f;
+        if (animator != null) animator.speed = 1f;
+    }
+
+    // Reset the bot's sped-up move animation back to normal speed after the swing has had time to play.
+    private IEnumerator ResetBotAnimSpeed()
+    {
+        yield return new WaitForSecondsRealtime(0.6f);
         if (animator != null) animator.speed = 1f;
     }
 
@@ -2071,9 +2224,6 @@ public class PlayerCombat : NetworkBehaviour
             _comboBuffer.RemoveAt(_comboBuffer.Count - 1);
         }
 
-        if (string.IsNullOrEmpty(_pendingAttackTrigger) && _pendingDashDirection == Vector3.zero && _comboBuffer.Count == 0)
-            EndGloveSelectionBloom();
-
         CmdCancelLastInput();
     }
 
@@ -2094,7 +2244,5 @@ public class PlayerCombat : NetworkBehaviour
             _comboBuffer.RemoveAt(_comboBuffer.Count - 1);
         }
 
-        if (string.IsNullOrEmpty(_pendingAttackTrigger) && _pendingDashDirection == Vector3.zero && _comboBuffer.Count == 0)
-            EndGloveSelectionBloom();
     }
 }

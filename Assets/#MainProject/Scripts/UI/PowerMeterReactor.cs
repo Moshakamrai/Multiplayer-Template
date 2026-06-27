@@ -187,7 +187,7 @@ public class PowerMeterReactor : MonoBehaviour
         closeness = Mathf.Clamp01(closeness);
         if (closeness >= goodLockCloseness)
         {
-            float boost = (closeness - goodLockCloseness) / Mathf.Max(0.01f, 1f - goodLockCloseness) * 0.30f;
+            float boost = (closeness - goodLockCloseness) / Mathf.Max(0.01f, 1f - goodLockCloseness) * 0.18f;
             _fillTarget = Mathf.Clamp01(Mathf.Max(_fillTarget, power + boost));
             _holdTimer  = holdTime; // ~1.5s lock before it dissolves
             _beatFlash  = 1f;       // pop the glow on the lock-in

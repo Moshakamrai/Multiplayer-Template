@@ -22,20 +22,17 @@ public class GloveBeatGlow : MonoBehaviour
     public Renderer[] rightGloveRenderers;
     [Tooltip("LEFT glove renderers — glow when a Block/Parry card is pending (or Support).")]
     public Renderer[] leftGloveRenderers;
-    [Tooltip("Family colors for the active-hand cue.")]
-    [ColorUsage(false, true)] public Color offenseColor = new Color(1.0f, 0.35f, 0.05f); // Strike/Throw = red-orange
-    [ColorUsage(false, true)] public Color defenseColor = new Color(0.1f, 0.55f, 1.0f);  // Block/Parry = blue
-    [ColorUsage(false, true)] public Color supportColor = new Color(1.0f, 1.0f, 1.0f);   // Support = white
-    [Tooltip("Brightness of the active glove's pulse.")]
-    public float activeGlowIntensity = 2.2f;
-    [Tooltip("Brightness the INACTIVE glove idles at (dim, so it doesn't look broken/off).")]
-    public float idleGlowIntensity = 0.25f;
+    [Tooltip("Brightness the active glove idles at far from the beat, and the INACTIVE glove stays at.")]
+    public float idleGlowIntensity = 1.5f;
     [Tooltip("Pulse speed of the active-hand cue.")]
     public float cuePulseSpeed = 3.0f;
 
     [Header("Beat Charge")]
     [ColorUsage(false, true)] public Color chargeColor = new Color(0.0f, 0.85f, 1.0f); // cyan
-    public float chargeIntensity = 1.0f;
+    public float chargeIntensity = 2.2f;
+    [Tooltip("Curve of the rise toward the beat. >1 ramps SLOW then SHOOTS UP near the beat (snappier). " +
+             "1 = linear. Try 2–3 for a strong gradual-then-sharp climb.")]
+    public float chargeRampPower = 2.5f;
     [Tooltip("Seconds before the beat the gloves start charging.")]
     public float chargeLead = 0.6f;
     public float chargePulseMax = 12f;
@@ -46,19 +43,16 @@ public class GloveBeatGlow : MonoBehaviour
     public float flashIntensity = 4f;
     public float flashDecay     = 6f;
 
-    [Header("Selection Bloom")]
-    [Tooltip("Intensity of the card-selection bloom.")]
-    public float selectionBloomIntensity = 4f;
-    public float selectionBloomPulseSpeed = 8f;
+    [Header("Persistent Card Glow")]
+    [Tooltip("Max glow intensity when the beat is close. Crank this to make the ramp dramatic.")]
+    public float selectionBloomIntensity = 16f;
 
-    [Header("Selection Bloom Colors")]
+    [Header("Persistent Card Glow Colors")]
     [ColorUsage(false, true)] public Color strikeBloomColor = new Color(1.0f, 0.35f, 0.05f);
     [ColorUsage(false, true)] public Color throwBloomColor  = new Color(1.0f, 0.60f, 0.10f);
     [ColorUsage(false, true)] public Color blockBloomColor  = new Color(0.10f, 0.55f, 1.0f);
     [ColorUsage(false, true)] public Color parryBloomColor  = new Color(0.50f, 0.80f, 1.0f);
     [ColorUsage(false, true)] public Color supportBloomColor = new Color(1.0f, 1.0f, 1.0f);
-    private bool _selectionBloomActive;
-    private CardFamily _selectionBloomFamily = CardFamily.Support;
 
     private Material[] _mats;
     private Material[] _rightMats;
@@ -66,12 +60,14 @@ public class GloveBeatGlow : MonoBehaviour
     private float _flashTimer;
     private Color _flashColor;
     private PlayerCombat _localCombat;   // resolved lazily; only the LOCAL player drives the cue
+    private PlayerController _localController;
     private CardManager  _cardManager;
     static readonly int ID_Emission = Shader.PropertyToID("_EmissionColor");
 
     void Awake()
     {
         _localCombat = GetComponent<PlayerCombat>();
+        _localController = GetComponent<PlayerController>();
         _cardManager = GetComponent<CardManager>();
 
         // If the per-hand renderer lists weren't assigned in the Inspector, auto-resolve them from
@@ -143,22 +139,7 @@ public class GloveBeatGlow : MonoBehaviour
     public void FlashStrike() => Flash(strikeFlashColor);
     public void FlashHurt()   => Flash(hurtFlashColor);
 
-    private string _suppressedMove = "";
-
-    public void TriggerSelectionBloom(string trigger)
-    {
-        _selectionBloomActive = true;
-        _suppressedMove = "";
-        _selectionBloomFamily = _cardManager != null ? _cardManager.FamilyOfTrigger(trigger) : CardFamily.Support;
-    }
-
-    public void EndSelectionBloom()
-    {
-        _selectionBloomActive = false;
-        _suppressedMove = _localCombat?.PendingMoveTrigger ?? "";
-    }
-
-    private Color BloomColorFor(CardFamily fam)
+    private Color GlowColorFor(CardFamily fam)
     {
         return fam switch
         {
@@ -183,13 +164,13 @@ public class GloveBeatGlow : MonoBehaviour
         var mgr = RhythmRoundManager.Instance;
         bool round = mgr != null && mgr.isRoundActive;
 
-        // Charge ramp toward the next beat.
+        // Charge ramp toward the next beat — eased so it rises gradually then climbs hard near the beat.
         float charge = 0f;
         if (round)
         {
             float toBeat = mgr.GetNextBeatTime() - mgr.GetCurrentTrackTime();
             if (toBeat >= 0f && toBeat <= chargeLead && chargeLead > 0.001f)
-                charge = 1f - (toBeat / chargeLead);
+                charge = Mathf.Pow(1f - (toBeat / chargeLead), chargeRampPower);
         }
 
         if (_flashTimer > 0f)
@@ -254,8 +235,9 @@ public class GloveBeatGlow : MonoBehaviour
     }
 
     /// VR: glow the controller the player should use for the pending card — RIGHT for Strike/Throw,
-    /// LEFT for Block/Parry, EITHER for Support. The other glove keeps a dim idle glow. Only the
-    /// LOCAL player drives this (remote clones / flat-screen leave the per-hand mats untouched).
+    /// LEFT for Block/Parry, BOTH for Support. Glow persists across beats and ramps up as the next
+    /// beat approaches, then goes dark while the attack/dash animation plays. Only the LOCAL player
+    /// drives this (remote clones / bot are left dark).
     private bool _cueDiag2;
     private string _lastCueMove = "\0";
     private void UpdateActiveHandCue()
@@ -274,25 +256,11 @@ public class GloveBeatGlow : MonoBehaviour
         // Runs on VR + flat. Only the LOCAL player's gloves cue (remote clones / bot are left dark).
         if (_localCombat == null || !_localCombat.isLocalPlayer) return;
 
-        // Selection bloom overrides the family cue.
-        if (_selectionBloomActive)
-        {
-            float bloomPulse = 0.7f + 0.3f * Mathf.Sin(Time.time * selectionBloomPulseSpeed * Mathf.PI);
-            Color bloom = BloomColorFor(_selectionBloomFamily) * (selectionBloomIntensity * bloomPulse);
-
-            bool rightHand = _selectionBloomFamily == CardFamily.Strike || _selectionBloomFamily == CardFamily.Throw || _selectionBloomFamily == CardFamily.Support;
-            bool leftHand  = _selectionBloomFamily == CardFamily.Block  || _selectionBloomFamily == CardFamily.Parry  || _selectionBloomFamily == CardFamily.Support;
-
-            if (rightHand)
-                foreach (var m in _rightMats) if (m != null) m.SetColor(ID_Emission, bloom);
-            if (leftHand)
-                foreach (var m in _leftMats)  if (m != null) m.SetColor(ID_Emission, bloom);
-            return;
-        }
-
-        // Keep the glove cue dark while the move that just started its animation is still pending.
         string move = _localCombat.PendingMoveTrigger;
-        if (!string.IsNullOrEmpty(_suppressedMove) && move == _suppressedMove)
+
+        // No card chosen, or the attack/dash animation is playing — keep the glove dark.
+        bool duringAction = _localCombat.isAttacking || (_localController != null && _localController.IsDashing);
+        if (string.IsNullOrEmpty(move) || duringAction)
         {
             foreach (var m in _rightMats) if (m != null) m.SetColor(ID_Emission, Color.black);
             foreach (var m in _leftMats)  if (m != null) m.SetColor(ID_Emission, Color.black);
@@ -307,36 +275,27 @@ public class GloveBeatGlow : MonoBehaviour
             if (!string.IsNullOrEmpty(move)) VRHaptics.CardCue(CueHandFor(move));
         }
 
-        Color rightEmis = Color.black;
-        Color leftEmis  = Color.black;
-
-        if (!string.IsNullOrEmpty(move) && _cardManager != null)
+        // Ramping intensity: low far from the beat, climbing hard as it nears (eased, within chargeLead).
+        float charge = 0f;
+        var mgr = RhythmRoundManager.Instance;
+        if (mgr != null && mgr.isRoundActive)
         {
-            CardFamily fam = _cardManager.FamilyOfTrigger(move);
-            bool offense = fam == CardFamily.Strike || fam == CardFamily.Throw;
-            bool defense = fam == CardFamily.Block  || fam == CardFamily.Parry;
-
-            float pulse = 0.7f + 0.3f * Mathf.Sin(Time.time * cuePulseSpeed * Mathf.PI);
-
-            if (offense)
-            {
-                rightEmis = offenseColor * (activeGlowIntensity * pulse);
-                leftEmis  = defenseColor * idleGlowIntensity;
-            }
-            else if (defense)
-            {
-                leftEmis  = defenseColor * (activeGlowIntensity * pulse);
-                rightEmis = offenseColor * idleGlowIntensity;
-            }
-            else // Support — either hand works, glow both
-            {
-                rightEmis = supportColor * (activeGlowIntensity * pulse);
-                leftEmis  = supportColor * (activeGlowIntensity * pulse);
-            }
+            float toBeat = mgr.GetNextBeatTime() - mgr.GetCurrentTrackTime();
+            if (toBeat >= 0f && toBeat <= chargeLead && chargeLead > 0.001f)
+                charge = Mathf.Pow(1f - (toBeat / chargeLead), chargeRampPower);
         }
 
-        foreach (var m in _rightMats) if (m != null) m.SetColor(ID_Emission, rightEmis);
-        foreach (var m in _leftMats)  if (m != null) m.SetColor(ID_Emission, leftEmis);
+        CardFamily fam = _cardManager != null ? _cardManager.FamilyOfTrigger(move) : CardFamily.Support;
+        Color color = GlowColorFor(fam);
+        float glow = Mathf.Lerp(idleGlowIntensity, selectionBloomIntensity, charge);
+        float pulse = 0.7f + 0.3f * Mathf.Sin(Time.time * cuePulseSpeed * Mathf.PI);
+        Color emis = color * (glow * pulse);
+
+        bool rightHand = fam == CardFamily.Strike || fam == CardFamily.Throw || fam == CardFamily.Support;
+        bool leftHand  = fam == CardFamily.Block  || fam == CardFamily.Parry  || fam == CardFamily.Support;
+
+        foreach (var m in _rightMats) if (m != null) m.SetColor(ID_Emission, rightHand ? emis : Color.black);
+        foreach (var m in _leftMats)  if (m != null) m.SetColor(ID_Emission, leftHand  ? emis : Color.black);
     }
 
     void OnDestroy()

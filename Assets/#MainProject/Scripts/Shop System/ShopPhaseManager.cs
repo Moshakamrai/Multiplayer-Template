@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using Mirror;
 
 public class ShopPhaseManager : MonoBehaviour
 {
@@ -18,8 +19,7 @@ public class ShopPhaseManager : MonoBehaviour
     private HashSet<int> _purchasedCombatSlots = new HashSet<int>();
     private HashSet<int> _purchasedTraitSlots = new HashSet<int>();
 
-    private bool _p1Locked = false;
-    private bool _p2Locked = false;
+    private readonly HashSet<uint> _lockedPlayerNetIds = new HashSet<uint>();
 
     private void Awake() { if (Instance == null) Instance = this; }
 
@@ -28,12 +28,11 @@ public class ShopPhaseManager : MonoBehaviour
         isShopPhase = true;
         shopTimeRemaining = 120f;
         currentShopRound = roundNumber;
-        _p1Locked = false;
-        _p2Locked = false;
+        _lockedPlayerNetIds.Clear();
 
         GenerateShop(roundNumber);
 
-        // Bot auto-buys immediately
+        // Bot auto-buys immediately and auto-locks in.
         var players = new List<PlayerController>(GameManager.players);
         foreach (var p in players)
         {
@@ -43,9 +42,7 @@ public class ShopPhaseManager : MonoBehaviour
                 if (botInv != null)
                 {
                     RunBotShopAI(botInv);
-                    int idx = GetPlayerIndex(botInv);
-                    if (idx == 0) _p1Locked = true;
-                    else if (idx == 1) _p2Locked = true;
+                    LockInShop(botInv); // auto-lock the bot so the human can finish
                 }
                 break;
             }
@@ -124,9 +121,16 @@ public class ShopPhaseManager : MonoBehaviour
     {
         var players = new List<PlayerController>(GameManager.players);
         if (players.Count == 0) return false;
-        bool p1 = _p1Locked;
-        bool p2 = players.Count > 1 ? _p2Locked : true;
-        return p1 && p2;
+
+        // New netId-based check (works for any number of players).
+        foreach (var p in players)
+        {
+            if (p == null) continue;
+            var netId = p.GetComponent<NetworkIdentity>()?.netId ?? 0;
+            if (netId == 0 || !_lockedPlayerNetIds.Contains(netId))
+                return false;
+        }
+        return true;
     }
 
     // ── BOT SHOP AI ──────────────────────────────────────────────────────────
@@ -178,43 +182,67 @@ public class ShopPhaseManager : MonoBehaviour
 
     public void TryBuyCombatCard(PlayerInventory inv, int slotIndex)
     {
-        if (!isShopPhase || slotIndex < 0 || slotIndex >= _combatShopSlots.Count) return;
+        if (!isShopPhase || slotIndex < 0 || slotIndex >= _combatShopSlots.Count)
+        {
+            Debug.LogWarning($"[ShopPhaseManager] TryBuyCombatCard invalid: isShopPhase={isShopPhase}, slot={slotIndex}, slots={_combatShopSlots.Count}");
+            return;
+        }
         var card = _combatShopSlots[slotIndex];
         if (card == null) return;
-        inv.BuyCombatCard(card.cardId, card.cost); // adds the card, or upgrades it if already owned
+        bool ok = inv.BuyCombatCard(card.cardId, card.cost); // adds the card, or upgrades it if already owned
+        Debug.Log($"[ShopPhaseManager] BuyCombatCard slot={slotIndex} id={card.cardId} cost={card.cost} credits={inv.credits} ok={ok}");
     }
 
     public void TryBuyTraitCard(PlayerInventory inv, int slotIndex)
     {
-        if (!isShopPhase || slotIndex < 0 || slotIndex >= _traitShopSlots.Count) return;
+        if (!isShopPhase || slotIndex < 0 || slotIndex >= _traitShopSlots.Count)
+        {
+            Debug.LogWarning($"[ShopPhaseManager] TryBuyTraitCard invalid: isShopPhase={isShopPhase}, slot={slotIndex}, slots={_traitShopSlots.Count}");
+            return;
+        }
         var card = _traitShopSlots[slotIndex];
         if (card == null) return;
-        inv.BuyTraitCard(card.traitId, card.cost);
+        bool ok = inv.BuyTraitCard(card.traitId, card.cost);
+        Debug.Log($"[ShopPhaseManager] BuyTraitCard slot={slotIndex} id={card.traitId} cost={card.cost} tokens={inv.traitTokens} ok={ok}");
     }
 
     public void LockInShop(PlayerInventory inv)
     {
-        if (!isShopPhase) return;
+        if (!isShopPhase)
+        {
+            Debug.LogWarning($"[ShopPhaseManager] LockInShop called while isShopPhase=false for {inv?.name ?? "?"}");
+            return;
+        }
         var equipList = new List<string>(inv.ownedCombatCards);
         Debug.Log($"<color=yellow>SHOP LOCK-IN:</color> Player has {inv.ownedCombatCards.Count} combat cards, equipping: {string.Join(",", equipList)}");
         inv.EquipCombatCards(equipList);
         Debug.Log($"<color=yellow>SHOP LOCK-IN:</color> Equipped {inv.equippedCombatCards.Count} cards: {string.Join(",", inv.equippedCombatCards)}");
 
-        int idx = GetPlayerIndex(inv);
-        if (idx == 0) _p1Locked = true;
-        else if (idx == 1) _p2Locked = true;
+        // Track lock-in by netId so HashSet ordering can never mix up p1/p2.
+        uint netId = inv != null && inv.GetComponent<NetworkIdentity>() != null
+            ? inv.GetComponent<NetworkIdentity>().netId
+            : 0;
+        if (netId != 0) _lockedPlayerNetIds.Add(netId);
     }
 
-    private int GetPlayerIndex(PlayerInventory inv)
+    private void EquipAllPlayers()
     {
-        var players = new List<PlayerController>(GameManager.players);
-        for (int i = 0; i < players.Count; i++)
-            if (players[i] != null && players[i].GetComponent<PlayerInventory>() == inv) return i;
-        return -1;
+        foreach (var player in GameManager.players)
+        {
+            var inv = player?.GetComponent<PlayerInventory>();
+            if (inv == null) continue;
+            var equipList = new List<string>(inv.ownedCombatCards);
+            inv.EquipCombatCards(equipList);
+            Debug.Log($"<color=yellow>SHOP FINALIZE:</color> Equipped {inv.equippedCombatCards.Count} cards for {player.PlayerName}: {string.Join(",", inv.equippedCombatCards)}");
+        }
     }
 
     private void FinalizeShop()
     {
+        // Make sure every purchased card is equipped before we leave, even if the
+        // Lock In button wasn't pressed or the command path failed.
+        EquipAllPlayers();
+
         isShopPhase = false;
         RhythmRoundManager.Instance?.ShowRoundPicker();
     }

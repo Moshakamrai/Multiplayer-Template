@@ -23,6 +23,18 @@ public class MatchResultHud : MonoBehaviour
         hud.Build();
     }
 
+    /// Lightweight per-ROUND result: a single centered WIN/LOSE panel that auto-dismisses after a few
+    /// seconds (no leaderboard panel, no leaderboard logging — that only happens at MATCH end via Show).
+    public static void ShowRoundResult(bool won, bool draw, float seconds)
+    {
+        var go = new GameObject("~RoundResultHud");
+        var hud = go.AddComponent<MatchResultHud>();
+        hud._won = won; hud._draw = draw; hud._roundOnly = true;
+        hud.BuildRoundOnly(seconds);
+    }
+
+    private bool _roundOnly;
+
     private const float DISTANCE   = 3.2f;   // metres in front of the player
     private const float SIDE       = 1.25f;  // how far each panel sits left/right of center
     private const float SLANT_DEG  = 28f;    // how much each panel angles INWARD toward the player
@@ -65,6 +77,82 @@ public class MatchResultHud : MonoBehaviour
         BuildBoardPanel(rightPos, Quaternion.LookRotation(rightPos - camPos) * Quaternion.Euler(0f, SLANT_DEG, 0f));
     }
 
+    // Single centered card for the per-round result; destroys itself after `seconds`.
+    // Clean, well-proportioned: a wide short card, a glowing accent bar in the result colour, a bold
+    // headline with depth shadow, a subtitle, and a quick pop-in scale so it lands with weight.
+    private void BuildRoundOnly(float seconds)
+    {
+        _font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf")
+             ?? Resources.GetBuiltinResource<Font>("Arial.ttf");
+        _quadMat = new Material(Shader.Find("Sprites/Default"));
+
+        Camera cam = Camera.main;
+        Vector3 camPos = cam != null ? cam.transform.position : Vector3.zero;
+        Vector3 fwd = cam != null ? cam.transform.forward : Vector3.forward; fwd.y = 0f;
+        if (fwd.sqrMagnitude < 0.001f) fwd = Vector3.forward; fwd.Normalize();
+        Vector3 center = camPos + fwd * (DISTANCE - 0.4f); center.y = camPos.y; // a touch closer than the match panels
+
+        Color c = _draw ? DrawCol : (_won ? WinCol : LoseCol);
+        string headline = _draw ? "DRAW" : (_won ? "ROUND WON" : "ROUND LOST");
+
+        // Card root (we animate this transform's scale for the pop-in).
+        var card = new GameObject("RoundResultPanel").transform;
+        card.SetParent(transform, false);
+        card.SetPositionAndRotation(center, Quaternion.LookRotation(center - camPos));
+
+        // Proportioned backing: wide and short, not the tall match-panel block.
+        const float cardW = 2.3f, cardH = 1.05f;
+        MakeQuad(card, new Vector3(0f, 0f, 0.03f), new Vector3(cardW, cardH, 1f), PanelBg);
+        // Thin coloured frame just behind, slightly larger, glowing in the result colour.
+        MakeQuad(card, new Vector3(0f, 0f, 0.05f), new Vector3(cardW + 0.08f, cardH + 0.08f, 1f),
+                 new Color(c.r, c.g, c.b, 0.35f));
+        // Accent bar under the headline.
+        MakeQuad(card, new Vector3(0f, -0.16f, 0.01f), new Vector3(cardW * 0.78f, 0.025f, 1f), c);
+
+        // Headline: dark depth copy + coloured front.
+        MakeText(card, headline, 0.34f, new Vector3(0f, 0.16f, 0f), new Color(0f, 0f, 0f, 0.9f), 0.025f);
+        MakeText(card, headline, 0.34f, new Vector3(0f, 0.16f, 0f), c, 0f);
+        // Subtitle.
+        MakeText(card, "DECIDED BY POINTS", 0.10f, new Vector3(0f, -0.30f, 0f), new Color(0.78f, 0.83f, 0.95f), 0f);
+
+        StartCoroutine(PopIn(card));
+        Destroy(gameObject, seconds);
+    }
+
+    // Quick spring-ish pop: scale from small → slight overshoot → settle. Makes the card land with weight.
+    private System.Collections.IEnumerator PopIn(Transform card)
+    {
+        float t = 0f; const float dur = 0.32f;
+        while (t < dur && card != null)
+        {
+            t += Time.unscaledDeltaTime;
+            float p = Mathf.Clamp01(t / dur);
+            // ease-out-back overshoot
+            float s = 1.70158f;
+            float u = p - 1f;
+            float scale = 1f + (u * u * ((s + 1f) * u + s));
+            card.localScale = Vector3.one * Mathf.Lerp(0.6f, 1f, scale);
+            yield return null;
+        }
+        if (card != null) card.localScale = Vector3.one;
+    }
+
+    // Small helper: a coloured, unlit, shadow-free quad parented to `parent`.
+    private void MakeQuad(Transform parent, Vector3 localPos, Vector3 localScale, Color col)
+    {
+        var quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
+        quad.name = "Quad";
+        Destroy(quad.GetComponent<Collider>());
+        quad.transform.SetParent(parent, false);
+        quad.transform.localPosition = localPos;
+        quad.transform.localScale = localScale;
+        var mr = quad.GetComponent<MeshRenderer>();
+        mr.sharedMaterial = _quadMat;
+        mr.material.color = col;
+        mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        mr.receiveShadows = false;
+    }
+
     private void BuildResultPanel(Vector3 pos, Quaternion rot)
     {
         var panel = MakePanel(pos, rot, "ResultPanel");
@@ -92,13 +180,13 @@ public class MatchResultHud : MonoBehaviour
         var all = LeaderboardStore.All();
         var sb = new StringBuilder();
         int shown = Mathf.Min(10, all.Count);
+        int myRowIndex = -1;
         for (int i = 0; i < shown; i++)
         {
             var e = all[i];
-            // Highlight the player's just-recorded row.
             bool mine = (i + 1 == _rank);
+            if (mine) myRowIndex = i;
             string mark = mine ? "> " : "  ";
-            // Fixed-ish columns: rank, name (padded), score.
             string nm = e.name.Length > 10 ? e.name.Substring(0, 10) : e.name.PadRight(10);
             sb.AppendLine($"{mark}{i + 1,2}. {nm}  {e.score,8:N0}");
         }
@@ -107,6 +195,33 @@ public class MatchResultHud : MonoBehaviour
         var body = MakeText(panel, sb.ToString(), 0.115f, new Vector3(0f, 0.75f, 0f), Color.white, 0f);
         body.anchor = TextAnchor.UpperCenter;
         body.alignment = TextAlignment.Left;
+
+        // Highlight bar behind the player's row.
+        if (myRowIndex >= 0)
+        {
+            float rowHeight = 0.145f;
+            float topY = 0.75f - myRowIndex * rowHeight - rowHeight * 0.35f;
+            var highlight = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            highlight.name = "Highlight";
+            Destroy(highlight.GetComponent<Collider>());
+            highlight.transform.SetParent(panel, false);
+            highlight.transform.localPosition = new Vector3(0f, topY, 0.015f);
+            highlight.transform.localScale = new Vector3(PANEL_W * 0.92f, rowHeight * 1.05f, 1f);
+            var hmr = highlight.GetComponent<MeshRenderer>();
+            hmr.sharedMaterial = _quadMat;
+            hmr.material.color = new Color(1f, 0.85f, 0.25f, 0.22f);
+            hmr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            hmr.receiveShadows = false;
+        }
+
+        // If the player didn't make the top 10, append their rank separately so it's still visible.
+        if (_rank > 10)
+        {
+            string extra = $"> {_rank,2}. {_name.ToUpper().PadRight(10)}  {_score,8:N0}";
+            var extraText = MakeText(panel, extra, 0.115f, new Vector3(0f, -0.85f, 0f), new Color(1f, 0.85f, 0.25f), 0f);
+            extraText.anchor = TextAnchor.MiddleCenter;
+            extraText.alignment = TextAlignment.Left;
+        }
     }
 
     private Transform MakePanel(Vector3 pos, Quaternion rot, string name)

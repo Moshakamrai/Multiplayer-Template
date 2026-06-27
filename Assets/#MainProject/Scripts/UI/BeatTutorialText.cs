@@ -52,7 +52,7 @@ public class BeatTutorialText : MonoBehaviour
         var rmm = RhythmRoundManager.Instance;
         Transform bot = LocalOpponent();
         PlayerCombat self = LocalSelf();
-        Camera cam = Camera.main;
+        Camera cam = CachedCamera.Main;
 
         // Always watch for events (so the timers/streaks stay live), but only DRAW when the coach
         // says this player still needs help and we have everything to position the panel.
@@ -148,13 +148,34 @@ public class BeatTutorialText : MonoBehaviour
 
     private void PositionBehindBot(Transform bot, Camera cam)
     {
-        // Sit above + slightly behind the bot (further from the player), facing the player.
-        Vector3 awayFromPlayer = (bot.position - cam.transform.position); awayFromPlayer.y = 0f;
-        if (awayFromPlayer.sqrMagnitude > 0.001f) awayFromPlayer.Normalize(); else awayFromPlayer = Vector3.forward;
+        // Sit above + slightly behind the bot (further from the player). Use the FIXED spawn-to-spawn
+        // direction for placement and rotation so the panel doesn't spin as the bot tracks the player.
+        Vector3 awayFromPlayer = FixedAwayFromPlayer();
 
         Vector3 pos = bot.position + Vector3.up * ABOVE_BOT + awayFromPlayer * BEHIND_BOT;
         transform.position = pos;
-        transform.rotation = Quaternion.LookRotation(pos - cam.transform.position); // face the player
+        transform.rotation = Quaternion.LookRotation(-awayFromPlayer); // face the player, fixed angle
+    }
+
+    // A stable "behind the bot" direction based on the scene spawn points, not the live camera.
+    private Vector3 FixedAwayFromPlayer()
+    {
+        var rmm = RhythmRoundManager.Instance;
+        if (rmm != null && rmm.playerStartPosition != null && rmm.botStartPosition != null)
+        {
+            Vector3 d = rmm.botStartPosition.position - rmm.playerStartPosition.position;
+            d.y = 0f;
+            if (d.sqrMagnitude > 0.0001f) return d.normalized;
+        }
+
+        // Fallback: use the current view direction (only used before spawn points are set).
+        Camera cam = CachedCamera.Main;
+        if (cam != null)
+        {
+            Vector3 d = (transform.position - cam.transform.position); d.y = 0f;
+            if (d.sqrMagnitude > 0.0001f) return d.normalized;
+        }
+        return Vector3.forward;
     }
 
     private void Build()

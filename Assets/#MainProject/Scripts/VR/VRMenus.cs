@@ -40,7 +40,9 @@ public class VRMenus : MonoBehaviour
 
     private void Update()
     {
-        if (!XRSettings.isDeviceActive) return;
+        // Show in real VR OR the editor VR-sim (so the world-space menus can be mouse-tested in Play
+        // mode). VRCameraDriver.VRActive folds both together.
+        if (!VRCameraDriver.VRActive) return;
 
         var rmm = RhythmRoundManager.Instance;
         var spm = ShopPhaseManager.Instance;
@@ -72,18 +74,35 @@ public class VRMenus : MonoBehaviour
 
         var options = rmm.GetRoundOptionsForVR();
 
+        // Grid: 3 columns, button + gap sizing computed so EVERYTHING fits inside the panel (the old
+        // 2-col / 520-wide layout overflowed once there were 5-6 songs).
+        const int cols = 3;
+        Vector2 btnSize = new Vector2(360, 250);
+        float gapX = 36f, gapY = 36f;
+        int rows = Mathf.CeilToInt(options.Count / (float)cols);
+
+        // Canvas sized to actually hold the title + all rows, with padding — no more spill.
+        float titleH = 120f, padTop = 40f, padBottom = 60f, padSide = 60f;
+        float gridW = cols * btnSize.x + (cols - 1) * gapX;
+        float gridH = rows * btnSize.y + Mathf.Max(0, rows - 1) * gapY;
+        float canvasW = gridW + padSide * 2f;
+        float canvasH = titleH + padTop + gridH + padBottom;
+
         _pickerPanel = new GameObject("VRRoundPicker");
         PlacePanel(_pickerPanel, cam);
-        var crt = MakeCanvas(_pickerPanel, new Vector2(1200, 900));
-        MakeImage(crt, new Color(0.02f, 0.03f, 0.06f, 0.92f), Vector2.zero, crt.sizeDelta);
+        var crt = MakeCanvas(_pickerPanel, new Vector2(canvasW, canvasH));
+        MakeImage(crt, new Color(0.02f, 0.03f, 0.06f, 0.94f), Vector2.zero, crt.sizeDelta);
 
-        var title = MakeText(crt, "PICK THE ROUND", 64, new Vector2(0, 390), new Vector2(1100, 90));
+        float topY = canvasH * 0.5f;
+        var title = MakeText(crt, "PICK A SONG", 60, new Vector2(0, topY - padTop - titleH * 0.5f),
+            new Vector2(canvasW - 80f, titleH));
         title.fontStyle = FontStyle.Bold;
         title.color = new Color(1f, 0.85f, 0.2f);
 
-        const int cols = 2;
-        Vector2 btnSize = new Vector2(520, 260);
-        float gapX = 40f, gapY = 32f, startY = 280f;
+        // First row's center Y, just under the title block.
+        float gridTop = topY - padTop - titleH;
+        float startY = gridTop - btnSize.y * 0.5f;
+
         for (int i = 0; i < options.Count; i++)
         {
             int row = i / cols, col = i % cols;
@@ -234,6 +253,49 @@ public class VRMenus : MonoBehaviour
         lockBtn.normalColor = new Color(0.10f, 0.50f, 0.20f, 0.97f);
         lockBtn.hoverColor  = new Color(0.20f, 0.90f, 0.40f, 0.98f);
         lockBtn.Refresh();
+
+        // Leaderboard panel to the RIGHT of the shop board (child of the shop so it moves/faces with it).
+        BuildShopLeaderboard();
+    }
+
+    // A standalone leaderboard panel beside the shop, reusing the persistent LeaderboardStore data.
+    private void BuildShopLeaderboard()
+    {
+        if (_shopPanel == null) return;
+        var panel = new GameObject("ShopLeaderboard");
+        panel.transform.SetParent(_shopPanel.transform, false);
+        // Sit just off the right edge of the 3000-wide board, slightly turned toward the player.
+        panel.transform.localPosition = new Vector3(2.4f, 0f, 0.25f);
+        panel.transform.localRotation = Quaternion.Euler(0f, -18f, 0f);
+
+        var crt = MakeCanvas(panel, new Vector2(900, 1400));
+        crt.localScale = Vector3.one * 0.00128f;
+        MakeImage(crt, new Color(0.02f, 0.03f, 0.06f, 0.95f), Vector2.zero, crt.sizeDelta);
+
+        var hdr = MakeText(crt, "LEADERBOARD", 52, new Vector2(0, 620), new Vector2(860, 80));
+        hdr.fontStyle = FontStyle.Bold; hdr.color = new Color(0.3f, 0.9f, 1f);
+
+        var entries = LeaderboardStore.All();
+        int shown = Mathf.Min(12, entries.Count);
+        if (shown == 0)
+            MakeText(crt, "No scores yet", 38, new Vector2(0, 400), new Vector2(860, 60)).color = new Color(0.7f, 0.75f, 0.85f);
+
+        float y = 500f;
+        for (int i = 0; i < shown; i++)
+        {
+            var e = entries[i];
+            string nm = e.name.Length > 12 ? e.name.Substring(0, 12) : e.name;
+            Color rowCol = i == 0 ? new Color(1f, 0.85f, 0.25f)
+                         : i == 1 ? new Color(0.85f, 0.85f, 0.9f)
+                         : i == 2 ? new Color(0.85f, 0.55f, 0.3f) : Color.white;
+            var rank = MakeText(crt, $"{i + 1}.", 36, new Vector2(-360, y), new Vector2(80, 54));
+            rank.alignment = TextAnchor.MiddleRight; rank.color = rowCol; rank.fontStyle = FontStyle.Bold;
+            var name = MakeText(crt, nm, 36, new Vector2(-110, y), new Vector2(380, 54));
+            name.alignment = TextAnchor.MiddleLeft; name.color = rowCol;
+            var sc = MakeText(crt, e.score.ToString("N0"), 36, new Vector2(300, y), new Vector2(260, 54));
+            sc.alignment = TextAnchor.MiddleRight; sc.color = rowCol; sc.fontStyle = FontStyle.Bold;
+            y -= 64f;
+        }
     }
 
     // A player's owned-card deck (name + family tag + level stars), display-only — plus the equipped
@@ -462,7 +524,7 @@ public class VRMenus : MonoBehaviour
                 vbtn.background = bimg; vbtn.normalColor = btnCol;
                 vbtn.hoverColor = new Color(0.25f, 1f, 0.5f, 0.98f);
                 vbtn.interactable = true; vbtn.OnClick = onClick; vbtn.Refresh();
-                var col = bgo.AddComponent<BoxCollider>(); col.size = new Vector3(bw, bh, 30f);
+                var col = bgo.AddComponent<BoxCollider>(); col.size = new Vector3(bw, bh, 600f);
             }
         }
     }
@@ -508,8 +570,10 @@ public class VRMenus : MonoBehaviour
         btn.Refresh();
 
         // Physics collider sized to the rect (local px; canvas scale converts it to world metres).
+        // DEEP Z so the laser reliably intersects it from any angle/distance — a thin slab (the old
+        // 30) was easy to graze past, which is why the button sometimes wouldn't highlight/click.
         var col = go.AddComponent<BoxCollider>();
-        col.size = new Vector3(size.x, size.y, 30f);
+        col.size = new Vector3(size.x, size.y, 600f);
 
         var txt = MakeText(rt, label, 34, Vector2.zero, size);
         txt.fontStyle = FontStyle.Bold;
@@ -561,13 +625,18 @@ public class VRMenus : MonoBehaviour
         var strip = MakeImage(rt, new Color(0.03f, 0.04f, 0.08f, 0.97f), new Vector2(0, -size.y * 0.5f + stripH * 0.5f), new Vector2(size.x, stripH));
         strip.transform.SetParent(rt, false);
 
-        // Accent line between art and strip
-        var accentLine = MakeImage(rt, color, new Vector2(0, -artH * 0.5f), new Vector2(size.x, 3f));
+        // Accent line BETWEEN art and the name strip — sits at the TOP edge of the strip, not through
+        // the label. (It used to land at the same Y as the text, drawing a line across it.)
+        float stripTopY = -size.y * 0.5f + stripH;           // boundary between art and strip
+        var accentLine = MakeImage(rt, color, new Vector2(0, stripTopY), new Vector2(size.x, 3f));
         accentLine.transform.SetParent(rt, false);
 
-        // Label text
-        var txt = MakeText(rt, label, 30, new Vector2(0, -size.y * 0.5f + stripH * 0.5f), new Vector2(size.x, stripH));
+        // Label text — centered within the name strip, clearly BELOW the accent line.
+        var txt = MakeText(rt, label, 30, new Vector2(0, -size.y * 0.5f + stripH * 0.5f), new Vector2(size.x - 24f, stripH));
         txt.fontStyle = FontStyle.Bold;
+        txt.alignment = TextAnchor.MiddleCenter;
+        txt.horizontalOverflow = HorizontalWrapMode.Wrap;
+        txt.verticalOverflow = VerticalWrapMode.Truncate;
         txt.color = used ? new Color(0.5f, 0.5f, 0.5f) : color;
 
         // Hover glow border (drawn as an image child, VRButton will tint it)
@@ -588,9 +657,9 @@ public class VRMenus : MonoBehaviour
         btn.OnClick = onClick;
         btn.Refresh();
 
-        // Collider
+        // Collider — deep Z so the laser reliably hits it.
         var col = go.AddComponent<BoxCollider>();
-        col.size = new Vector3(size.x, size.y, 30f);
+        col.size = new Vector3(size.x, size.y, 600f);
 
         return btn;
     }

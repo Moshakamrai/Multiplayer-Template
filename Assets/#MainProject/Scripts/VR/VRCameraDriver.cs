@@ -16,14 +16,25 @@ using UnityEngine.XR;
 [DefaultExecutionOrder(10000)] // run after everything else that moves the camera
 public class VRCameraDriver : MonoBehaviour
 {
-    public static bool VRActive { get; private set; }
+    // Real VR is active, OR the editor VR-simulation toggle is on (lets you test all the world-space
+    // VR menus with the MOUSE in Play mode without a headset). The sim only ever applies in the Editor.
+    public static bool VRActive => _vrActive || EditorVRSim;
+    private static bool _vrActive;
+
+    // EDITOR-ONLY test switch: set true to make the game behave as if in VR (world-space menus + the
+    // mouse-driven laser) while in Play mode. Never on in a real build.
+    // Was true on the VR branch to mouse-test VR menus in the editor. OFF here so PC/editor runs the
+    // FLAT flow (no world-space start menu / leaderboard — straight to the round picker).
+    public const bool EditorVRSim = false;
+
     private static VRCameraDriver _instance;
 
-    // Live-tunable VR viewpoint offset (set in-headset with the right thumbstick).
-    // GameManager.HandleCamera reads these to push the first-person view forward/up.
-    public static float ForwardOffset { get; private set; } = 2.4f;
+    // Live-tunable VR viewpoint distance. Positive values pull the camera BACK from the eye socket,
+    // which makes the world appear farther away / wider (the only reliable way to "increase FOV" in VR,
+    // because OpenXR owns the per-eye projection matrices and ignores Camera.fieldOfView).
+    public static float ForwardOffset { get; private set; } = 0.5f;
     public static float HeightOffset { get; private set; } = 0f;
-    private const string FwdKey = "VR_FwdOffset";
+    private const string FwdKey = "VR_ViewDistance"; // renamed so the old inverted value isn't reused
     private const string HgtKey = "VR_HeightOffset";
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -41,7 +52,7 @@ public class VRCameraDriver : MonoBehaviour
         if (_instance != null && _instance != this) { Destroy(this); return; }
         _instance = this;
 
-        ForwardOffset = PlayerPrefs.GetFloat(FwdKey, 0.8f);
+        ForwardOffset = PlayerPrefs.GetFloat(FwdKey, 0.5f);
         HeightOffset = PlayerPrefs.GetFloat(HgtKey, 0f);
     }
 
@@ -49,7 +60,8 @@ public class VRCameraDriver : MonoBehaviour
     private static string _diag = "no input read yet";
     private float _logTimer;
     // Camera position is locked (set once, not adjusted with buttons to avoid conflicts with gloves).
-    // If you need to retune, manually call this in editor or modify ForwardOffset/HeightOffset directly.
+    // If you need to retune at runtime, call VRCameraDriver.SetForwardOffset(value) or
+    // AdjustForwardOffset(delta). Values are saved to PlayerPrefs automatically.
 
     private InputDevice _hmd;
     private bool _hmdFound;
@@ -63,7 +75,7 @@ public class VRCameraDriver : MonoBehaviour
 
         _hmd = devices[0];
         _hmdFound = true;
-        VRActive = true;
+        _vrActive = true;
         Debug.Log($"[VR] HMD detected: {_hmd.name}");
     }
 
@@ -103,7 +115,8 @@ public class VRCameraDriver : MonoBehaviour
             Transform eye = lp.CameraPosition;
             Vector3 flatFwd = eye.forward; flatFwd.y = 0f;
             if (flatFwd.sqrMagnitude > 0.0001f) flatFwd.Normalize();
-            _cam.transform.position = eye.position + flatFwd * ForwardOffset + Vector3.up * HeightOffset;
+            // Subtract ForwardOffset so positive values pull the camera BACK, giving a wider view.
+            _cam.transform.position = eye.position - flatFwd * ForwardOffset + Vector3.up * HeightOffset;
         }
 
         // --- Head-look: drive the camera ROTATION from the HMD. ---
@@ -134,7 +147,7 @@ public class VRCameraDriver : MonoBehaviour
         };
         style.normal.textColor = new Color(0.3f, 1f, 0.4f);
         GUI.Label(new Rect(0, Screen.height * 0.5f + 30f, Screen.width, 50f),
-                  $"View distance: {ForwardOffset:0.00}   (right stick / A=closer B=farther)", style);
+                  $"View distance (pull-back): {ForwardOffset:0.00}   (+ = wider/ farther, - = closer)", style);
 
         // Diagnostic line — tells us if the controller input is actually arriving.
         var dstyle = new GUIStyle(GUI.skin.label) { fontSize = 26, alignment = TextAnchor.MiddleCenter };
@@ -142,5 +155,18 @@ public class VRCameraDriver : MonoBehaviour
         GUI.Label(new Rect(0, Screen.height * 0.5f + 80f, Screen.width, 40f), _diag, dstyle);
     }
 
-    public static void ForceDisable() => VRActive = false;
+    public static void ForceDisable() => _vrActive = false;
+
+    // Runtime tuning helpers. Call these from a debug input binding / console to widen/tighten the VR view.
+    public static void SetForwardOffset(float value)
+    {
+        ForwardOffset = value;
+        PlayerPrefs.SetFloat(FwdKey, ForwardOffset);
+        PlayerPrefs.Save();
+    }
+
+    public static void AdjustForwardOffset(float delta)
+    {
+        SetForwardOffset(ForwardOffset + delta);
+    }
 }

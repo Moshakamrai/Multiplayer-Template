@@ -34,18 +34,20 @@ public static class LeaderboardStore
         return _cache;
     }
 
-    /// Add a finished match's result and persist. Returns the 1-based rank it landed at (0 = didn't
-    /// make the top MAX_ENTRIES).
+    /// Record a player's score and persist. ONE entry per name — if the name already exists, its score
+    /// is OVERWRITTEN with this one (so a player's row updates each round instead of duplicating).
+    /// Returns the 1-based rank it landed at (0 = didn't make the top MAX_ENTRIES).
     public static int Record(string name, int score)
     {
         if (string.IsNullOrWhiteSpace(name)) name = "PLAYER";
+        name = name.Trim();
         var list = Load();
-        list.Add(new Entry
-        {
-            name  = name.Trim(),
-            score = score,
-            date  = System.DateTime.Now.ToString("yyyy-MM-dd")
-        });
+
+        // Upsert: replace the existing entry for this name (case-insensitive), else add a new one.
+        int existing = list.FindIndex(e => string.Equals(e.name, name, System.StringComparison.OrdinalIgnoreCase));
+        var entry = new Entry { name = name, score = score, date = System.DateTime.Now.ToString("yyyy-MM-dd") };
+        if (existing >= 0) list[existing] = entry;
+        else               list.Add(entry);
 
         // Highest score first; keep only the top N.
         list.Sort((a, b) => b.score.CompareTo(a.score));
@@ -54,10 +56,33 @@ public static class LeaderboardStore
         _cache = list;
         Save(list);
 
-        // Find where THIS exact entry ranked (first matching name+score).
         for (int i = 0; i < list.Count; i++)
-            if (list[i].name == name.Trim() && list[i].score == score) return i + 1;
+            if (string.Equals(list[i].name, name, System.StringComparison.OrdinalIgnoreCase)) return i + 1;
         return 0;
+    }
+
+    /// True if a player name is already on the board (case-insensitive). Used to reject duplicate names.
+    public static bool NameExists(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return false;
+        name = name.Trim();
+        foreach (var e in All())
+            if (string.Equals(e.name, name, System.StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
+    }
+
+    // Preset scores shown on a fresh board — challenging but beatable benchmarks for players to chase.
+    // Real runs overwrite/overtake these (one entry per name). Tune the numbers here.
+    private static List<Entry> SeedDefaults()
+    {
+        return new List<Entry>
+        {
+            new Entry { name = "ACE", score = 92000, date = "2026-06-01" },
+            new Entry { name = "NEO", score = 78500, date = "2026-06-01" },
+            new Entry { name = "VYX", score = 64000, date = "2026-06-01" },
+            new Entry { name = "KAI", score = 51000, date = "2026-06-01" },
+            new Entry { name = "ZED", score = 38000, date = "2026-06-01" },
+        };
     }
 
     private static List<Entry> Load()
@@ -75,15 +100,22 @@ public static class LeaderboardStore
             }
         }
         catch (System.Exception e) { Debug.LogWarning($"[LeaderboardStore] load failed: {e.Message}"); }
-        return new List<Entry>();
+
+        // No saved board yet → seed the default benchmark scores AND write them so they persist.
+        var seeded = SeedDefaults();
+        Save(seeded);
+        return seeded;
     }
 
     private static void Save(List<Entry> list)
     {
         try
         {
+            var dir = Path.GetDirectoryName(FilePath);
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir)) Directory.CreateDirectory(dir);
             var w = new Wrapper { entries = list };
             File.WriteAllText(FilePath, JsonUtility.ToJson(w, true));
+            Debug.Log($"<color=green>[LeaderboardStore]</color> saved {list.Count} entries → {FilePath}");
         }
         catch (System.Exception e) { Debug.LogWarning($"[LeaderboardStore] save failed: {e.Message}"); }
     }

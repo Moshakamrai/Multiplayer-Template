@@ -96,8 +96,8 @@ public class FighterCardVFX : MonoBehaviour
     public float effectHeight = 1.2f;
     [Tooltip("Seconds before one-shot VFX instances are cleaned up.")]
     public float oneShotLifetime = 3f;
-    [Tooltip("Uniform scale applied to spawned hit / status / reaction VFX. Lower this if the imported effects look too big (1 = prefab's own size).")]
-    [Range(0.05f, 3f)] public float effectSizeScale = 0.5f;
+    [Tooltip("Uniform scale applied to spawned status / reaction VFX. Lower this if the imported effects look too big (1 = prefab's own size).")]
+    [Range(0.05f, 3f)] public float effectSizeScale = 0.3f;
 
     // Apply the global size scale to a freshly-spawned one-shot VFX instance.
     private void ScaleEffect(GameObject go)
@@ -176,17 +176,10 @@ public class FighterCardVFX : MonoBehaviour
         var set = SetForFamily(FamilyOf(trigger));
         if (set == null) return;
 
-        // 1) Weapon aura — switch OFF the previous family's aura, switch this one ON.
-        //    It turns OFF when the attack ANIMATION ends (PlayerCombat.EndAttackWindow → StopAura),
-        //    with a safety timeout so a missed animation event can't leave it stuck on.
-        if (_activeAura != null && _activeAura != set.weaponAuraVfx) SetAura(_activeAura, false);
-        if (set.weaponAuraVfx != null)
-        {
-            _activeAura = set.weaponAuraVfx;
-            SetAura(_activeAura, true);
-            if (_auraSafetyRoutine != null) StopCoroutine(_auraSafetyRoutine);
-            _auraSafetyRoutine = StartCoroutine(AuraSafetyTimeout());
-        }
+        // GLOVE AURA VFX DISABLED — no VFX should come off the player's gloves. We keep any existing aura
+        // forced OFF and never turn one on. (Sword tint below is harmless for glove fighters — no sword
+        // renderers — and the flying slash/blood are unaffected.)
+        if (_activeAura != null) { SetAura(_activeAura, false); _activeAura = null; }
 
         // Sword + arc tint for the swing.
         if (set.tintSword)
@@ -217,14 +210,9 @@ public class FighterCardVFX : MonoBehaviour
     }
 
     /// 3) Hit effect: this fighter's attack of `family` landed on `victimPos` — burst there.
-    public void PlayHit(CardFamily family, Vector3 victimPos)
-    {
-        var set = SetForFamily(family);
-        if (set?.hitVfx == null) return;
-        var go = Instantiate(set.hitVfx, victimPos, Quaternion.identity);
-        ScaleEffect(go);
-        Destroy(go, oneShotLifetime);
-    }
+    // DISABLED: the project already has a dedicated blood effect, so these imported hit bursts are
+    // skipped entirely.
+    public void PlayHit(CardFamily family, Vector3 victimPos) { }
 
     private IEnumerator TintRoutine(FamilyVfx set)
     {

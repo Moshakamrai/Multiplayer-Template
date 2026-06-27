@@ -43,8 +43,18 @@ public class PlayerController : NetworkBehaviour
         _hasHome = true;
     }
 
+    public Vector3 HomePosition => _homePosition;
+
+    // Temporary position override for the bot's beat run-in. While set, LateUpdate pins to this point
+    // instead of home, so the run isn't snapped back. Cleared (ClearApproachOverride) to resume pinning.
+    private bool _useApproachOverride;
+    private Vector3 _approachPos;
+    public void SetApproachOverride(Vector3 pos) { _useApproachOverride = true; _approachPos = pos; }
+    public void ClearApproachOverride() { _useApproachOverride = false; }
+
     private Queue<Vector3> _dashQueue = new Queue<Vector3>();
     private bool _isDashing;
+    public bool IsDashing => _isDashing;
     private float _lastDashTime;
     private Vector3 _dashDirection;
     private float _dashElapsed;
@@ -103,6 +113,10 @@ public class PlayerController : NetworkBehaviour
 
         if (!(isLocalPlayer || isBotOnServer) || _combat.IsDead || _combat.IsHurting) return;
 
+        // Held stagger (drone segment): the bot does NOT move/rotate/dash at all — it stays frozen on
+        // its spawn. Skip the whole movement pipeline so nothing drifts or spins it.
+        if (_combat.HeldStaggerActive) { _dashQueue.Clear(); _isDashing = false; return; }
+
         ProcessDashQueue();
         Movement();
     }
@@ -127,13 +141,15 @@ public class PlayerController : NetworkBehaviour
         if (!(isLocalPlayer || isBotOnServer)) return;
         if (!_hasHome) return;
 
-        // In VR the human is positioned by VRCameraDriver/their real body — don't fight it. The BOT is
-        // always pinned (even in VR), since it has no rig driving it.
+        // Both the bot AND the human are hard-pinned to their spawn every frame. The player is not
+        // allowed to leave their spot — only rotation is permitted. The bot still respects its temporary
+        // approach override for beat run-ins.
         bool isBot = GetComponent<BotController>() != null;
-        if (!isBot && VRCameraDriver.VRActive) return;
 
-        // Full pin to spawn on every axis.
-        transform.position = _homePosition;
+        // Full pin to spawn on every axis — UNLESS a temporary approach override is set (the bot's
+        // beat run-in drives its position itself; we pin to that point instead of home so the run isn't
+        // snapped back every frame).
+        transform.position = _useApproachOverride ? _approachPos : _homePosition;
 
         // Face the opponent (animations can twist the rig; enforce the facing here).
         PlayerController opp = GetOpponent();
@@ -210,18 +226,16 @@ public class PlayerController : NetworkBehaviour
 
     private IEnumerator KnockbackRoutine(Vector3 dir)
     {
-        float elapsed = 0f;
-        const float duration = 0.12f;
-        while (elapsed < duration)
-        {
-            _characterController.Move(dir * 2.5f * (1f - elapsed / duration) * Time.deltaTime);
-            elapsed += Time.deltaTime;
-            yield return null;
-        }
+        // DISABLED: the bot is positioned ENTIRELY by the LateUpdate pin / BotBeatApproach override now.
+        // Physically Move()-ing it here on knockback shoved it off spawn and (via collider depenetration
+        // against the player) leaked cumulative drift. The hurt/knockback ANIMATION still plays; the body
+        // stays pin-driven. No physical relocation.
+        yield break;
     }
 
     private void Movement()
     {
+        bool isBot = GetComponent<BotController>() != null;
         PlayerController opponent = GetOpponent();
 
         // 1. Handle Rotation and Aiming
@@ -267,7 +281,9 @@ public class PlayerController : NetworkBehaviour
         // 3. Dash Execution
         if (_isDashing)
         {
-            _characterController.Move(transform.TransformDirection(_dashDirection) * (dashDistance / dashDuration) * Time.deltaTime);
+            // NEITHER fighter physically relocates on a dash anymore — the dodge ANIMATION + VFX play for
+            // feedback, but the body stays pin-driven (LateUpdate). The bot used to Move() its controller
+            // here, which depenetrated against the player and leaked cumulative drift off its spawn.
             _dashElapsed += Time.deltaTime;
             playerCollider.enabled = false;
             if (_dashElapsed >= dashDuration) _isDashing = false;
@@ -307,7 +323,12 @@ public class PlayerController : NetworkBehaviour
         targetVelocity += autoSpacingVelocity;
         targetVelocity.y = _velocityY;
 
-        _characterController.Move(targetVelocity * Time.deltaTime);
+        // NEITHER fighter uses the CharacterController to move anymore. The bot is positioned ENTIRELY
+        // by LateUpdate (home pin OR the beat-approach override set by BotBeatApproach). Letting the
+        // CharacterController also Move() here caused slow DRIFT: while the bot overlaps the player at the
+        // attack point, the controller depenetrates it sideways and accumulates gravity, nudging it off
+        // its spawn a little more each return. Pinning via transform.position is the single source of
+        // truth, so we skip the controller move for the bot too.
     }
     public void InterruptMovement() { _dashQueue.Clear(); _isDashing = false; }
     private void ProcessDashQueue()
@@ -323,6 +344,13 @@ public class PlayerController : NetworkBehaviour
 
     [Command] private void UpdateLookRotationCmd(float rot) { _rotationYRemote = rot; }
     [Command] private void SetNameCmd(string playerName) { PlayerName = playerName; }
+
+    /// Public entry to (re)sync this player's networked name — used by the VR start-menu initials picker.
+    public void SetNameNetworked(string playerName)
+    {
+        if (isServer) PlayerName = playerName;
+        else if (isLocalPlayer) SetNameCmd(playerName);
+    }
 
     public PlayerController GetOpponent()
     {

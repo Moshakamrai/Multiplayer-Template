@@ -19,10 +19,50 @@ public class BotController : NetworkBehaviour
         if (isServer) _controller.SetReady(true);
     }
 
+    private void LateUpdate()
+    {
+        if (!isServer) return;
+        if (_combat == null || _combat.IsDead || _combat.IsHurting || _combat.IsStaggered || _combat.isAttacking) return;
+        // BotBeatApproach already handles rotation during the beat run-in; skip to avoid fighting it.
+        if (GetComponent<BotBeatApproach>() is { IsApproaching: true }) return;
+        FaceOpponent();
+    }
+
+    private void FaceOpponent()
+    {
+        Vector3 lookPos = GetOpponentLookPos();
+        Vector3 dir = lookPos - transform.position;
+        dir.y = 0f;
+        if (dir.sqrMagnitude > 0.0001f)
+            transform.rotation = Quaternion.LookRotation(dir);
+    }
+
+    // The opponent's head/camera position in world space. Falls back to the body transform
+    // if the player has no camera slot assigned. This lets the bot look at the player's head
+    // rather than their feet.
+    // In VR/host mode, we use the live HMD position when it's available.
+    private Vector3 GetOpponentLookPos()
+    {
+        if (_controller == null) return transform.position + transform.forward;
+        PlayerController opponent = _controller.GetOpponent();
+        if (opponent == null) return transform.position + transform.forward;
+
+        if (VRCameraDriver.VRActive && opponent.isLocalPlayer)
+        {
+            Vector3 head = VRHands.HeadPos;
+            if (head != Vector3.zero) return head;
+        }
+
+        Transform cam = opponent.CameraPosition;
+        return cam != null ? cam.position : opponent.transform.position;
+    }
+
     [Server]
     public void ThinkNextMove()
     {
-        if (_combat.IsHurting || _combat.IsDead) return;
+        // Staggered too → don't act (this is what keeps the bot frozen during the drone-rush segment;
+        // otherwise it kept queuing attacks and animating over the held stagger pose).
+        if (_combat.IsHurting || _combat.IsDead || _combat.IsStaggered) return;
 
         // In single mode the bot can only play its currently-drawn hand (one card per family,
         // minus the locked type) — same rule as the human.
@@ -60,6 +100,11 @@ public class BotController : NetworkBehaviour
             }
             // Looser timing in combo mode, and looser still in early rounds.
             _combat.lastVocalSpikeTime = rmm.GetNextBeatTime() - Random.Range(minOff + 0.15f, maxOff + 0.25f);
+
+            // BEAT RUN-IN (combo mode too): start charging to the attack point NOW so the bot arrives on
+            // the beat. Without this, combo rounds never triggered the approach and the bot just stood
+            // at spawn. Uses the same beat the manager is counting down to.
+            StartApproach();
             return;
         }
 
@@ -75,6 +120,7 @@ public class BotController : NetworkBehaviour
                 _combat.lastVocalSpikeTime = beat - Random.Range(minOff, maxOff);
                 _combat.QueueRhythmMove(pick, Vector3.zero);
                 if (_myCards != null) _myCards.ConsumeSlot(pick);
+                StartApproach();
                 return;
             }
         }
@@ -105,8 +151,8 @@ public class BotController : NetworkBehaviour
         string mostSpammed = GetMostSpammedMove();
         float adaptiveChance = Random.value;
 
-        // Early rounds rarely hard-counter the player; later rounds punish heavily.
-        float adaptiveThreshold = (round <= 2) ? 0.15f : (round <= 4) ? 0.40f : 0.65f;
+        // Round 1 rarely hard-counters; round 2 punishes your spammed moves much more often.
+        float adaptiveThreshold = (round <= 1) ? 0.15f : (round <= 2) ? 0.45f : 0.65f;
 
         if (adaptiveChance < adaptiveThreshold && !string.IsNullOrEmpty(mostSpammed))
         {
@@ -210,15 +256,26 @@ public class BotController : NetworkBehaviour
 
         _combat.QueueRhythmMove(attack, dash);
         if (_myCards != null) _myCards.ConsumeSlot(trigger);
+
+        // BEAT RUN-IN: the bot charges in from its spawn to perform WHATEVER move it chose at close
+        // range — strike, throw, block, parry, dash, anything — arriving on the beat, then recovers
+        // and returns home. (Previously gated to Strike/Throw only; now every beat the bot acts on.)
+        StartApproach();
     }
+
+    // No-op: BotBeatApproach now SELF-DRIVES the run-in (it starts running the moment the bot is home
+    // and the next beat is within its lead window, pacing speed to the time left). The card decision is
+    // still made here in ThinkNextMove and queued; the movement is owned by BotBeatApproach.Update.
+    private void StartApproach() { }
 
     // Bot timing offset from the beat, by round. Bigger offset = worse timing =
     // less damage and loses same-family timing clashes to a competent player.
+    // Match is 2 rounds: round 1 = ease them in, round 2 = step it up so it's a real fight.
     private void GetTimingOffset(int round, out float min, out float max)
     {
-        if (round <= 2)      { min = 0.28f; max = 0.50f; } // EASY — frequently mistimes
-        else if (round <= 4) { min = 0.14f; max = 0.30f; } // MEDIUM
-        else                 { min = 0.05f; max = 0.21f; } // HARD — semi-pro
+        if (round <= 1)      { min = 0.26f; max = 0.46f; } // round 1 — frequently mistimes
+        else if (round <= 2) { min = 0.12f; max = 0.24f; } // round 2 — TOUGHER, tighter timing
+        else                 { min = 0.05f; max = 0.18f; } // beyond — semi-pro
     }
 
     private Vector3 PickDash(bool hasLeft, bool hasRight)

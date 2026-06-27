@@ -105,7 +105,12 @@ public class RhythmTestManager : MonoBehaviour
         _audio.GetSpectrumData(_spec, 0, FFTWindow.BlackmanHarris);
         _tlScroll = Mathf.Max(0f, _audio.time - _tlWin * 0.25f);
 
-#if ENABLE_LEGACY_INPUT_MANAGER
+        // Spacebar tap — works under either input backend (was legacy-only, so it did nothing with the
+        // new Input System active).
+#if ENABLE_INPUT_SYSTEM
+        var _kb = UnityEngine.InputSystem.Keyboard.current;
+        if (_kb != null && _kb.spaceKey.wasPressedThisFrame) TestVoiceInput();
+#else
         if (Input.GetKeyDown(KeyCode.Space)) TestVoiceInput();
 #endif
     }

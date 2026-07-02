@@ -12,6 +12,9 @@ public class SmartBeatMapper : MonoBehaviour
     public AudioSource audioSource;
 
     [Header("Beat-Snap Settings")]
+    [Tooltip("OFF = pure manual mapping: every tap is saved at its RAW time, no snapping/quantization. " +
+             "ON = snap taps to detected beats / BPM grid. Leave OFF for hand-mapping.")]
+    public bool quantizeEnabled = false;
     [Tooltip("Max distance (seconds) a tap can be from a detected beat and still snap to it. Taps farther than this keep their raw time.")]
     [Range(0.03f, 0.333f)] public float maxSnapDistance = 0.12f;
 
@@ -141,6 +144,19 @@ public class SmartBeatMapper : MonoBehaviour
         _quantizedBeats.Clear();
         if (_rawTaps.Count == 0) return;
 
+        // MANUAL MODE: quantization off → save raw taps exactly as tapped (just de-dupe + sort).
+        if (!quantizeEnabled)
+        {
+            foreach (float raw in _rawTaps)
+            {
+                _lastRawTime = _lastSnappedTime = raw;
+                if (!_quantizedBeats.Contains(raw)) _quantizedBeats.Add(raw);
+            }
+            _quantizedBeats.Sort();
+            Debug.Log($"<color=cyan>RAW (no quantize):</color> {_rawTaps.Count} taps → {_quantizedBeats.Count} beats.");
+            return;
+        }
+
         int snapped = 0, fallback = 0, unanchored = 0;
 
         foreach (float raw in _rawTaps)
@@ -209,6 +225,8 @@ public class SmartBeatMapper : MonoBehaviour
     // Returns signed offset from wherever this tap will actually snap to (respects the 1/3 s cap).
     private float NearestBeatOffset(float tapTime)
     {
+        if (!quantizeEnabled) return 0f; // manual mode — no snapping, so no offset
+
         if (_analysisReady && _analyzedBeats.Count > 0)
         {
             float nearest = FindNearestBeat(tapTime);

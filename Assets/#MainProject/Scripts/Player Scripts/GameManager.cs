@@ -597,7 +597,10 @@ public override void Start()
 #else
         bool holdingFreeLook = false;
 #endif
-        bool visible = !IsServer && !IsClient || _optionsOpen || holdingFreeLook;
+        // During the drone segment the player uses mouse + arrow keys, so the cursor must stay visible +
+        // free (not locked to centre).
+        bool droneSegment = DroneRushSegment.AnySegmentActive;
+        bool visible = (!IsServer && !IsClient) || _optionsOpen || holdingFreeLook || droneSegment;
         Cursor.visible = visible;
         Cursor.lockState = visible ? CursorLockMode.None : CursorLockMode.Locked;
     }

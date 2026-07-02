@@ -2,20 +2,20 @@ using System.Collections;
 using Mirror;
 using UnityEngine;
 
-/// The bot's beat RUN-IN telegraph + motivated RETURN home. On an attack beat the bot charges from its
-/// home spot toward the player, arriving exactly ON the beat. It holds there while the trade resolves,
-/// then returns home with an animation chosen by the OUTCOME:
-///   • got hit   → KNOCKBACK: a falling/recoil anim whose backward motion carries it home (brief
-///                 slow-mo on impact then speeds up to be home before the next beat).
-///   • landed hit→ BACK-DASH: a quick retreat-hop while sliding home.
-///   • clash/none→ a neutral back-step slide.
-/// The position lerp home is ALWAYS time-budgeted to finish before the next action, so the bot is never
-/// caught mid-slide. Server-driven; the animation plays on all clients via RPC.
+/// The bot's beat RUN-IN telegraph + motivated RETURN. On an attack beat the bot charges from its
+/// current rest spot toward the player, arriving exactly ON the beat. It holds there while the trade
+/// resolves, then returns to a REST POSITION chosen by the OUTCOME (and, for a got-hit, by how well the
+/// human's shout was timed — read from PlayerCombat.LastTimingRating):
+///   • EXCELLENT-timed hit → hard KNOCKBACK, flies to RhythmRoundManager.botHardHitPosition.
+///   • GOOD-timed hit      → lighter "Hurt 2" reaction, settles at RhythmRoundManager.botGoodHitPosition.
+///   • BAD-timed hit       → classic knockback recoil, stays at home (no special fly-off).
+///   • landed/defended/clash → confident BACK-DASH to RhythmRoundManager.botNoHitPosition.
+/// Any of those position Transforms can be left unassigned in the inspector, in which case that outcome
+/// falls back to the bot's normal home spot. The slide is ALWAYS time-budgeted to finish before the next
+/// action, so the bot is never caught mid-slide. Server-driven; the animation plays on all clients via RPC.
 ///
 /// Put this on the bot prefab (with BotController/PlayerController/PlayerCombat). Set the state-name
-/// fields to your Animator states.
-// Runs BEFORE PlayerController (order 0) so the safety override-clear in LateUpdate happens before the
-// home-pin reads it — no 1-frame lag where the bot stays stuck at the player.
+/// fields to your Animator states, and the three botXxxPosition Transforms on RhythmRoundManager.
 [DefaultExecutionOrder(-50)]
 [RequireComponent(typeof(PlayerController))]
 public class BotBeatApproach : NetworkBehaviour
@@ -23,17 +23,17 @@ public class BotBeatApproach : NetworkBehaviour
     [Header("Animator STATE names (match your Animator exactly)")]
     public string runState        = "Run";          // run-in (healthy)
     public string injuredRunState = "Run_Injured";  // run-in AFTER getting hit, until a clean round
-    public string knockbackState  = "Knockback";    // got hit → flung back toward home
-    public string backDashState   = "BackDash";     // landed a hit → retreat
+    public string knockbackState  = "Knockback";    // got hit EXCELLENT → hard knockback, flies far
+    public string hurt2State      = "Hurt 2";       // got hit GOOD (not excellent/bad) → lighter hurt reaction
+    public string backDashState   = "BackDash";     // landed a hit / defended / clash → retreat
     public string idleState       = "Boxing Idle";  // neutral fallback
     [Header("Move animation STATE names (by card family)")]
     public string strikeAttackState = "Attack1";    // Strike-family move animation
     public string throwAttackState  = "Attack2";    // Throw-family move animation
 
-    // Injured = the bot took a hit; it runs with the limp (injuredRunState) until it survives a full
-    // round without being hit again, then goes back to the normal run. Server-driven.
+    // Injured = the bot was just hit with EXCELLENT shout timing; it limps (injuredRunState) for
+    // exactly the NEXT run-in, then clears automatically. Server-driven.
     private bool _injured;
-    private bool _hitThisRound; // did the bot take a hit during the current round?
 
     [Header("Geometry / timing")]
     [Tooltip("How close to the player the bot ends up at the peak of the run (metres in front of them).")]
@@ -55,10 +55,16 @@ public class BotBeatApproach : NetworkBehaviour
              "giving the card's move animation more time to play out and finish before the beat lands " +
              "(instead of still sliding in / cutting the swing short).")]
     [Range(0f, 0.6f)] public float arriveEarly = 0.28f;
+    [Tooltip("Reference travel speed (m/s) used to estimate how much lead time is actually needed when the " +
+             "bot is resting close to the attack point (good-hit / no-hit rest spots) — matches the ~3 m/s " +
+             "the run animation is scaled against in RunIn, so the estimate lines up with the real pace.")]
+    public float closeRestSpeedMps = 3f;
     [Tooltip("The bot self-drives: as soon as it's home/idle it starts running to the attack point for " +
              "the NEXT beat, pacing its speed to the time left. This caps how early it'll set off so on a " +
              "slow (far-apart) beat it doesn't sprint in and then stand waiting — it idles a moment, then " +
-             "runs. On normal/dense beats the gap is shorter than this, so it moves continuously.")]
+             "runs. On normal/dense beats the gap is shorter than this, so it moves continuously. Only " +
+             "applies from HOME/hard-hit rest — when resting at the good-hit/no-hit spot (already close), " +
+             "the lead time is instead calculated from the real distance (see closeRestSpeedMps).")]
     public float maxLeadTime = 2.0f;
     [Tooltip("Seconds the bot STAYS PLANTED on the attack point after the beat — the recovery animation " +
              "(hurt / BackDash) plays out in place for this whole time before it moves. Then it slides " +
@@ -72,7 +78,10 @@ public class BotBeatApproach : NetworkBehaviour
 
     // Defended = the bot played a defensive move (block/parry/dodge) and successfully avoided damage —
     // treated as a GOOD outcome, so it gets the same confident back-dash recovery as a landed hit.
-    public enum Outcome { Pending, GotHit, LandedHit, Defended, Clash }
+    // GotHitExcellent/GotHitGood split the old single GotHit by the ATTACKER's shout-timing rating:
+    // EXCELLENT → hard knockback to hardHitPosition; GOOD → lighter Hurt2 to goodHitPosition;
+    // BAD-timed hits still land (damage doesn't care about timing) but keep the classic GotHit reaction.
+    public enum Outcome { Pending, GotHit, GotHitExcellent, GotHitGood, LandedHit, Defended, Clash }
     private Outcome _outcome = Outcome.Pending;
 
     private PlayerController _pc;
@@ -131,13 +140,18 @@ public class BotBeatApproach : NetworkBehaviour
         float secsToBeat = beatTrackTime - rmm.GetCurrentTrackTime();
         if (secsToBeat <= 0.05f) return;
 
-        // If a previous approach/return is still mid-flight when the next beat's run-in begins (lead time
-        // can exceed the gap between beats on dense sections), the bot would otherwise start the new run
-        // from wherever it was stranded — creeping toward the player a little more each beat until it
-        // walks through them. Kill the old routine and SNAP the bot back to its spawn so every run-in
-        // starts clean from home.
-        if (_routine != null) StopCoroutine(_routine);
-        _pc.SetApproachOverride(_pc.HomePosition); // snap home before the new run starts
+        // If a previous approach/return is still mid-FLIGHT (actively moving) when the next beat's run-in
+        // begins (lead time can exceed the gap between beats on dense sections), the bot would otherwise
+        // start the new run from wherever it was stranded mid-slide — creeping toward the player a little
+        // more each beat until it walks through them. Only snap home in THAT case. If the bot is simply
+        // RESTING (previous run-in finished cleanly and left it at a hard-hit/good-hit/no-hit/home spot),
+        // don't snap — RunIn starts from transform.position, i.e. wherever it's actually resting, which is
+        // exactly the point of the outcome-based rest positions.
+        if (_routine != null)
+        {
+            StopCoroutine(_routine);
+            _pc.SetApproachOverride(_pc.HomePosition); // was genuinely mid-flight — snap home to recover
+        }
 
         _active = true;                 // mark active immediately so LateUpdate's safety doesn't release
         _outcome = Outcome.Pending;
@@ -151,18 +165,18 @@ public class BotBeatApproach : NetworkBehaviour
     public void ReportOutcome(Outcome outcome)
     {
         if (_active) _outcome = outcome;
-        // Got hit → limp from now on, and mark that the bot was hit THIS round so the injured state
-        // can't clear at this round's end. It clears only after a full round with no hit.
-        if (outcome == Outcome.GotHit) { _injured = true; _hitThisRound = true; }
+        // Only an EXCELLENT-timed hit triggers the injured limp — and only for the SINGLE next run-in
+        // (consumed in RunIn as soon as it's used). GOOD/BAD-timed hits don't limp at all.
+        if (outcome == Outcome.GotHitExcellent) _injured = true;
     }
 
-    /// Server: call at the END of each round. If the bot got through the round WITHOUT being hit, it
-    /// heals — back to the normal run animation. Otherwise it stays injured for the next round too.
+    /// Server: call at the END of each round. Kept for compatibility with existing callers; the injured
+    /// limp is now consumed after one run rather than tracked per-round, so this just clears any leftover
+    /// flag as a safety net.
     [Server]
     public void NotifyRoundEnded()
     {
-        if (!_hitThisRound) _injured = false; // survived clean → heal
-        _hitThisRound = false;                 // reset for the next round
+        _injured = false;
     }
 
     /// Server: the move animation STATE for the bot's CURRENTLY-QUEUED card, by family.
@@ -218,7 +232,11 @@ public class BotBeatApproach : NetworkBehaviour
             return home + d * stepDist;
         }
 
-        Vector3 start = home;
+        // Start from wherever the bot is ACTUALLY resting — not always `home`. Since the last beat's
+        // outcome may have left it at a hard-hit/good-hit/no-hit position instead of home, transform.
+        // position (pinned every LateUpdate to the last SetApproachOverride) is the true current rest
+        // spot. Using `home` here would teleport it back to home the instant this run-in starts.
+        Vector3 start = transform.position;
 
         // ── Travel for (almost) the ENTIRE time until the beat so the bot covers the WHOLE gap from its
         // spawn to the attack point and is planted there ON the beat — no last-second teleport. We arrive
@@ -238,8 +256,10 @@ public class BotBeatApproach : NetworkBehaviour
         float urgency = Mathf.InverseLerp(1.2f, 0.3f, inTime);             // 0 (slow beat) → 1 (fast beat)
         float boost   = Mathf.Lerp(1f, fastBeatBoost, urgency);
         float animSpeed = Mathf.Clamp(runAnimSpeed * (speedMps / 3f) * boost, 0.6f, maxRunAnimSpeed);
-        // Use the INJURED run (limp) if the bot has been hit and hasn't survived a clean round yet.
+        // Use the INJURED run (limp) for exactly ONE run-in right after an EXCELLENT-timed hit, then
+        // clear it — back to the normal run on the very next approach, not waiting for round end.
         RpcPlayState(_injured ? injuredRunState : runState, 0.12f, animSpeed);
+        _injured = false;
 
         // Position = lerp(start → target) by elapsed/inTime (linear = constant velocity). Re-aims at the
         // player's live position each frame so it heads where they actually are.
@@ -280,19 +300,40 @@ public class BotBeatApproach : NetworkBehaviour
             yield return null;
         }
 
-        // ── Choose & TRIGGER the recovery animation by outcome ──
-        // The bot plays BackDash on EVERY beat EXCEPT when it got hit (then it's the hurt/knockback
-        // recoil). So any time it does a card move and isn't hurt — landed a hit, defended, or even a
-        // neutral whiff/clash — it retreats with the confident BackDash.
-        if (_outcome == Outcome.GotHit)
-            RpcPlayState(knockbackState, 0.05f, 1f); // hurt recoil
-        else
-            RpcPlayState(backDashState, 0.08f, 1f);  // BackDash retreat for all non-hurt outcomes
+        // ── Choose the recovery animation AND the rest-position by outcome ──
+        // EXCELLENT-timed hit → hard knockback, flies to botHardHitPosition.
+        // GOOD-timed hit      → lighter Hurt2 reaction, settles at botGoodHitPosition.
+        // Anything else (old plain GotHit / landed / defended / clash) → confident BackDash to
+        // botNoHitPosition (landed/defended/clash) or the classic knockback recoil in place (GotHit,
+        // BAD-timed hit still lands but doesn't get a special fly-off).
+        var rmmPos = RhythmRoundManager.Instance;
+        Vector3 restTarget = home;
+        switch (_outcome)
+        {
+            case Outcome.GotHitExcellent:
+                RpcPlayState(knockbackState, 0.05f, 1f);
+                if (rmmPos != null && rmmPos.botHardHitPosition != null)
+                    restTarget = HeightMatched(rmmPos.botHardHitPosition.position, home);
+                break;
+            case Outcome.GotHitGood:
+                RpcPlayState(hurt2State, 0.05f, 1f);
+                if (rmmPos != null && rmmPos.botGoodHitPosition != null)
+                    restTarget = HeightMatched(rmmPos.botGoodHitPosition.position, home);
+                break;
+            case Outcome.GotHit:
+                RpcPlayState(knockbackState, 0.05f, 1f); // hurt recoil (BAD-timed hit, no special fly-off)
+                break;
+            default: // LandedHit, Defended, Clash
+                RpcPlayState(backDashState, 0.08f, 1f);
+                if (rmmPos != null && rmmPos.botNoHitPosition != null)
+                    restTarget = HeightMatched(rmmPos.botNoHitPosition.position, home);
+                break;
+        }
 
         // STAY PLANTED on the attack point for the full hold (default 0.4s) so the recovery animation
         // (hurt / BackDash fall-back) plays out IN PLACE before we move — no zapping back the instant the
         // beat resolves. Uses UNSCALED time so the hurt slow-motion doesn't stretch the hold. After this,
-        // it slides home (the slide can overlap the tail of the animation — that's fine).
+        // it slides to the chosen rest position (the slide can overlap the tail of the animation — fine).
         float held = 0f;
         while (held < postBeatHold)
         {
@@ -302,27 +343,61 @@ public class BotBeatApproach : NetworkBehaviour
             yield return null;
         }
 
-        // ── Slide home. Quick, fixed glide (unscaled, so hurt slow-mo can't stall it). ──
+        // ── Slide to the rest position. Quick, fixed glide (unscaled, so hurt slow-mo can't stall it). ──
         float returnTime = returnSlideTime;
         float r = 0f;
         // Start the return from the KNOWN attack point, NOT transform.position. Reading the live transform
-        // could capture a root-motion/controller-shifted value, and lerping home from there leaks a small
+        // could capture a root-motion/controller-shifted value, and lerping from there leaks a small
         // offset into the bot's resting spot every cycle — the cumulative drift. ComputeTarget() is a
-        // fixed scene point, so the return is deterministic and always lands exactly on home.
+        // fixed scene point, so the return is deterministic and always lands exactly on the target.
         Vector3 from = ComputeTarget();
         while (r < returnTime)
         {
             r += Time.unscaledDeltaTime;
             float e = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(r / returnTime));
-            _pc.SetApproachOverride(Vector3.Lerp(from, home, e));
+            _pc.SetApproachOverride(Vector3.Lerp(from, restTarget, e));
             yield return null;
         }
-        // Snap exactly home and HAND BACK to the normal spawn-pin.
-        _pc.SetApproachOverride(home);
-        _pc.ClearApproachOverride();
+        // Rest at the chosen position — KEEP the approach override set (do NOT ClearApproachOverride)
+        // so PlayerController's home-pin doesn't snap it back to HomePosition. The override stays until
+        // the NEXT RunIn starts (which immediately re-overrides it for the new run-in anyway).
+        _pc.SetApproachOverride(restTarget);
         FaceOpponent();
         _active = false;
         _routine = null;
+    }
+
+    // Keeps the target's X/Z but the bot's own home Y, so an inspector-placed empty at the wrong height
+    // doesn't sink/float the bot off the floor.
+    private static Vector3 HeightMatched(Vector3 target, Vector3 home)
+    {
+        target.y = home.y;
+        return target;
+    }
+
+    // True if the bot is CURRENTLY resting at the good-hit or no-hit position (both meant to sit close
+    // to the attack point). If so, outputs the ACTUAL lead time needed to cover the real remaining
+    // distance (arriveEarly + distance/closeRestSpeedMps, floored at a small minimum) instead of the
+    // flat maxLeadTime, so it doesn't set off early from a spot it's already almost standing on.
+    private bool IsRestingCloseToTarget(RhythmRoundManager rmm, out float neededLead)
+    {
+        neededLead = maxLeadTime;
+        Transform good = rmm.botGoodHitPosition;
+        Transform none = rmm.botNoHitPosition;
+        if (good == null && none == null) return false;
+
+        const float RESTING_TOLERANCE = 0.35f; // metres — "am I basically standing at that spot"
+        Vector3 pos = transform.position;
+        bool atGood = good != null && Vector3.Distance(pos, HeightMatched(good.position, pos)) <= RESTING_TOLERANCE;
+        bool atNone = none != null && Vector3.Distance(pos, HeightMatched(none.position, pos)) <= RESTING_TOLERANCE;
+        if (!atGood && !atNone) return false;
+
+        Vector3 attackPoint = rmm.botAttackPosition != null
+            ? HeightMatched(rmm.botAttackPosition.position, pos)
+            : GetOpponentLookPos(); // fall back to a rough estimate — still much better than the flat cap
+        float dist = Vector3.Distance(pos, attackPoint);
+        neededLead = Mathf.Max(0.3f, arriveEarly + dist / Mathf.Max(0.1f, closeRestSpeedMps));
+        return true;
     }
 
     // SELF-DRIVE: the bot doesn't wait for a one-shot "go" signal anymore. Every frame on the server,
@@ -340,7 +415,7 @@ public class BotBeatApproach : NetworkBehaviour
 
         var rmm = RhythmRoundManager.Instance;
         if (rmm == null || !rmm.isRoundActive) return;
-        if (PCDroneSegment.AnySegmentActive) return; // a drone segment owns the bot (VR or PC)
+        if (DroneRushSegment.AnySegmentActive) return; // the drone segment owns the bot
 
         float nextBeat = rmm.GetNextBeatTime();
         if (nextBeat <= 0f) return;
@@ -348,21 +423,29 @@ public class BotBeatApproach : NetworkBehaviour
 
         float secsToBeat = nextBeat - rmm.GetCurrentTrackTime();
         if (secsToBeat <= 0.05f) return;                  // beat already here/passed
-        if (secsToBeat > maxLeadTime) return;             // too early — idle a moment first
+
+        // If the bot is currently resting at the GOOD-HIT or NO-HIT position (both intentionally close
+        // to the attack point), it doesn't need the full maxLeadTime head start — calculate the actual
+        // lead needed from the real remaining distance instead, so it doesn't start jogging absurdly
+        // early from a spot it's already almost standing on.
+        float allowedLead = maxLeadTime;
+        if (IsRestingCloseToTarget(rmm, out float neededLead))
+            allowedLead = neededLead;
+
+        if (secsToBeat > allowedLead) return;             // too early — idle a moment first
 
         _startedForBeat = nextBeat;
         BeginApproach(nextBeat);
     }
 
-    // SAFETY NET: if the routine ever gets killed mid-flight (StopCoroutine on a new approach, the bot
-    // being staggered/disabled, the round ending…), the approach override could be left stuck pointing
-    // at the player → the bot freezes near you. This guarantees it's released the moment we're not
-    // actively approaching, so the normal home-pin always takes back over.
-    private void LateUpdate()
-    {
-        if (!_active && _routine == null && _pc != null)
-            _pc.ClearApproachOverride();
-    }
+    // NOTE: there used to be a LateUpdate safety net here that force-cleared the approach override
+    // whenever the bot was idle (!_active && _routine == null) — that was to guard against a routine
+    // being killed mid-flight and leaving the bot stuck at the player. But it also fought the new
+    // hit-reaction rest positions: RunIn now deliberately leaves the override SET at the chosen rest
+    // spot (hard-hit / good-hit / no-hit position) instead of HomePosition, and this safety net would
+    // snap it back to HomePosition every single frame. CancelApproach() already explicitly clears the
+    // override for the real interruption cases (disable, drone segment, round end), so the net was
+    // redundant for those and actively harmful for the normal resting case. Removed.
 
 
     [ClientRpc]

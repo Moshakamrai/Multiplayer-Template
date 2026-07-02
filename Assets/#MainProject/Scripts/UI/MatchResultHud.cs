@@ -23,17 +23,21 @@ public class MatchResultHud : MonoBehaviour
         hud.Build();
     }
 
-    /// Lightweight per-ROUND result: a single centered WIN/LOSE panel that auto-dismisses after a few
-    /// seconds (no leaderboard panel, no leaderboard logging — that only happens at MATCH end via Show).
+    /// Lightweight per-ROUND result: a SCREEN-SPACE overlay banner (OnGUI) that auto-dismisses after a
+    /// few seconds. Not the 3D panels — a clean flat card centred on screen.
     public static void ShowRoundResult(bool won, bool draw, float seconds)
     {
         var go = new GameObject("~RoundResultHud");
         var hud = go.AddComponent<MatchResultHud>();
         hud._won = won; hud._draw = draw; hud._roundOnly = true;
-        hud.BuildRoundOnly(seconds);
+        hud._overlaySeconds = seconds;
+        hud._overlayBornAt  = Time.unscaledTime;
+        Destroy(go, seconds);
     }
 
-    private bool _roundOnly;
+    private bool  _roundOnly;
+    private float _overlaySeconds;
+    private float _overlayBornAt;
 
     private const float DISTANCE   = 3.2f;   // metres in front of the player
     private const float SIDE       = 1.25f;  // how far each panel sits left/right of center
@@ -77,64 +81,56 @@ public class MatchResultHud : MonoBehaviour
         BuildBoardPanel(rightPos, Quaternion.LookRotation(rightPos - camPos) * Quaternion.Euler(0f, SLANT_DEG, 0f));
     }
 
-    // Single centered card for the per-round result; destroys itself after `seconds`.
-    // Clean, well-proportioned: a wide short card, a glowing accent bar in the result colour, a bold
-    // headline with depth shadow, a subtitle, and a quick pop-in scale so it lands with weight.
-    private void BuildRoundOnly(float seconds)
+    // ── Screen-space (OnGUI) round-result overlay ────────────────────────────────────────────────────
+    private static Texture2D _px;
+    private static Texture2D Px
     {
-        _font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf")
-             ?? Resources.GetBuiltinResource<Font>("Arial.ttf");
-        _quadMat = new Material(Shader.Find("Sprites/Default"));
+        get { if (_px == null) { _px = new Texture2D(1, 1); _px.SetPixel(0, 0, Color.white); _px.Apply(); } return _px; }
+    }
+    private static void GuiRect(Rect r, Color c)
+    {
+        var prev = GUI.color; GUI.color = c; GUI.DrawTexture(r, Px); GUI.color = prev;
+    }
 
-        Camera cam = Camera.main;
-        Vector3 camPos = cam != null ? cam.transform.position : Vector3.zero;
-        Vector3 fwd = cam != null ? cam.transform.forward : Vector3.forward; fwd.y = 0f;
-        if (fwd.sqrMagnitude < 0.001f) fwd = Vector3.forward; fwd.Normalize();
-        Vector3 center = camPos + fwd * (DISTANCE - 0.4f); center.y = camPos.y; // a touch closer than the match panels
+    private void OnGUI()
+    {
+        if (!_roundOnly) return;
+        if (VRCameraDriver.VRActive) return; // VR uses its own world HUD
 
+        int w = Screen.width, h = Screen.height;
         Color c = _draw ? DrawCol : (_won ? WinCol : LoseCol);
         string headline = _draw ? "DRAW" : (_won ? "ROUND WON" : "ROUND LOST");
 
-        // Card root (we animate this transform's scale for the pop-in).
-        var card = new GameObject("RoundResultPanel").transform;
-        card.SetParent(transform, false);
-        card.SetPositionAndRotation(center, Quaternion.LookRotation(center - camPos));
+        // Pop-in scale (ease-out-back) for the first ~0.32s.
+        float age = Time.unscaledTime - _overlayBornAt;
+        float p = Mathf.Clamp01(age / 0.32f);
+        float s = 1.70158f; float u = p - 1f;
+        float pop = Mathf.Lerp(0.7f, 1f, 1f + (u * u * ((s + 1f) * u + s)));
+        // Fade out over the last 0.4s.
+        float fade = _overlaySeconds > 0f ? Mathf.Clamp01((_overlaySeconds - age) / 0.4f) : 1f;
 
-        // Proportioned backing: wide and short, not the tall match-panel block.
-        const float cardW = 2.3f, cardH = 1.05f;
-        MakeQuad(card, new Vector3(0f, 0f, 0.03f), new Vector3(cardW, cardH, 1f), PanelBg);
-        // Thin coloured frame just behind, slightly larger, glowing in the result colour.
-        MakeQuad(card, new Vector3(0f, 0f, 0.05f), new Vector3(cardW + 0.08f, cardH + 0.08f, 1f),
-                 new Color(c.r, c.g, c.b, 0.35f));
-        // Accent bar under the headline.
-        MakeQuad(card, new Vector3(0f, -0.16f, 0.01f), new Vector3(cardW * 0.78f, 0.025f, 1f), c);
+        // Card geometry, centred.
+        float cw = w * 0.34f * pop, ch = h * 0.18f * pop;
+        float cx = (w - cw) * 0.5f, cy = h * 0.20f;
 
-        // Headline: dark depth copy + coloured front.
-        MakeText(card, headline, 0.34f, new Vector3(0f, 0.16f, 0f), new Color(0f, 0f, 0f, 0.9f), 0.025f);
-        MakeText(card, headline, 0.34f, new Vector3(0f, 0.16f, 0f), c, 0f);
-        // Subtitle.
-        MakeText(card, "DECIDED BY POINTS", 0.10f, new Vector3(0f, -0.30f, 0f), new Color(0.78f, 0.83f, 0.95f), 0f);
+        // Backing + glowing frame + accent bar.
+        GuiRect(new Rect(cx - 4, cy - 4, cw + 8, ch + 8), new Color(c.r, c.g, c.b, 0.35f * fade));
+        GuiRect(new Rect(cx, cy, cw, ch), new Color(0.02f, 0.03f, 0.06f, 0.92f * fade));
+        GuiRect(new Rect(cx + cw * 0.10f, cy + ch * 0.62f, cw * 0.80f, Mathf.Max(2f, h * 0.004f)),
+                new Color(c.r, c.g, c.b, fade));
 
-        StartCoroutine(PopIn(card));
-        Destroy(gameObject, seconds);
-    }
+        var head = new GUIStyle(GUI.skin.label)
+        { fontSize = Mathf.RoundToInt(h * 0.06f * pop), fontStyle = FontStyle.Bold,
+          alignment = TextAnchor.MiddleCenter, normal = { textColor = new Color(c.r, c.g, c.b, fade) } };
+        var sub = new GUIStyle(GUI.skin.label)
+        { fontSize = Mathf.RoundToInt(h * 0.022f), fontStyle = FontStyle.Bold,
+          alignment = TextAnchor.MiddleCenter, normal = { textColor = new Color(0.78f, 0.83f, 0.95f, fade) } };
 
-    // Quick spring-ish pop: scale from small → slight overshoot → settle. Makes the card land with weight.
-    private System.Collections.IEnumerator PopIn(Transform card)
-    {
-        float t = 0f; const float dur = 0.32f;
-        while (t < dur && card != null)
-        {
-            t += Time.unscaledDeltaTime;
-            float p = Mathf.Clamp01(t / dur);
-            // ease-out-back overshoot
-            float s = 1.70158f;
-            float u = p - 1f;
-            float scale = 1f + (u * u * ((s + 1f) * u + s));
-            card.localScale = Vector3.one * Mathf.Lerp(0.6f, 1f, scale);
-            yield return null;
-        }
-        if (card != null) card.localScale = Vector3.one;
+        // Depth shadow + coloured headline.
+        var shadow = new GUIStyle(head) { normal = { textColor = new Color(0f, 0f, 0f, 0.8f * fade) } };
+        GUI.Label(new Rect(cx + 3, cy + ch * 0.14f + 3, cw, ch * 0.45f), headline, shadow);
+        GUI.Label(new Rect(cx, cy + ch * 0.14f, cw, ch * 0.45f), headline, head);
+        GUI.Label(new Rect(cx, cy + ch * 0.66f, cw, ch * 0.28f), "DECIDED BY POINTS", sub);
     }
 
     // Small helper: a coloured, unlit, shadow-free quad parented to `parent`.

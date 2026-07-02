@@ -178,7 +178,7 @@ public class CardManager : NetworkBehaviour
         // (Menus/shop = no hand; combo rounds use the combo HUD instead.)
         // Also hidden during the drone-rush segment — you only punch drones then, cards aren't usable.
         var rmm = RhythmRoundManager.Instance;
-        bool droneRush = PCDroneSegment.AnySegmentActive;
+        bool droneRush = DroneRushSegment.AnySegmentActive;
         bool showHand = rmm != null && rmm.isRoundActive && rmm.IsSingleMoveMode() && !droneRush;
 
         if (!showHand)

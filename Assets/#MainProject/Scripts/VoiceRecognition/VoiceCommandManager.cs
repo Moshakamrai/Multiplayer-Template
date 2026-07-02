@@ -136,6 +136,30 @@ public class VoiceCommandManager : NetworkBehaviour
     // Returns false = timing blocked (dead zone) — keep retrying until the window opens
     bool ProcessWords(string segment)
     {
+        // ── ENTRY PROMPT: say "start" to open the level picker (flat/PC). Checked FIRST so it works at
+        //    scene entry before combat/round state exists. Accepts a few near-homophones Vosk gives.
+        var rmmStart = RhythmRoundManager.Instance;
+        if (rmmStart != null && rmmStart.WaitingForVoiceStart)
+        {
+            string lower = segment.ToLower().Trim();
+            Debug.Log($"<color=cyan>[VOICE-START]</color> heard: '{lower}' (waiting to start)");
+            foreach (string wStart in lower.Split(' '))
+            {
+                // Vosk (English) commonly mishears a shouted "start" as guard/god/art/star/god — accept them.
+                if (wStart == "start" || wStart == "started" || wStart == "starts" ||
+                    wStart == "star"  || wStart == "art"     || wStart == "guard"  ||
+                    wStart == "god"   || wStart == "hard"    || wStart == "card"   ||
+                    Match(wStart, "start"))
+                {
+                    Debug.Log($"<color=lime>[VOICE-START]</color> matched '{wStart}' → beginning!");
+                    rmmStart.BeginFromVoiceStart();
+                    LogExecution("START");
+                    return true;
+                }
+            }
+            return true; // waiting to start — ignore any other chatter
+        }
+
         if (_myCombat.IsHurting || _myCombat.IsDead || _myCombat.IsStaggered) return true;
         if (TiebreakerManager.Instance != null && TiebreakerManager.Instance.IsTiebreakerActive) return true;
 

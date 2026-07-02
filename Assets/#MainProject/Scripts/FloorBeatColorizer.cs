@@ -62,6 +62,8 @@ public class FloorBeatColorizer : MonoBehaviour
     public float hitDecayRate = 5f;
     public float idleBreatheSpeed = 0.6f;
 
+    public static FloorBeatColorizer Instance { get; private set; }
+
     private Material[] _mats;
     private float _hitTimer;
     private float _lastBeatTime = -1f;
@@ -70,7 +72,26 @@ public class FloorBeatColorizer : MonoBehaviour
     private Color _waveColor = Color.cyan; // this wave's colour (re-rolled each beat)
     private int   _waveIdx;
 
+    // Per-side warning (0..1): lights the ATTACKING side's floor red. Tiles are LEFT→RIGHT (element 0 =
+    // leftmost). Left attack lights the FIRST tiles, right attack the LAST. (Currently unused — the
+    // drone segment is arrow-key punch, not side-dodge — but kept for a possible side-cue.)
+    private float _warnLeft, _warnRight;
+    [Header("Drone-segment side warning")]
+    [ColorUsage(false, true)] public Color sideWarnColor = new Color(1f, 0.05f, 0.05f);
+    public float sideWarnIntensity = 10f;
+    [Tooltip("How many tiles at the attacking end to light up (first N for left, last N for right).")]
+    public int sideWarnTileCount = 3;
+
     static readonly int ID_Emission = Shader.PropertyToID("_EmissionColor");
+
+    void Awake() { Instance = this; }
+
+    /// left/right in 0..1 = how hot each floor side glows red. Pass 0,0 to clear. (Currently unused.)
+    public void SetSideWarning(float left, float right)
+    {
+        _warnLeft  = Mathf.Clamp01(left);
+        _warnRight = Mathf.Clamp01(right);
+    }
 
     void Start()
     {
@@ -78,6 +99,7 @@ public class FloorBeatColorizer : MonoBehaviour
         if (waveColors != null && waveColors.Length > 0) _waveColor = waveColors[0];
 
         var list = new List<Material>();
+
         if (floorTiles != null)
             foreach (var r in floorTiles)
             {
@@ -154,7 +176,7 @@ public class FloorBeatColorizer : MonoBehaviour
 
         // Dim the floor during the drone-rush segment so its glow doesn't overpower the drones; full
         // brightness any other time.
-        float dim = PCDroneSegment.AnySegmentActive ? droneSegmentDim : 1f;
+        float dim = DroneRushSegment.AnySegmentActive ? droneSegmentDim : 1f;
 
         // ── Light every tile ───────────────────────────────────────────────
         for (int i = 0; i < n; i++)
@@ -198,7 +220,26 @@ public class FloorBeatColorizer : MonoBehaviour
                 intensity = Mathf.Max(intensity, Mathf.Lerp(idleIntensity, hitIntensity, f));
             }
 
-            _mats[i].SetColor(ID_Emission, col * (intensity * dim));
+            // ── Drone-segment SIDE warning: light the ATTACKING end of the floor red. ──
+            // Tiles are left→right (0 = leftmost). LEFT attack → light the FIRST N tiles; RIGHT
+            // attack → light the LAST N tiles. Warning tiles IGNORE the segment dim so they read bright.
+            float tileDim = dim;
+            if (DroneRushSegment.AnySegmentActive && (_warnLeft > 0.01f || _warnRight > 0.01f))
+            {
+                bool  inLeftEnd  = i < sideWarnTileCount;
+                bool  inRightEnd = i >= n - sideWarnTileCount;
+                float myWarn = 0f;
+                if (inLeftEnd)  myWarn = Mathf.Max(myWarn, _warnLeft);
+                if (inRightEnd) myWarn = Mathf.Max(myWarn, _warnRight);
+                if (myWarn > 0.01f)
+                {
+                    col       = Color.Lerp(col, sideWarnColor, myWarn);
+                    intensity = Mathf.Max(intensity, sideWarnIntensity * myWarn);
+                    tileDim   = 1f; // full brightness for the danger tiles
+                }
+            }
+
+            _mats[i].SetColor(ID_Emission, col * (intensity * tileDim));
         }
     }
 

@@ -747,7 +747,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 7163040428997531151, guid: 24073b0de017f5247bd8fabdd7c688af, type: 3}
       propertyPath: m_LocalPosition.z
-      value: 0.737
+      value: 0.12
       objectReference: {fileID: 0}
     - target: {fileID: 7163040428997531151, guid: 24073b0de017f5247bd8fabdd7c688af, type: 3}
       propertyPath: m_LocalRotation.w
@@ -1304,9 +1304,12 @@ MonoBehaviour:
   syncMode: 0
   syncInterval: 0
   runState: Run
+  injuredRunState: Run_Injured
   knockbackState: Knockback
   backDashState: BackDash
   idleState: Boxing Idle
+  strikeAttackState: Attack1
+  throwAttackState: Attack2
   approachStop: 0
   maxApproachDistance: 0.9
   runAnimSpeed: 0.6
@@ -1316,6 +1319,7 @@ MonoBehaviour:
   maxLeadTime: 2
   postBeatHold: 0.4
   returnSlideTime: 0.18
+  attackPlayTime: 0.3
 --- !u!1 &2025704897926748122 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 8393281142797502702, guid: 094ee12588f16e344a7950cec231df77, type: 3}

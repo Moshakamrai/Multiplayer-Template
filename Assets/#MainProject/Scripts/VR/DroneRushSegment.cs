@@ -1,467 +1,503 @@
 using System.Collections;
 using System.Collections.Generic;
-using Mirror;
 using UnityEngine;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
 
-/// The ~20s "drone rush" reward segment (VR). Triggered when the player's score crosses a threshold:
-///   • the bot drops into a no-damage STAGGER for the whole segment,
-///   • a PORTAL opens behind/near the bot,
-///   • drones fly OUT of the portal toward the player one after another, each timed to ARRIVE on a beat,
-///   • the player PUNCHES them (bounces to bot = damage+points, scaled by punch power + on-beat),
-///     DODGES with their head (small save points), or MISSES (screen sparks, no real damage),
-///   • a combo multiplier builds within the segment; the final drone is a big finisher,
-///   • after ~20s the portal closes and the bot recovers.
+/// DRONE RUSH SEGMENT (PC) — a beat-timed PUNCH break.
 ///
-/// Server drives the segment + applies all damage/score (authoritative). The actual drone flight and
-/// VR punch/dodge detection run on the LOCAL client (where hand tracking lives) and report outcomes
-/// back via Command. No real collision — distance + beat-timing checks only.
-public class DroneRushSegment : NetworkBehaviour
+/// Triggered on a dense beat run. The bot stands in IDLE. Drones spawn from BEHIND the bot, drift out to
+/// its LEFT or RIGHT, then fly on a straight line toward the matching side of the player, arriving ON a
+/// beat. You HIT the incoming drone with the arrow keys:
+///   • LEFT arrow  → hits a LEFT-side drone with the PUNCH animation.
+///   • RIGHT arrow → hits a RIGHT-side drone with the UPPERCUT animation.
+/// A correct, on-time hit punches the drone back into the bot (damage + score). Miss / wrong key / wrong
+/// side → the drone hits you (bot scores). No dodging, no shout, no overlays.
+///
+/// First segment of a session PAUSES and shows a short how-to overlay (click to continue).
+/// Host-authoritative plain MonoBehaviour (game runs as host). Self-bootstraps.
+[DefaultExecutionOrder(10006)]
+public class DroneRushSegment : MonoBehaviour
 {
-    public static DroneRushSegment Instance;
+    public static DroneRushSegment Instance { get; private set; }
 
-    [Header("Prefabs (assign your portal + drone)")]
-    [Tooltip("Portal prefab spawned near the bot for the segment.")]
-    public GameObject portalPrefab;
-    [Tooltip("Drone prefab — must have the Drone component + a TrailRenderer.")]
+    // NO self-bootstrap. This lives as a real object in the scene (with the Drone Prefab assigned in
+    // the inspector). A runtime-spawned duplicate used to fight this scene object for Instance and win
+    // with an EMPTY prefab slot — that was why the prefab looked "emptied on start".
+
+    [Header("Prefab")]
+    [Tooltip("Drone prefab — just the visual model. Any VR 'Drone' component on it is stripped at spawn.")]
     public GameObject dronePrefab;
 
-    [Header("Trigger")]
-    [Tooltip("Score the player must reach to trigger the segment (moderate). One-shot per round.")]
-    public int scoreTrigger = 40000;
-
     [Header("Timing")]
-    [Tooltip("How long the whole segment lasts (seconds).")]
-    public float segmentDuration = 20f;
-    [Tooltip("Seconds a drone spends flying from the portal to the player.")]
-    public float droneTravelTime = 1.35f;
-    [Tooltip("Gap (seconds) between launching one drone and the next.")]
-    public float spawnGap = 1.7f;
+    public float segmentDuration = 16f;
+    [Tooltip("Seconds a drone spends flying from behind the bot to the player.")]
+    public float travelTime = 1.3f;
+    [Tooltip("Minimum seconds between successive drone arrivals.")]
+    public float minArrivalGap = 0.9f;
+    [Tooltip("Window (s) before AND after the beat in which an arrow-key hit counts. Bigger = easier.")]
+    public float hitWindow = 0.55f;
+
+    [Header("Attack animation state names (from the card Animator)")]
+    [Tooltip("Animator state played when you hit a LEFT drone with the LEFT arrow.")]
+    public string punchState = "Cross";
+    [Tooltip("Animator state played when you hit a RIGHT drone with the RIGHT arrow.")]
+    public string uppercutState = "Uppercut";
 
     [Header("Scoring")]
-    public int dronePunchPoints = 1500;   // base, ×power ×onBeat ×combo
-    public int droneDodgePoints = 400;    // a clean head-dodge save
-    public int finisherPoints   = 6000;
-    public int droneBaseDamage  = 14;     // bot damage per bounced hit (×power)
-    [Tooltip("Points the BOT gets when a drone gets past the player and hits them (a miss).")]
-    public int droneMissBotPoints = 1200;
+    public int hitPoints        = 1600;   // clean punch of a drone
+    public int botHitPoints     = 1200;   // bot scores when a drone hits you
+    public int deflectBotDamage = 12;     // damage to the bot when you punch a drone into it
 
-    [Header("Portal placement")]
-    public float portalBehindBot = 1.6f;
-    public float portalHeight    = 1.6f;
+    [Header("Drone spawn / flight")]
+    [Tooltip("How far BEHIND the bot the drones spawn (m).")]
+    public float spawnBehind = 1.4f;
+    [Tooltip("Spawn height above the bot base (m).")]
+    public float spawnHeight = 1.6f;
+    [Tooltip("How far out to the side the drone drifts as it leaves the bot (m).")]
+    public float sideDrift = 1.0f;
+    [Tooltip("How far to the player's side the drone aims (m from the player centre).")]
+    public float playerSideOffset = 0.7f;
+    [Tooltip("Vertical offset (m) applied to the drone's ARRIVAL point, relative to the camera. Negative " +
+             "brings the drone DOWN toward glove height. -0.6 ≈ ~50% down toward the gloves.")]
+    public float gloveHeightOffset = -0.6f;
+    [Tooltip("Scale multiplier on each drone.")]
+    public float droneScale = 1.4f;
 
-    [Header("Approach variety")]
-    [Tooltip("Random HEIGHT variation (m) for each drone, so they're not all at the exact same spot.")]
-    public float verticalSpread = 0.4f;
-    [Tooltip("Small left/right X offset (m) alternated per drone — mostly middle, just nudged aside so " +
-             "they don't stack. Keep small (the player should still reach all of them easily).")]
-    public float lateralOffset = 0.45f;
-    [Tooltip("Minimum seconds between successive drone ARRIVALS, so two never reach you at once — you " +
-             "hit one, then the next. Bigger = more spaced out.")]
-    public float minArrivalGap = 0.7f;
+    [Header("Colours / glow")]
+    public Color leftColor  = new Color(0.3f, 0.6f, 1f);   // blue = LEFT (punch)
+    public Color rightColor = new Color(1f, 0.45f, 0.15f); // orange = RIGHT (uppercut)
+    [Tooltip("Emission multiplier (glow strength).")]
+    public float glow = 3.5f;
 
-    private int _nextThreshold;   // next score multiple of scoreTrigger that fires a segment
-    private bool _running;         // a segment is currently in progress
-    private GameObject _portal;
-    private int _combo;
-    private float _trackToUnscaledOffset; // GetCurrentTrackTime() ≈ Time.unscaledTime + this
+    [Header("Punch feel")]
+    [Tooltip("Animator playback speed multiplier for the punch/uppercut during THIS segment only " +
+             "(bigger = snappier, more exaggerated). Restored to 1 when the segment ends.")]
+    public float punchAnimSpeed = 1.8f;
+    [Tooltip("Projectile prefab fired from the glove to the drone on a hit (this segment only). Optional " +
+             "— if empty, a glowing energy ball is generated at runtime.")]
+    public GameObject punchProjectilePrefab;
+    [Tooltip("Seconds the projectile takes to travel from the glove to the drone.")]
+    public float projectileTime = 0.12f;
+    [Tooltip("Where the projectile launches from, relative to the camera (right = +x, up = +y, fwd = +z).")]
+    public Vector3 gloveMuzzleOffset = new Vector3(0f, -0.35f, 0.5f);
 
-    [Tooltip("Don't start a new segment if the song has fewer than this many seconds left (so a rush " +
-             "can't begin right as the round is about to end).")]
-    public float minSongTimeLeftToStart = 6f;
+    [Header("Camera hit kick")]
+    public float camPunchKick = 0.18f;
+    public float camKickTime  = 0.12f;
 
-    // Synced so the LOCAL player knows the segment is running and suppresses normal on-beat card moves
-    // (during the rush the player should ONLY be hitting drones).
-    [SyncVar] public bool SegmentActive = false;
+    public bool SegmentActive { get; private set; }
 
-    private void Awake() { if (Instance == null) Instance = this; }
+    /// True while the drone segment is running. (Kept as a static helper so game code can gate on it.)
+    public static bool AnySegmentActive => Instance != null && Instance.SegmentActive;
 
-    // Called by PlayerCombat on the SERVER when a fighter's score changes. Fires a segment EVERY time
-    // the score crosses a new multiple of scoreTrigger (40k, 80k, 120k…), not just once.
-    [Server]
-    public void NotifyScore(PlayerCombat pc, int newScore)
+    private bool _running;
+    private Transform _camRig;
+    private Coroutine _camRoutine;
+    private Animator _humanAnimator;
+    private float _prevAnimSpeed = 1f;
+
+    // Tutorial (once per session).
+    private static bool _tutorialShown;
+    private bool _tutorialActive;
+
+    // Latched arrow press: -1 = LEFT this frame, +1 = RIGHT this frame, 0 = none.
+    private int _arrow;
+
+    static readonly int ID_BaseColor = Shader.PropertyToID("_BaseColor");
+    static readonly int ID_RimColor  = Shader.PropertyToID("_RimColor");
+    static readonly int ID_FlowColor = Shader.PropertyToID("_FlowColor");
+    static readonly int ID_Emission  = Shader.PropertyToID("_EmissionColor");
+
+    private void Awake()
     {
-        if (_running || pc == null) return;
-        if (pc.GetComponent<BotController>() != null) return;          // humans only trigger it
-        if (scoreTrigger <= 0) return;
-        if (_nextThreshold == 0) _nextThreshold = scoreTrigger;        // first threshold
-        if (newScore < _nextThreshold) return;
+        if (Instance != null && Instance != this) { Destroy(gameObject); return; }
+        Instance = this;
+    }
 
+    private void Update()
+    {
+        int a = ReadArrow();
+        if (a != 0) _arrow = a;
+    }
+
+    public void StartSegment(List<float> beatTrackTimes)
+    {
+        if (_running) { Debug.Log("<color=orange>[Drone]</color> ignored — already running."); return; }
         var rmm = RhythmRoundManager.Instance;
-        if (rmm == null || !rmm.isRoundActive) return;
+        if (rmm == null || !rmm.isRoundActive) { Debug.Log("<color=orange>[Drone]</color> ignored — no active round."); return; }
+        // No prefab → do NOT run: otherwise you'd get hit by invisible drones. Bail so normal play continues.
+        if (dronePrefab == null)
+        {
+            Debug.LogError("<color=red>[Drone]</color> No 'Drone Prefab' assigned on ~DroneRushSegment — segment SKIPPED so you don't get hit by invisible drones. Assign the Drone prefab in the inspector.");
+            return;
+        }
+        Debug.Log($"<color=lime>[Drone]</color> Starting segment, {beatTrackTimes.Count} beats.");
+        StartCoroutine(RunSegment(beatTrackTimes));
+    }
 
-        // Don't start if the song's almost over — the rush would get cut off mid-way.
-        if (SongTimeLeft(rmm) < minSongTimeLeftToStart) return;
-
-        // Advance to the next multiple ABOVE the current score (in case it jumped past several at once).
-        while (_nextThreshold <= newScore) _nextThreshold += scoreTrigger;
-
+    private IEnumerator RunSegment(List<float> beats)
+    {
         _running = true;
-        StartCoroutine(RunSegment(pc));
-    }
-
-    // Seconds of song left (custom track), or a big number for non-custom rounds.
-    private float SongTimeLeft(RhythmRoundManager rmm)
-    {
-        var src = BeatAnalyzer.Instance != null ? BeatAnalyzer.Instance.audioSource : null;
-        if (src != null && src.clip != null && src.isPlaying)
-            return src.clip.length - src.time;
-        return 999f;
-    }
-
-    [Server]
-    private IEnumerator RunSegment(PlayerCombat human)
-    {
-        var humanCtrl = human.GetComponent<PlayerController>();
-        var bot = humanCtrl != null ? humanCtrl.GetOpponent() : null;
-        var botCombat = bot != null ? bot.GetComponent<PlayerCombat>() : null;
-        if (bot == null || botCombat == null) { _running = false; yield break; }
-
-        var rmm = RhythmRoundManager.Instance;
-        // Clamp the segment so it can't run past the end of the song (leave a small buffer).
-        float dur = segmentDuration;
-        if (rmm != null) dur = Mathf.Min(dur, Mathf.Max(2f, SongTimeLeft(rmm) - 2f));
-
-        SegmentActive = true; // suppress the player's normal on-beat card moves for the whole segment
-
-        // 1) Drop the bot into a HELD stagger pose ("Stagger New") for the whole segment — it deals no
-        //    damage and won't act (BotController.ThinkNextMove bails while staggered).
-        PinBotForSegment(bot);
-        botCombat.EnterHeldStagger();
-
-        // 2) Open the portal near the bot (all clients see it).
-        Vector3 toBot = (bot.transform.position - human.transform.position); toBot.y = 0f;
-        toBot = toBot.sqrMagnitude > 0.001f ? toBot.normalized : Vector3.forward;
-        Vector3 portalPos = bot.transform.position + toBot * portalBehindBot + Vector3.up * portalHeight;
-        RpcOpenPortal(portalPos, Quaternion.LookRotation(-toBot));
-
-        // 3) Tell the LOCAL human to start spawning + driving drones (VR tracking lives there).
-        //    Score-triggered segments now use the ACTUAL mapped beat grid so every drone arrives on a beat.
-        float[] beatTrackTimes = null;
-        if (rmm != null)
-        {
-            float track = rmm.GetCurrentTrackTime();
-            float startTrack = track + droneTravelTime;
-            float endTrack = track + droneTravelTime + dur;
-            var beats = rmm.GetUpcomingBeats(startTrack, endTrack);
-            if (beats.Count > 0) beatTrackTimes = beats.ToArray();
-        }
-
-        if (beatTrackTimes != null && beatTrackTimes.Length > 0)
-        {
-            TargetBeginForcedRush(human.connectionToClient,
-                human.transform.position, bot.transform.position, portalPos,
-                beatTrackTimes, droneTravelTime);
-        }
-        else
-        {
-            // Fallback if no beat data is available (shouldn't happen in normal play).
-            TargetBeginDroneRush(human.connectionToClient,
-                human.transform.position, bot.transform.position, portalPos,
-                dur, droneTravelTime, spawnGap);
-        }
-
-        // 4) Hold the segment (or until the round ends), then end. End EARLY if the round stops.
-        //    When using mapped beats, keep the portal open until the last drone has arrived.
-        if (beatTrackTimes != null && beatTrackTimes.Length > 0)
-        {
-            float lastBeat = beatTrackTimes[beatTrackTimes.Length - 1];
-            while (rmm != null && rmm.isRoundActive && rmm.GetCurrentTrackTime() < lastBeat + 0.6f)
-                yield return null;
-        }
-        else
-        {
-            float t = 0f;
-            while (t < dur)
-            {
-                if (rmm != null && !rmm.isRoundActive) break;
-                t += Time.deltaTime;
-                yield return null;
-            }
-        }
-
-        RpcClosePortal();
-        botCombat.ExitHeldStagger();
-        SegmentActive = false; // restore normal on-beat card play
-        _running = false;       // ready to fire again at the next score threshold
-    }
-
-    // Stop any in-progress beat run-in and lock the bot to its spawn for the whole drone segment, so it
-    // stands still in the held-stagger pose instead of charging the player. BotBeatApproach.Update also
-    // bails while SegmentActive, but we cancel + snap here in case a run-in was already mid-flight.
-    [Server]
-    private void PinBotForSegment(PlayerController bot)
-    {
-        if (bot == null) return;
-        var approach = bot.GetComponent<BotBeatApproach>();
-        if (approach != null) approach.CancelApproach();   // kills any active run/return
-        bot.ClearApproachOverride();                       // resume the home pin
-        bot.transform.position = bot.HomePosition;          // snap to spawn immediately
-    }
-
-    // ── FORCED segment from a dense beatmap run — one drone per beat ────────────────────────────
-    // Called by RhythmRoundManager when the song reaches a dense run. Ignored if a segment's running.
-    [Server]
-    public void StartForcedSegment(PlayerCombat human, System.Collections.Generic.List<float> beatTrackTimes)
-    {
-        if (_running || human == null || beatTrackTimes == null || beatTrackTimes.Count == 0) return;
-        var rmm = RhythmRoundManager.Instance;
-        if (rmm == null || !rmm.isRoundActive) return;
-        _running = true;
-        StartCoroutine(RunForcedSegment(human, beatTrackTimes.ToArray()));
-    }
-
-    [Server]
-    private IEnumerator RunForcedSegment(PlayerCombat human, float[] beatTrackTimes)
-    {
-        var humanCtrl = human.GetComponent<PlayerController>();
-        var bot = humanCtrl != null ? humanCtrl.GetOpponent() : null;
-        var botCombat = bot != null ? bot.GetComponent<PlayerCombat>() : null;
-        if (bot == null || botCombat == null) { _running = false; yield break; }
-
-        var rmm = RhythmRoundManager.Instance;
         SegmentActive = true;
-        PinBotForSegment(bot);
-        botCombat.EnterHeldStagger();
 
-        Vector3 toBot = (bot.transform.position - human.transform.position); toBot.y = 0f;
-        toBot = toBot.sqrMagnitude > 0.001f ? toBot.normalized : Vector3.forward;
-        Vector3 portalPos = bot.transform.position + toBot * portalBehindBot + Vector3.up * portalHeight;
-        RpcOpenPortal(portalPos, Quaternion.LookRotation(-toBot));
+        var human     = LocalHuman();
+        var bot       = human != null ? human.GetComponent<PlayerController>()?.GetOpponent() : null;
+        var botCombat = bot   != null ? bot.GetComponent<PlayerCombat>()   : null;
+        if (human == null || bot == null) { _running = false; SegmentActive = false; yield break; }
 
-        TargetBeginForcedRush(human.connectionToClient,
-            human.transform.position, bot.transform.position, portalPos,
-            beatTrackTimes, droneTravelTime);
+        _camRig = human.GetComponent<PlayerController>()?.CameraPosition;
+        Transform aimAt = _camRig != null ? _camRig : human.transform;
 
-        // Hold until the last beat has passed (+ travel + a tail), or the round ends.
-        float lastBeat = beatTrackTimes[beatTrackTimes.Length - 1];
-        while (rmm != null && rmm.isRoundActive && rmm.GetCurrentTrackTime() < lastBeat + 0.6f)
-            yield return null;
+        // Boost the player's punch animation speed for this segment (snappier/exaggerated).
+        _humanAnimator = human.animator;
+        if (_humanAnimator != null) { _prevAnimSpeed = _humanAnimator.speed; _humanAnimator.speed = punchAnimSpeed; }
 
-        RpcClosePortal();
-        botCombat.ExitHeldStagger();
+        // Bot: stand IDLE (pinned) — no charging the player, no stagger pose.
+        if (botCombat != null) botCombat.HoldIdle();
+        var botApproach = bot.GetComponent<BotBeatApproach>();
+        if (botApproach != null) botApproach.CancelApproach();
+        bot.GetComponent<PlayerController>()?.ClearApproachOverride();
+
+        // First segment of the session: how-to overlay (pauses game).
+        if (!_tutorialShown)
+        {
+            _tutorialShown = true;
+            yield return ShowTutorial();
+        }
+
+        var rmm      = RhythmRoundManager.Instance;
+        float endAt  = Time.time + segmentDuration;
+        float lastArrival = -99f;
+        int   beatIdx = 0;
+
+        while (Time.time < endAt && rmm != null && rmm.isRoundActive)
+        {
+            float now = rmm.GetCurrentTrackTime();
+            float arriveTrack = NextBeatAfter(beats, ref beatIdx, now + travelTime, lastArrival + minArrivalGap);
+            if (arriveTrack < 0f) { yield return null; continue; }
+            lastArrival = arriveTrack;
+
+            bool fromRight = Random.value < 0.5f;
+            // Fire-and-forget: each drone lives its own life (no shared state).
+            StartCoroutine(RunDrone(bot.transform, human.transform, aimAt, botCombat, arriveTrack, fromRight));
+
+            yield return new WaitForSeconds(minArrivalGap);
+        }
+
+        if (_humanAnimator != null) _humanAnimator.speed = _prevAnimSpeed; // restore normal anim speed
+        if (botCombat != null) botCombat.ReleaseIdle();
         SegmentActive = false;
         _running = false;
     }
 
-    [TargetRpc]
-    private void TargetBeginForcedRush(NetworkConnection target, Vector3 playerPos, Vector3 botPos,
-                                       Vector3 portalPos, float[] beatTrackTimes, float travel)
+    // ── ONE DRONE: spawn behind bot → drift to a side → fly straight at the player's matching side. ──
+    private IEnumerator RunDrone(Transform bot, Transform human, Transform aimAt,
+                                 PlayerCombat botCombat, float arriveTrack, bool fromRight)
     {
-        StartCoroutine(LocalForcedRush(botPos, portalPos, beatTrackTimes, travel));
-    }
-
-    // Spawn one drone per dense beat, each arriving ON its beat (converts track-time → unscaled time).
-    private IEnumerator LocalForcedRush(Vector3 botPos, Vector3 portalPos, float[] beatTrackTimes, float travel)
-    {
-        _combo = 0;
         var rmm = RhythmRoundManager.Instance;
-        Transform playerHead = CachedCamera.Main != null ? CachedCamera.Main.transform : null;
-        Transform botT = FindBotTransform(botPos);
-        if (playerHead == null || rmm == null) yield break;
 
-        Vector3 sideAxis = playerHead.right; sideAxis.y = 0f;
-        sideAxis = sideAxis.sqrMagnitude > 0.001f ? sideAxis.normalized : Vector3.right;
+        Vector3 toPlayer = human.position - bot.position; toPlayer.y = 0f;
+        toPlayer = toPlayer.sqrMagnitude > 0.001f ? toPlayer.normalized : Vector3.forward;
+        // The PLAYER looks toward the bot (-toPlayer). The player's RIGHT is Cross(up, -toPlayer). Using
+        // the player's own right so "fromRight" drone = right side of the SCREEN = RIGHT arrow.
+        Vector3 playerRight = Vector3.Cross(Vector3.up, -toPlayer);
+        float   sideSign    = fromRight ? 1f : -1f;
 
-        bool rightNext = true;
-        for (int b = 0; b < beatTrackTimes.Length; b++)
+        // Drones fly at glove/hand height, not up near the head — bring the arrival + drift down.
+        Vector3 spawnPos  = bot.position - toPlayer * spawnBehind + Vector3.up * spawnHeight;
+        Vector3 driftPos  = bot.position + playerRight * (sideSign * sideDrift) + Vector3.up * spawnHeight;
+        Vector3 arrivePos = aimAt.position + playerRight * (sideSign * playerSideOffset)
+                          + Vector3.up * gloveHeightOffset; // lowered toward the gloves
+
+        var go = SpawnDrone(spawnPos);
+        if (go == null) yield break;
+        TintDrone(go, fromRight ? rightColor : leftColor);
+
+        float driftFrac = 0.3f;
+        // LEFT arrow hits a LEFT drone (punch); RIGHT arrow hits a RIGHT drone (uppercut).
+        int   wantArrow = fromRight ? +1 : -1;
+
+        bool resolved = false;
+        while (go != null)
         {
-            // If the beat has already passed by the time we got the message (network latency), skip it
-            // rather than spawning a drone that arrives late. Every spawned drone lands ON its mapped beat.
-            if (rmm.GetCurrentTrackTime() > beatTrackTimes[b]) continue;
+            float t = rmm != null ? rmm.GetCurrentTrackTime() : arriveTrack;
+            float u = Mathf.InverseLerp(arriveTrack - travelTime, arriveTrack, t); // 0 spawn → 1 beat
 
-            // Spawn `travel` seconds before this beat's track time so the drone arrives ON the beat.
-            float spawnTrack = beatTrackTimes[b] - travel;
-            while (rmm.isRoundActive && rmm.GetCurrentTrackTime() < spawnTrack)
-                yield return null;
-            if (!rmm.isRoundActive) yield break;
+            Vector3 pos;
+            if (u < driftFrac)
+                pos = Vector3.Lerp(spawnPos, driftPos, u / driftFrac);
+            else
+                pos = Vector3.Lerp(driftPos, arrivePos, (u - driftFrac) / (1f - driftFrac));
+            go.transform.position = pos;
+            Vector3 face = (aimAt.position - go.transform.position);
+            if (face.sqrMagnitude > 0.001f) go.transform.rotation = Quaternion.LookRotation(face.normalized);
 
-            // Convert this beat's track time to an unscaled arrival time for the drone.
-            float now = Time.unscaledTime;
-            float arrive = now + Mathf.Max(0.05f, beatTrackTimes[b] - rmm.GetCurrentTrackTime());
+            if (!resolved && Mathf.Abs(t - arriveTrack) <= hitWindow && _arrow != 0)
+            {
+                int a = _arrow; _arrow = 0;
+                if (a == wantArrow)
+                {
+                    resolved = true;
+                    var human2 = LocalHuman();
+                    human2?.PlayLocalAttackAnim(fromRight ? uppercutState : punchState);
+                    DoCameraKick(fromRight ? +1 : -1);
+                    human2?.AddScore(hitPoints, "drone punch");
+                    // Fire a projectile from the glove to the drone, THEN punch the drone into the bot.
+                    yield return FireProjectileAtDrone(aimAt, go, fromRight);
+                    yield return PunchIntoBot(go, bot, botCombat);
+                    yield break;
+                }
+                // Wrong arrow → consumed; drone continues and may still land on you.
+            }
 
-            float vert = Random.Range(-verticalSpread, verticalSpread);
-            float side = (rightNext ? 1f : -1f) * lateralOffset;
-            Vector3 spawnPos = portalPos + Vector3.up * vert + sideAxis * side;
-            Vector3 arriveOffset = Vector3.up * (vert * 0.5f) + sideAxis * (side * 0.5f);
-            bool finisher = (b == beatTrackTimes.Length - 1); // last dense beat = the big one
-
-            SpawnDrone(playerHead, botT, spawnPos, arriveOffset, arrive, rightNext, finisher);
-            rightNext = !rightNext;
+            if (t > arriveTrack + hitWindow)
+            {
+                if (!resolved) { botCombat?.AddScore(botHitPoints, "drone hit"); FlashHitFeedback(); }
+                break;
+            }
+            yield return null;
         }
+        if (go != null) Destroy(go);
     }
 
-    // ── Client: portal visuals ─────────────────────────────────────────────────────────────────
-    [ClientRpc]
-    private void RpcOpenPortal(Vector3 pos, Quaternion rot)
+    // Fire a projectile from the glove muzzle to the drone on a hit (segment-only flavour). Uses the
+    // assigned prefab, or a runtime-built glowing energy ball if none is set.
+    private IEnumerator FireProjectileAtDrone(Transform aimAt, GameObject drone, bool fromRight)
     {
-        if (portalPrefab == null) return;
-        if (_portal != null) Destroy(_portal);
-        _portal = Instantiate(portalPrefab, pos, rot);
+        if (drone == null) yield break;
+
+        // Muzzle position from the camera: right/up/forward offset, mirrored to the swinging side.
+        Vector3 right = aimAt.right, up = aimAt.up, fwd = aimAt.forward;
+        float sideSign = fromRight ? 1f : -1f;
+        Vector3 muzzle = aimAt.position
+                       + right * (gloveMuzzleOffset.x * sideSign)
+                       + up    *  gloveMuzzleOffset.y
+                       + fwd   *  gloveMuzzleOffset.z;
+
+        GameObject proj = punchProjectilePrefab != null
+            ? Instantiate(punchProjectilePrefab, muzzle, Quaternion.identity)
+            : BuildEnergyBall(muzzle, fromRight ? rightColor : leftColor);
+
+        float e = 0f;
+        while (e < projectileTime && proj != null && drone != null)
+        {
+            e += Time.unscaledDeltaTime;
+            proj.transform.position = Vector3.Lerp(muzzle, drone.transform.position, e / projectileTime);
+            yield return null;
+        }
+        if (proj != null) Destroy(proj);
     }
 
-    [ClientRpc]
-    private void RpcClosePortal()
+    // A simple glowing sphere used when no projectile prefab is assigned.
+    private GameObject BuildEnergyBall(Vector3 pos, Color c)
     {
-        if (_portal != null) Destroy(_portal, 0.3f);
-        _combo = 0;
+        var ball = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        ball.transform.position = pos;
+        ball.transform.localScale = Vector3.one * 0.18f;
+        var col = ball.GetComponent<Collider>(); if (col != null) Destroy(col);
+        var r = ball.GetComponent<Renderer>();
+        var m = new Material(Shader.Find("Sprites/Default")); // unlit, always visible
+        m.color = c;
+        r.material = m;
+        if (r.material.HasProperty(ID_Emission)) r.material.SetColor(ID_Emission, c * glow);
+        return ball;
     }
 
-    // ── Local client: spawn + drive the drones ─────────────────────────────────────────────────
-    [TargetRpc]
-    private void TargetBeginDroneRush(NetworkConnection target, Vector3 playerPos, Vector3 botPos,
-                                      Vector3 portalPos, float duration, float travel, float gap)
+    // Punch a hit drone back into the bot (damage + its blood/hit VFX play there).
+    private IEnumerator PunchIntoBot(GameObject go, Transform bot, PlayerCombat botCombat)
     {
-        StartCoroutine(LocalDroneRush(playerPos, botPos, portalPos, duration, travel, gap));
+        if (go == null) yield break;
+        Vector3 from = go.transform.position;
+        Vector3 to   = bot.position + Vector3.up * 1.2f;
+        float e = 0f, dur = 0.26f;
+        while (e < dur && go != null)
+        {
+            e += Time.unscaledDeltaTime;
+            go.transform.position = Vector3.Lerp(from, to, e / dur);
+            go.transform.LookAt(bot);
+            yield return null;
+        }
+        botCombat?.TakeDroneHit(deflectBotDamage);
+        if (go != null) Destroy(go);
     }
 
-    private IEnumerator LocalDroneRush(Vector3 playerPos, Vector3 botPos, Vector3 portalPos,
-                                       float duration, float travel, float gap)
+    // ── Camera hit kick — a quick punchy jolt to the side you swung (no flip). ──
+    private void DoCameraKick(int side)
     {
-        _combo = 0;
+        if (_camRig == null) return;
+        if (_camRoutine != null) StopCoroutine(_camRoutine);
+        _camRoutine = StartCoroutine(CameraKickRoutine(side));
+    }
+
+    private IEnumerator CameraKickRoutine(int side)
+    {
+        Transform cam = _camRig;
+        Vector3 basePos = cam.localPosition;
+        float e = 0f;
+        while (e < camKickTime)
+        {
+            e += Time.unscaledDeltaTime;
+            float p = Mathf.Sin(Mathf.Clamp01(e / camKickTime) * Mathf.PI); // out and back
+            cam.localPosition = basePos + Vector3.right * (side * camPunchKick * p) + Vector3.forward * (camPunchKick * 0.4f * p);
+            yield return null;
+        }
+        cam.localPosition = basePos;
+        _camRoutine = null;
+    }
+
+    // ── Drone spawn / tint ──────────────────────────────────────────────────────────────────────────────
+    private GameObject SpawnDrone(Vector3 pos)
+    {
+        if (dronePrefab == null) return null;
+        var go = Instantiate(dronePrefab, pos, Quaternion.identity);
+        go.transform.localScale *= droneScale;
+        var vrDrone = go.GetComponent<Drone>(); // strip VR flight; we drive position
+        if (vrDrone != null) Destroy(vrDrone);
+        return go;
+    }
+
+    private void TintDrone(GameObject go, Color c)
+    {
+        var rend = go != null ? go.GetComponentInChildren<Renderer>() : null;
+        if (rend == null) return;
+        var mat = rend.material; // instance
+        if (mat.HasProperty(ID_BaseColor)) mat.SetColor(ID_BaseColor, c);
+        if (mat.HasProperty(ID_RimColor))  mat.SetColor(ID_RimColor,  c);
+        if (mat.HasProperty(ID_FlowColor)) mat.SetColor(ID_FlowColor, c);
+        if (mat.HasProperty(ID_Emission))  mat.SetColor(ID_Emission,  c * glow);
+    }
+
+    // ── First-time tutorial ─────────────────────────────────────────────────────────────────────────────
+    private IEnumerator ShowTutorial()
+    {
+        _tutorialActive = true;
         var rmm = RhythmRoundManager.Instance;
-        Transform playerHead = CachedCamera.Main != null ? CachedCamera.Main.transform : null;
-        Transform botT = FindBotTransform(botPos);
-        if (playerHead == null) yield break;
+        rmm?.PauseTrackClock();
+        float prevScale = Time.timeScale;
+        Time.timeScale = 0f;
 
-        float endTime = Time.unscaledTime + duration;
-        bool finisherSpawned = false;
-        bool rightNext = true;
-
-        // Player's left/right axis (flattened) for a small X offset so drones aren't dead-center.
-        Vector3 sideAxis = playerHead.right; sideAxis.y = 0f;
-        sideAxis = sideAxis.sqrMagnitude > 0.001f ? sideAxis.normalized : Vector3.right;
-
-        float lastArrive = 0f; // enforce a minimum spacing between successive drone ARRIVALS
-
-        while (Time.unscaledTime < endTime)
+        float realElapsed = 0f;
+        yield return null;
+        bool clicked = false;
+        while (!clicked)
         {
-            // Last ~2.5s → spawn the single big finisher instead of another normal drone.
-            bool finisher = !finisherSpawned && (endTime - Time.unscaledTime) <= 2.5f;
-            if (finisher) finisherSpawned = true;
-
-            // Mostly-middle, with a SMALL left/right X nudge (alternating) + a little height variation,
-            // so two drones never stack on the exact same spot. Hand to use is shown by COLOUR.
-            float vert = finisher ? 0f : Random.Range(-verticalSpread, verticalSpread);
-            float side = finisher ? 0f : (rightNext ? 1f : -1f) * lateralOffset;
-            Vector3 spawnPos = portalPos + Vector3.up * vert + sideAxis * side;
-            Vector3 arriveOffset = Vector3.up * (vert * 0.5f) + sideAxis * (side * 0.5f);
-
-            // Arrival timing: snap to the beat, but force it to be at least minArrivalGap after the
-            // previous drone so they DON'T reach at the same time — player hits one, then the next.
-            float arrive = ComputeBeatArrival(rmm, travel);
-            if (arrive < lastArrive + minArrivalGap) arrive = lastArrive + minArrivalGap;
-            lastArrive = arrive;
-
-            SpawnDrone(playerHead, botT, spawnPos, arriveOffset, arrive, rightNext, finisher);
-            rightNext = !rightNext;
-
-            if (finisher) break;
-            yield return new WaitForSecondsRealtime(gap);
+            realElapsed += Time.unscaledDeltaTime;
+            if (MouseClickedThisFrame()) clicked = true;
+            yield return null;
         }
+
+        Time.timeScale = prevScale;
+        rmm?.ResumeTrackClock(realElapsed);
+        _tutorialActive = false;
+        _arrow = 0;
     }
 
-    // Pick an arrival time ≈ travel seconds out, snapped to the nearest real beat so the punch lands
-    // on the metronome. Falls back to "now + travel" if beat info isn't available.
-    private float ComputeBeatArrival(RhythmRoundManager rmm, float travel)
+    private void OnGUI()
     {
-        float now = Time.unscaledTime;
-        if (rmm == null) return now + travel;
+        if (!_tutorialActive) return;
+        int w = Screen.width, h = Screen.height;
+        DrawRect(new Rect(0, 0, w, h), new Color(0f, 0f, 0f, 0.82f));
 
-        // Convert the desired arrival (track time) back to unscaled time using the live offset.
-        float track = rmm.GetCurrentTrackTime();
-        float offset = now - track;                 // unscaled ≈ track + offset
-        float desiredTrack = track + travel;
-        float beat = rmm.GetNextBeatTime();
-        // Walk beats forward to the one closest to desiredTrack (beats are ~ fixed interval apart).
-        // GetNextBeatTime only gives the next one; approximate the grid from it.
-        float arriveTrack = beat >= desiredTrack ? beat : desiredTrack;
-        return arriveTrack + offset;
+        var title = new GUIStyle(GUI.skin.label)
+        { fontSize = Mathf.RoundToInt(h * 0.045f), fontStyle = FontStyle.Bold,
+          alignment = TextAnchor.MiddleCenter, normal = { textColor = new Color(0.35f, 0.95f, 1f) } };
+        var head = new GUIStyle(GUI.skin.label)
+        { fontSize = Mathf.RoundToInt(h * 0.05f), fontStyle = FontStyle.Bold,
+          alignment = TextAnchor.MiddleCenter, wordWrap = true };
+        var body = new GUIStyle(GUI.skin.label)
+        { fontSize = Mathf.RoundToInt(h * 0.028f), alignment = TextAnchor.UpperCenter, wordWrap = true,
+          normal = { textColor = new Color(0.9f, 0.92f, 1f) } };
+        var footer = new GUIStyle(GUI.skin.label)
+        { fontSize = Mathf.RoundToInt(h * 0.03f), fontStyle = FontStyle.Bold,
+          alignment = TextAnchor.MiddleCenter, normal = { textColor = new Color(1f, 0.9f, 0.3f) } };
+
+        GUI.Label(new Rect(0, h * 0.10f, w, h * 0.08f), "DRONE RUSH — PUNCH THE DRONES", title);
+
+        var leftPanel = new Rect(w * 0.06f, h * 0.28f, w * 0.40f, h * 0.42f);
+        DrawRect(leftPanel, new Color(0.05f, 0.10f, 0.18f, 0.95f));
+        DrawBorder(leftPanel, new Color(0.3f, 0.6f, 1f, 0.9f), 3);
+        GUI.Label(new Rect(leftPanel.x, leftPanel.y + h * 0.03f, leftPanel.width, h * 0.07f), "◄ LEFT ARROW", head);
+        GUI.Label(new Rect(leftPanel.x + 20, leftPanel.y + h * 0.14f, leftPanel.width - 40, leftPanel.height * 0.6f),
+            "A drone flies at your LEFT side.\n\nPress the LEFT ARROW KEY on the beat\nto PUNCH it back into your opponent.", body);
+
+        var rightPanel = new Rect(w * 0.54f, h * 0.28f, w * 0.40f, h * 0.42f);
+        DrawRect(rightPanel, new Color(0.05f, 0.10f, 0.18f, 0.95f));
+        DrawBorder(rightPanel, new Color(1f, 0.5f, 0.2f, 0.9f), 3);
+        GUI.Label(new Rect(rightPanel.x, rightPanel.y + h * 0.03f, rightPanel.width, h * 0.07f), "RIGHT ARROW ►", head);
+        GUI.Label(new Rect(rightPanel.x + 20, rightPanel.y + h * 0.14f, rightPanel.width - 40, rightPanel.height * 0.6f),
+            "A drone flies at your RIGHT side.\n\nPress the RIGHT ARROW KEY on the beat\nto UPPERCUT it back into your opponent.", body);
+
+        GUI.Label(new Rect(0, h * 0.78f, w, h * 0.08f), "CLICK ANYWHERE TO START", footer);
     }
 
-    private void SpawnDrone(Transform player, Transform bot, Vector3 spawnPos, Vector3 arriveOffset,
-                            float arriveTime, bool isRight, bool isFinisher)
+    // ── Helpers ────────────────────────────────────────────────────────────────────────────────────────
+    private void FlashHitFeedback()
     {
-        if (dronePrefab == null) return;
-        var go = Instantiate(dronePrefab, spawnPos, Quaternion.identity);
-        var drone = go.GetComponent<Drone>();
-        if (drone == null) { Destroy(go); return; }
-        drone.Init(player, bot, arriveOffset, arriveTime, this, isRight, isFinisher);
+        CameraShake.Instance?.Shake(0.18f, 0.35f);
+        VRHaptics.GotHit(0.5f);
     }
 
-    private Transform FindBotTransform(Vector3 botPos)
+    private float NextBeatAfter(List<float> beats, ref int idx, float floorA, float floorB)
     {
-        var lp = GameManager.localPlayer;
-        var opp = lp != null ? lp.GetOpponent() : null;
-        return opp != null ? opp.transform : null;
+        float floor = Mathf.Max(floorA, floorB);
+        while (idx < beats.Count && beats[idx] < floor) idx++;
+        return idx < beats.Count ? beats[idx++] : -1f;
     }
 
-    // ── Drone outcome callbacks (local) → route authoritative results to the server ─────────────
-    public void OnDronePunched(Drone d, float power, float onBeat, bool rightHand, bool finisher)
+    private static PlayerCombat LocalHuman()
     {
-        _combo++;
-        CmdDroneHit(power, onBeat, _combo, finisher);
+        foreach (var p in GameManager.players)
+            if (p != null && p.isLocalPlayer && p.GetComponent<BotController>() == null)
+                return p.GetComponent<PlayerCombat>();
+        return null;
     }
 
-    public void OnDroneDodged(Drone d)
+    private static int ReadArrow()
     {
-        CmdDroneDodge();
+#if ENABLE_INPUT_SYSTEM
+        var k = Keyboard.current;
+        if (k != null)
+        {
+            if (k.leftArrowKey.wasPressedThisFrame)  return -1;
+            if (k.rightArrowKey.wasPressedThisFrame) return +1;
+        }
+        return 0;
+#else
+        if (Input.GetKeyDown(KeyCode.LeftArrow))  return -1;
+        if (Input.GetKeyDown(KeyCode.RightArrow)) return +1;
+        return 0;
+#endif
     }
 
-    public void OnDroneMissed(Drone d)
+    private static bool MouseClickedThisFrame()
     {
-        _combo = 0;                       // a true miss breaks the in-segment combo
-        ScreenSpark.Flash();              // local screen spark (no real damage to the player)
-        CmdDroneMissed();                 // the drone got past you → the BOT scores
+#if ENABLE_INPUT_SYSTEM
+        var mo = Mouse.current;
+        return mo != null && mo.leftButton.wasPressedThisFrame;
+#else
+        return Input.GetMouseButtonDown(0);
+#endif
     }
 
-    public void OnDroneHitBot(Drone d)
+    // ── OnGUI draw helpers ──────────────────────────────────────────────────────────────────────────────
+    private static Texture2D _px;
+    private static Texture2D Px
     {
-        // Visual only — the actual damage was applied server-side in CmdDroneHit when it was punched.
-        // The bot's own hit VFX + blood play via its normal damage path.
+        get { if (_px == null) { _px = new Texture2D(1, 1); _px.SetPixel(0, 0, Color.white); _px.Apply(); } return _px; }
     }
 
-    [Command(requiresAuthority = false)]
-    private void CmdDroneHit(float power, float onBeat, int combo, bool finisher, NetworkConnectionToClient sender = null)
+    private static void DrawRect(Rect r, Color c)
     {
-        var human = sender != null && sender.identity != null ? sender.identity.GetComponent<PlayerCombat>() : null;
-        if (human == null) return;
-        var bot = human.GetComponent<PlayerController>()?.GetOpponent()?.GetComponent<PlayerCombat>();
-        if (bot == null) return;
-
-        power  = Mathf.Clamp01(power);
-        onBeat = Mathf.Clamp01(onBeat);
-        float comboMult = 1f + Mathf.Min(combo, 10) * 0.15f; // up to ~2.5× at a 10-combo
-
-        int dmg = Mathf.Max(1, Mathf.RoundToInt(droneBaseDamage * (0.5f + power) * (0.5f + onBeat)));
-        int pts = Mathf.RoundToInt((finisher ? finisherPoints : dronePunchPoints)
-                                   * (0.5f + power) * (0.5f + onBeat) * comboMult);
-
-        bot.TakeDroneHit(dmg);            // blood spill only — no hurt anim, no knockback (stays staggered)
-        human.AddScore(pts, "drone bounce");
+        var prev = GUI.color; GUI.color = c; GUI.DrawTexture(r, Px); GUI.color = prev;
     }
 
-    [Command(requiresAuthority = false)]
-    private void CmdDroneDodge(NetworkConnectionToClient sender = null)
+    private static void DrawBorder(Rect r, Color c, int t)
     {
-        var human = sender != null && sender.identity != null ? sender.identity.GetComponent<PlayerCombat>() : null;
-        if (human != null) human.AddScore(droneDodgePoints, "drone dodge save");
-    }
-
-    [Command(requiresAuthority = false)]
-    private void CmdDroneMissed(NetworkConnectionToClient sender = null)
-    {
-        // A drone got past the player → reward the BOT (the human's opponent).
-        var human = sender != null && sender.identity != null ? sender.identity.GetComponent<PlayerCombat>() : null;
-        if (human == null) return;
-        var bot = human.GetComponent<PlayerController>()?.GetOpponent()?.GetComponent<PlayerCombat>();
-        if (bot != null) bot.AddScore(droneMissBotPoints, "drone got past player");
-    }
-
-    [Server]
-    public void ResetForNewRound()
-    {
-        _running = false;
-        _nextThreshold = scoreTrigger; // score resets each round, so the threshold resets too
-        if (SegmentActive) SegmentActive = false;
+        DrawRect(new Rect(r.x, r.y, r.width, t), c);
+        DrawRect(new Rect(r.x, r.yMax - t, r.width, t), c);
+        DrawRect(new Rect(r.x, r.y, t, r.height), c);
+        DrawRect(new Rect(r.xMax - t, r.y, t, r.height), c);
     }
 }

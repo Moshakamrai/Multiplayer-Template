@@ -17,9 +17,7 @@ public class Drone : MonoBehaviour
     private Transform _player;       // the head/camera to fly at
     private Transform _bot;          // where a punched drone bounces to
     private float _arriveTime;       // unscaled time the drone should reach punch range (a beat)
-    private DroneRushSegment _owner; // reports outcomes here
     private bool _isRight;           // red = right hand, blue = left hand
-    private bool _isFinisher;        // the big climactic drone
 
     [Header("Glow / colour (Custom/EnergyGlove shader)")]
     [Tooltip("The drone's Mesh Renderer (multi-material). Leave empty to auto-find in children. " +
@@ -99,17 +97,10 @@ public class Drone : MonoBehaviour
     public System.Action<Drone>        onMissed;
     public System.Action<Drone>        onHitBot;
 
-    public void InitPC(Transform player, Transform bot, Vector3 arriveOffset, float arriveTime,
-                       bool isRight, bool isFinisher = false)
+    public void Init(Transform player, Transform bot, Vector3 arriveOffset, float arriveTime, bool isRight)
     {
-        Init(player, bot, arriveOffset, arriveTime, null, isRight, isFinisher);
-    }
-
-    public void Init(Transform player, Transform bot, Vector3 arriveOffset, float arriveTime,
-                     DroneRushSegment owner, bool isRight, bool isFinisher)
-    {
-        _player = player; _bot = bot; _arriveOffset = arriveOffset; _arriveTime = arriveTime; _owner = owner;
-        _isRight = isRight; _isFinisher = isFinisher;
+        _player = player; _bot = bot; _arriveOffset = arriveOffset; _arriveTime = arriveTime;
+        _isRight = isRight;
         _spawnPos = transform.position;
         _spawnTime = Time.unscaledTime;
         _born = Time.unscaledTime;
@@ -140,7 +131,7 @@ public class Drone : MonoBehaviour
         }
 
         // Spawn-from-portal feel: start tiny and pop to full (reduced) size.
-        _fullScale = transform.localScale * droneScale * (isFinisher ? 1.7f : 1f);
+        _fullScale = transform.localScale * droneScale;
         transform.localScale = Vector3.zero;
     }
 
@@ -244,7 +235,6 @@ public class Drone : MonoBehaviour
                 Destroy(fx, hitVfxLifetime);
             }
 
-            _owner?.OnDronePunched(this, power, onBeat, rightHand, _isFinisher);
             onPunched?.Invoke(this, power);
             StartBounce();
             return;
@@ -255,8 +245,8 @@ public class Drone : MonoBehaviour
         {
             bool dodged = _headRestCaptured && VRHands.Tracking &&
                           Vector3.Distance(VRHands.HeadPos, _headRestPos) >= dodgeDistance;
-            if (dodged) { _owner?.OnDroneDodged(this); onDodged?.Invoke(this); }
-            else        { _owner?.OnDroneMissed(this); onMissed?.Invoke(this); }
+            if (dodged) onDodged?.Invoke(this);
+            else        onMissed?.Invoke(this);
             Finish();
         }
     }
@@ -297,7 +287,6 @@ public class Drone : MonoBehaviour
         transform.Rotate(Vector3.forward, idleSpin * 4f * Time.unscaledDeltaTime, Space.Self); // fast spin on the zip back
         if (Vector3.Distance(transform.position, _bot.position) < 0.4f)
         {
-            _owner?.OnDroneHitBot(this);
             onHitBot?.Invoke(this);
             Finish();
         }

@@ -135,6 +135,18 @@ public class RhythmRoundManager : NetworkBehaviour
              "If empty, the bot computes a point in front of the player instead.")]
     public Transform botAttackPosition;
 
+    [Header("Bot Hit-Reaction Positions")]
+    [Tooltip("Where the bot flies to when hit with EXCELLENT shout timing (hard knockback). Assign an " +
+             "empty GameObject in the scene. If empty, falls back to the normal bot home spot.")]
+    public Transform botHardHitPosition;
+    [Tooltip("Where the bot goes when hit with GOOD (not excellent, not bad) shout timing — plays the " +
+             "'Hurt 2' animation. Assign an empty GameObject in the scene. If empty, falls back to home.")]
+    public Transform botGoodHitPosition;
+    [Tooltip("Where the bot rests when it did NOT take damage this beat (landed a hit, defended, or a " +
+             "neutral clash) — replaces the plain home-return for those outcomes. Assign an empty " +
+             "GameObject in the scene. If empty, falls back to the normal bot home spot.")]
+    public Transform botNoHitPosition;
+
     // Human + bot home spots. Use the assigned Start Position Transforms; fall back to the old
     // fixed coords if unassigned. Drive round setup, the bot spawn, AND the LateUpdate home-lock.
     private Vector3 _spawnP1 => playerStartPosition != null ? playerStartPosition.position : new Vector3(0f, 0f, -2.5f);
@@ -203,7 +215,9 @@ public class RhythmRoundManager : NetworkBehaviour
 
     private void Awake()
     {
-        if (Instance == null) Instance = this;
+        if (Instance != null && Instance != this)
+            Debug.LogWarning($"<color=orange>[RRM]</color> A second RhythmRoundManager appeared ({name}) — it now owns Instance. If there were two, that was the bug.");
+        Instance = this; // last one wins → Instance always points at the live/active manager
         EnsureShopSystemsExist();
     }
 
@@ -279,8 +293,26 @@ public class RhythmRoundManager : NetworkBehaviour
         }
         else
         {
-            ShowRoundPicker();
+            // Flat/PC: wait for the player to SAY "start" before the level picker appears.
+            WaitingForVoiceStart = true;
         }
+    }
+
+    // True on flat/PC before the first round: shows a "Say \"Start\" to begin" prompt; saying "start"
+    // (via VoiceCommandManager) opens the level picker.
+    [SyncVar] public bool WaitingForVoiceStart = false;
+
+    // Called when the player says "start" at the entry prompt. Opens the level picker. Routed as a
+    // Command (no authority needed) so it works whether the caller is the host or a pure client.
+    // Plain method (NOT a Command) — the game runs as host, so we open the picker directly. Routing
+    // through [Command]/[Server] silently no-ops if the network/Steam transport didn't fully start,
+    // which was why "start"/Enter did nothing.
+    public void BeginFromVoiceStart()
+    {
+        Debug.Log($"<color=lime>[RRM]</color> BeginFromVoiceStart called. WaitingForVoiceStart={WaitingForVoiceStart}");
+        if (!WaitingForVoiceStart) return;
+        WaitingForVoiceStart = false;
+        ShowRoundPicker();
     }
 
 #if UNITY_EDITOR
@@ -966,7 +998,6 @@ public class RhythmRoundManager : NetworkBehaviour
     {
         _p1RoundDamageDealt = 0;
         _p2RoundDamageDealt = 0;
-        DroneRushSegment.Instance?.ResetForNewRound(); // re-arm the drone-rush trigger each round
 
         int idx = 0;
         foreach (var player in GameManager.players)
@@ -1056,6 +1087,20 @@ public class RhythmRoundManager : NetworkBehaviour
 
     private void Update()
     {
+        // KEYBOARD FALLBACK for the "Say Start" prompt (works in builds too) — press Enter or Space to
+        // begin if the mic doesn't catch "start". Safe at any event.
+        if (WaitingForVoiceStart)
+        {
+#if ENABLE_INPUT_SYSTEM
+            var kb0 = UnityEngine.InputSystem.Keyboard.current;
+            bool go = kb0 != null && (kb0.enterKey.wasPressedThisFrame || kb0.spaceKey.wasPressedThisFrame
+                                      || kb0.numpadEnterKey.wasPressedThisFrame);
+#else
+            bool go = Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.Space);
+#endif
+            if (go) { BeginFromVoiceStart(); return; }
+        }
+
 #if UNITY_EDITOR && ENABLE_INPUT_SYSTEM
         // --- EDITOR FAST-TEST SHORTCUT (Space) — uses the NEW Input System (the project's active one;
         // the old UnityEngine.Input.GetKeyDown threw an exception every frame and broke Update). ---
@@ -1112,6 +1157,7 @@ public class RhythmRoundManager : NetworkBehaviour
 
         if (!isRoundActive || _startTime == 0) return;
         if (_tiebreakerPaused) return;
+        if (_clockPaused) return; // drone-segment tutorial paused the music/clock — don't run beat/round-end logic
 
         if (isServer)
         {
@@ -1336,14 +1382,14 @@ public class RhythmRoundManager : NetworkBehaviour
         var run = _denseRuns[0];
         if (run == null || run.Count == 0) { _denseRuns.RemoveAt(0); return; }
 
-        // Lead in by the flyer travel time so the first drone/slash arrives ON the run's first beat.
-        float lead = PCDroneSegment.Instance != null ? PCDroneSegment.Instance.travelTime : 1.2f;
+        // Lead in by the drone travel time so the first drone arrives ON the run's first beat.
+        float lead = DroneRushSegment.Instance != null ? DroneRushSegment.Instance.travelTime : 1.3f;
         if (currentTime < run[0] - lead) return;        // not time yet
         _denseRuns.RemoveAt(0);                          // consume this run (only fires once)
 
-        // PC DRONE SEGMENT: a dense beat run triggers the scroll-dodge / shout-parry drone rush.
-        if (PCDroneSegment.Instance != null)
-            PCDroneSegment.Instance.StartSegment(run);
+        // DRONE SEGMENT: a dense beat run triggers the arrow-key punch drone rush.
+        if (DroneRushSegment.Instance != null)
+            DroneRushSegment.Instance.StartSegment(run);
     }
 
     private PlayerCombat GetLocalHumanCombat()
@@ -1538,11 +1584,13 @@ public class RhythmRoundManager : NetworkBehaviour
         if (dmgToP2 > 0) _p1RoundDamageDealt += dmgToP2;
         if (dmgToP1 > 0) _p2RoundDamageDealt += dmgToP1;
 
-        // ── Tell the bot's run-in how the trade went, so it picks the right RETURN animation ──
-        // (got-hit → knockback carries it home; landed → back-dash; otherwise neutral). Only matters
-        // while the bot is mid run-in.
+        // ── Tell the bot's run-in how the trade went, so it picks the right RETURN animation + rest spot ──
+        // A got-hit is split further by the ATTACKING HUMAN's shout-timing rating (LastTimingRating,
+        // set in EvaluateAndSendFeedback just above): EXCELLENT → hard knockback fly-off, GOOD → lighter
+        // Hurt2 reaction, BAD → the classic in-place knockback recoil. Only matters mid run-in.
         {
-            PlayerCombat botPc = p1IsBot ? p1 : (p2IsBot ? p2 : null);
+            PlayerCombat botPc    = p1IsBot ? p1 : (p2IsBot ? p2 : null);
+            PlayerCombat humanPc  = p1IsBot ? p2 : (p2IsBot ? p1 : null); // the attacker whose timing matters
             if (botPc != null)
             {
                 int botTook  = p1IsBot ? p1DamageTaken : p2DamageTaken;
@@ -1552,7 +1600,14 @@ public class RhythmRoundManager : NetworkBehaviour
                 var approach = botPc.GetComponent<BotBeatApproach>();
                 if (approach != null && approach.IsApproaching)
                 {
-                    if (botTook > 0)              approach.ReportOutcome(BotBeatApproach.Outcome.GotHit);
+                    if (botTook > 0)
+                    {
+                        string rating = humanPc != null ? humanPc.LastTimingRating : "BAD";
+                        var hitOutcome = rating == "EXCELLENT" ? BotBeatApproach.Outcome.GotHitExcellent
+                                       : rating == "GOOD"      ? BotBeatApproach.Outcome.GotHitGood
+                                       : BotBeatApproach.Outcome.GotHit;
+                        approach.ReportOutcome(hitOutcome);
+                    }
                     else if (botDealt > 0)        approach.ReportOutcome(BotBeatApproach.Outcome.LandedHit);
                     else if (botPlayedDefense)    approach.ReportOutcome(BotBeatApproach.Outcome.Defended); // blocked/parried/dodged a hit → confident retreat
                     else                          approach.ReportOutcome(BotBeatApproach.Outcome.Clash);    // neutral whiff
@@ -2859,25 +2914,41 @@ public class RhythmRoundManager : NetworkBehaviour
         StartCoroutine(CardActivationEffectRoutine(player.transform));
     }
 
+    static readonly int ID_ColorProp = Shader.PropertyToID("_Color");
+
     private System.Collections.IEnumerator CardActivationEffectRoutine(Transform target)
     {
-        Renderer renderer = target.GetComponentInChildren<Renderer>();
+        // Find the FIRST renderer whose material actually has a "_Color" property — skips VFX/decal
+        // renderers (e.g. KriptoFX BFX_Decal) that would throw on mat.color. We tint the shared
+        // material's property block via MaterialPropertyBlock so we don't allocate a material instance
+        // per activation (that was leaking + churning GC).
+        Renderer renderer = null;
+        foreach (var r in target.GetComponentsInChildren<Renderer>())
+        {
+            if (r != null && r.sharedMaterial != null && r.sharedMaterial.HasProperty(ID_ColorProp))
+            {
+                renderer = r;
+                break;
+            }
+        }
         if (renderer == null) yield break;
 
-        Material mat = renderer.material;
-        Color originalColor = mat.color;
-        float duration = 0.3f;
-        float elapsed = 0f;
+        var mpb = new MaterialPropertyBlock();
+        renderer.GetPropertyBlock(mpb);
+        Color originalColor = renderer.sharedMaterial.GetColor(ID_ColorProp);
 
-        // Brief white flash
+        float duration = 0.3f;
+        float elapsed  = 0f;
         while (elapsed < duration)
         {
             elapsed += Time.deltaTime;
             float t = elapsed / duration;
-            mat.color = Color.Lerp(Color.white, originalColor, t);
+            mpb.SetColor(ID_ColorProp, Color.Lerp(Color.white, originalColor, t));
+            renderer.SetPropertyBlock(mpb);
             yield return null;
         }
-        mat.color = originalColor;
+        mpb.SetColor(ID_ColorProp, originalColor);
+        renderer.SetPropertyBlock(mpb);
     }
 
     [Server]
@@ -2954,6 +3025,7 @@ public class RhythmRoundManager : NetworkBehaviour
             if (pc.lastVocalSpikeTime <= 0)
             {
                 Debug.Log($"<color=orange>[TIMING]</color> {pc.name} - CHAIN | No Vocal Spike -> BAD");
+                pc.LastTimingRating = "BAD";
                 pc.TargetShowTimingFeedback("BAD");
                 return;
             }
@@ -2963,6 +3035,7 @@ public class RhythmRoundManager : NetworkBehaviour
                 ? pc.lastVocalSpikeOffset
                 : Mathf.Abs(targetBeat - pc.lastVocalSpikeTime);
             string chainRating = (chainOffset <= 0.18f) ? "EXCELLENT" : "GOOD";
+            pc.LastTimingRating = chainRating;
             if (chainRating == "EXCELLENT") pc.roundExcellentCount++;
             if (chainRating == "EXCELLENT") pc.AddScore(PlayerCombat.SCORE_ONBEAT_EXCELLENT, "EXCELLENT chain");
             else pc.AddScore(PlayerCombat.SCORE_ONBEAT_GOOD, "GOOD chain");
@@ -2975,6 +3048,7 @@ public class RhythmRoundManager : NetworkBehaviour
         if (pc.lastVocalSpikeTime <= 0)
         {
             Debug.Log($"<color=orange>[TIMING]</color> {pc.name} - Move: {(string.IsNullOrEmpty(move.attack) ? "DODGE" : move.attack)} | No Vocal Spike Detected -> BAD");
+            pc.LastTimingRating = "BAD";
             pc.TargetShowTimingFeedback("BAD");
             return;
         }
@@ -3004,6 +3078,7 @@ public class RhythmRoundManager : NetworkBehaviour
         string rating = "BAD";
         if (offset <= 0.18f) rating = "EXCELLENT"; // wider EXCELLENT sweet-spot (was 0.1)
         else if (offset <= window) rating = "GOOD";
+        pc.LastTimingRating = rating;
 
         if (rating == "EXCELLENT") pc.roundExcellentCount++;
 
@@ -3044,6 +3119,43 @@ public class RhythmRoundManager : NetworkBehaviour
 
     // Smooth per-card hover amount (0..1), keyed by card name. Eased each Repaint.
     private readonly Dictionary<string, float> _cardHover = new Dictionary<string, float>();
+
+    // Left-side entry prompt: "Say \"Start\" to begin." Shown on flat/PC before the level picker.
+    private void DrawVoiceStartPrompt()
+    {
+        if (_whiteTex == null) { _whiteTex = new Texture2D(1, 1); _whiteTex.SetPixel(0, 0, Color.white); _whiteTex.Apply(); }
+
+        int w = Screen.width, h = Screen.height;
+
+        // Panel on the LEFT, vertically centred.
+        float pw = w * 0.30f, ph = h * 0.22f;
+        float px = w * 0.05f, py = (h - ph) * 0.5f;
+
+        var prev = GUI.color;
+        GUI.color = new Color(0.03f, 0.05f, 0.10f, 0.92f);
+        GUI.DrawTexture(new Rect(px, py, pw, ph), _whiteTex);
+        // Accent bar.
+        GUI.color = new Color(0.35f, 0.95f, 1f, 1f);
+        GUI.DrawTexture(new Rect(px, py, pw, h * 0.006f), _whiteTex);
+        GUI.color = prev;
+
+        var head = new GUIStyle(GUI.skin.label)
+        { fontSize = Mathf.RoundToInt(h * 0.055f), fontStyle = FontStyle.Bold,
+          alignment = TextAnchor.MiddleCenter, normal = { textColor = new Color(0.35f, 0.95f, 1f) } };
+        var sub = new GUIStyle(GUI.skin.label)
+        { fontSize = Mathf.RoundToInt(h * 0.026f), alignment = TextAnchor.MiddleCenter,
+          wordWrap = true, normal = { textColor = new Color(0.85f, 0.9f, 1f) } };
+
+        // Pulsing "START" so it draws the eye.
+        float pulse = 0.7f + 0.3f * Mathf.Sin(Time.unscaledTime * 3f);
+        head.normal.textColor = new Color(0.35f * pulse + 0.2f, 0.95f, 1f);
+
+        GUI.Label(new Rect(px, py + ph * 0.20f, pw, ph * 0.35f), "SAY  \"START\"", head);
+        GUI.Label(new Rect(px + 14, py + ph * 0.55f, pw - 28, ph * 0.22f), "to begin the match", sub);
+        var tiny = new GUIStyle(sub) { fontSize = Mathf.RoundToInt(h * 0.02f),
+            normal = { textColor = new Color(0.6f, 0.7f, 0.85f) } };
+        GUI.Label(new Rect(px + 14, py + ph * 0.78f, pw - 28, ph * 0.2f), "(or press Enter)", tiny);
+    }
 
     private void DrawRoundPicker()
     {
@@ -3248,6 +3360,13 @@ public class RhythmRoundManager : NetworkBehaviour
         if (isShopPhase)
         {
             DrawShop();
+            return;
+        }
+
+        // --- "SAY START" ENTRY PROMPT (left side) ---
+        if (WaitingForVoiceStart)
+        {
+            DrawVoiceStartPrompt();
             return;
         }
 
@@ -3744,6 +3863,34 @@ public class RhythmRoundManager : NetworkBehaviour
     public float GetCurrentTrackTime()
     {
         return (currentType == RoundType.CustomTrack) ? BeatAnalyzer.Instance.audioSource.time : (float)(NetworkTime.time - _startTime);
+    }
+
+    // ── Segment pause/resume ─────────────────────────────────────────────────────────────────────────
+    // Freezes the music and the beat clock so a PC-drone tutorial (or similar) can pause mid-round
+    // without the timeline drifting. PauseTrackClock() halts the audio; ResumeTrackClock(realElapsed)
+    // shifts the timeline forward by the real time spent paused so beats stay aligned. Mirrors the
+    // tiebreaker's _startTime shift. Safe to call on the host (game runs as host = server).
+    private bool _clockPaused;
+
+    public void PauseTrackClock()
+    {
+        if (_clockPaused) return;
+        _clockPaused = true;
+        var src = BeatAnalyzer.Instance != null ? BeatAnalyzer.Instance.audioSource : null;
+        if (src != null && src.isPlaying) src.Pause(); // .time freezes while paused (keeps CustomTrack synced)
+    }
+
+    // realElapsed = real (unscaled) seconds the game sat paused. We advance _startTime by that amount
+    // for BOTH round types so the wall-clock cap (NetworkTime.time - _startTime) isn't inflated by the
+    // paused time. For built-in tracks this also keeps the beat clock aligned; CustomTrack's beat clock
+    // uses audioSource.time (frozen while paused) so it stays synced on its own.
+    public void ResumeTrackClock(float realElapsed)
+    {
+        if (!_clockPaused) return;
+        _clockPaused = false;
+        _startTime += realElapsed;
+        var src = BeatAnalyzer.Instance != null ? BeatAnalyzer.Instance.audioSource : null;
+        if (src != null) src.UnPause();
     }
 
     public int GetNextClusterSize() => _clusterSizes.Count > 0 ? _clusterSizes[0] : 1;

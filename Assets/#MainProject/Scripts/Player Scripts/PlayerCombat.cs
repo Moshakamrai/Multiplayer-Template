@@ -12,6 +12,12 @@ public class PlayerCombat : NetworkBehaviour
     [SyncVar] public int roundExcellentCount = 0;
     [SyncVar] public int roundCounterCount = 0;
 
+    // Server-only: the rating ("EXCELLENT"/"GOOD"/"BAD") of this player's most recent on-beat move,
+    // set by RhythmRoundManager.EvaluateAndSendFeedback just before the trade resolves. Used to decide
+    // how hard a hit lands (e.g. the bot's knockback distance/animation when the human's shout timing
+    // was EXCELLENT vs GOOD vs BAD).
+    public string LastTimingRating = "BAD";
+
     // ── SCORE (replaces the health % as the win metric) ──────────────────────
     // You gain points for moves that BENEFIT you: a clean on-beat move, a successful defense that
     // takes no damage, a parry/reflect that turns the tables, and especially landing a hard hit.
@@ -48,8 +54,6 @@ public class PlayerCombat : NetworkBehaviour
         if (surge != null && surge.SurgeActive && surge.Multiplier > 1)
             amount *= surge.Multiplier;
         Score += amount;
-        // VR drone-rush reward segment (dormant on PC): fires once per round on a score threshold.
-        DroneRushSegment.Instance?.NotifyScore(this, Score);
     }
     [SyncVar] public string availableCardsString = "";
     public Animator animator;
@@ -763,9 +767,9 @@ public class PlayerCombat : NetworkBehaviour
     {
         if (RhythmRoundManager.Instance == null) return;
 
-        // During a drone-rush segment (VR or PC) the player only dodges/parries the rush — suppress all
-        // normal on-beat card moves (shout/trigger-release won't fire an attack/defense here).
-        if (PCDroneSegment.AnySegmentActive) return;
+        // During the drone-rush segment the player only punches drones — suppress all normal on-beat
+        // card moves (shout/trigger-release won't fire an attack/defense here).
+        if (DroneRushSegment.AnySegmentActive) return;
 
         var   rmm          = RhythmRoundManager.Instance;
         float currentTime  = rmm.GetCurrentTrackTime();
@@ -1125,6 +1129,35 @@ public class PlayerCombat : NetworkBehaviour
         RpcPlayHeldStagger(false);
     }
 
+    // Pin the bot in its IDLE pose for a segment (used by the PC drone segment — the bot just stands
+    // idle while drones fly out from behind it). Reuses the stagger "pinned" flag so BotBeatApproach
+    // won't drive it, but plays the idle state instead of the stagger pose.
+    [Server]
+    public void HoldIdle()
+    {
+        IsStaggered = true;          // stops BotBeatApproach from starting a run
+        HeldStaggerActive = true;
+        StaggerBeatsRemaining = 9999;
+        RpcPlayIdleHold();
+    }
+
+    [Server]
+    public void ReleaseIdle()
+    {
+        IsStaggered = false;
+        HeldStaggerActive = false;
+        StaggerBeatsRemaining = 0;
+        RpcPlayIdleHold(); // stays in idle; normal flow resumes next beat
+    }
+
+    [ClientRpc]
+    private void RpcPlayIdleHold()
+    {
+        if (animator == null) return;
+        animator.applyRootMotion = false;
+        animator.Play(idleState, 0, 0f);
+    }
+
     [Header("Drone-rush held stagger (match these to the bot's Animator state names)")]
     [Tooltip("Animator STATE name for the held stagger pose.")]
     public string heldStaggerState = "Held Stagger State";
@@ -1168,6 +1201,15 @@ public class PlayerCombat : NetworkBehaviour
 
     // Maps a logical move trigger to the Animator state/trigger name.
     // The whole Parry family shares ONE animation ("ParryIntent"). Everything else uses its own name.
+    // Play an attack animation state directly on the local player's rig (used by the PC drone segment
+    // when you punch/uppercut a drone with the arrow keys). Just the visual — no damage routing.
+    public void PlayLocalAttackAnim(string stateName)
+    {
+        if (animator == null || string.IsNullOrEmpty(stateName)) return;
+        animator.applyRootMotion = false;
+        animator.Play(stateName, 0, 0f);
+    }
+
     private string AnimName(string trigger)
     {
         switch (trigger)
@@ -2076,8 +2118,8 @@ public class PlayerCombat : NetworkBehaviour
             GUILayout.EndArea();
         }
         
-        // --- 4. CHAIN ATTACK INPUT LIST (Bottom Left) ---
-        if (RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive && !RhythmRoundManager.Instance.IsSingleMoveMode())
+        // --- 4. CHAIN ATTACK INPUT LIST (Bottom Left) --- DISABLED (removed per design).
+        if (false && RhythmRoundManager.Instance != null && RhythmRoundManager.Instance.isRoundActive && !RhythmRoundManager.Instance.IsSingleMoveMode())
         {
             float w = 240f;
             float h = 280f;

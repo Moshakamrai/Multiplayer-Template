@@ -24,6 +24,11 @@ public class PlayerCombat : NetworkBehaviour
     // so it survives until the scene reloads (which starts a fresh match).
     [SyncVar] public int MatchScore = 0;
 
+    // Server-side: this player's latest on-beat shout grade ("EXCELLENT"/"GOOD"/"BAD"), stamped by
+    // RhythmRoundManager.EvaluateAndSendFeedback right before the trade resolves. The bot reads the
+    // ATTACKING human's grade to pick its got-hit reaction + rest position (BotBeatApproach).
+    [System.NonSerialized] public string LastTimingRating = "";
+
     // Score tuning — deliberately BIG ("thousands per move") for arcade dopamine.
     public const int SCORE_ONBEAT_GOOD      = 1000;  // played the move on-beat
     public const int SCORE_ONBEAT_EXCELLENT = 2000;  // nailed the beat
@@ -362,6 +367,8 @@ public class PlayerCombat : NetworkBehaviour
     private SwordArcTrail _swordArc;
     private FighterCardVFX _cardVfx;   // per-fighter card/element VFX slots (optional)
     private string _lastSwingTrigger;  // attack trigger of the current swing, for per-card slash lookup
+    private string _resolvedAttackState = ""; // server-side: the animation state resolved for this attack
+                                              // (bot Strike/Throw randomizes across 3), reused by the RPC
 
     [Header("Sword Impact VFX (sword characters only — leave empty for glove fighters)")]
     public GameObject swordImpactVfx;
@@ -380,6 +387,9 @@ public class PlayerCombat : NetworkBehaviour
     // Detects card family and fires the matching VFX after a 0.2s delay.
     private void TriggerDefenseVfx(string trigger)
     {
+        // DRONE/FOOTBALL SEGMENT: only drone hit VFX + blood — no block/parry VFX during the rush.
+        if (DroneRushSegment.Instance != null && DroneRushSegment.Instance.SegmentActive) return;
+
         switch (trigger)
         {
             case "Block": case "Left": case "Right":
@@ -460,6 +470,15 @@ public class PlayerCombat : NetworkBehaviour
     [Tooltip("ON = the slash always flies straight at the opponent (recommended). OFF = it flies along the fighter's facing direction.")]
     public bool slashAimsAtOpponent = true;
 
+    [Header("Showcase fail-safe (VR)")]
+    [Tooltip("ON = a real on-beat SWING of the matching hand fires the move even without a shout or a " +
+             "trigger pull — so first-timers at an event who just punch still connect. Shout/trigger " +
+             "still work as before and take priority.")]
+    public bool swingLockInEnabled = true;
+    [Tooltip("Minimum hand speed (m/s) for a swing to count as a fail-safe punch. Higher = needs a more " +
+             "committed swing (avoids idle hand-drift firing moves); lower = more forgiving.")]
+    public float swingLockInMinSpeed = 1.6f;
+
     // Timed code path: waits slashSpawnDelay then spawns. (Skipped when slashViaAnimationEvent is on.)
     private void ThrowSlash(string trigger)
     {
@@ -477,6 +496,9 @@ public class PlayerCombat : NetworkBehaviour
     // Animation Event (via SlashAnimationEvent.Slash) can fire it at the exact swing frame.
     public void SpawnSlashNow()
     {
+        // DRONE/FOOTBALL SEGMENT: only drone hit VFX + blood — no slash projectiles during the rush.
+        if (DroneRushSegment.Instance != null && DroneRushSegment.Instance.SegmentActive) return;
+
         // No slash projectile when the BOT has run in to melee range (it's close enough to hit with the
         // sword directly). Block/Parry/Support and the human (who attacks from range) still spawn it.
         var approach = GetComponent<BotBeatApproach>();
@@ -617,7 +639,14 @@ public class PlayerCombat : NetworkBehaviour
     {
         if (_gloveGlow != null) _gloveGlow.FlashStrike();
         if (isLocalPlayer)
-            VRHaptics.StrikeLanded(offenseHand ? VRHaptics.Hand.Right : VRHaptics.Hand.Left);
+        {
+            var hand = offenseHand ? VRHaptics.Hand.Right : VRHaptics.Hand.Left;
+            // Guaranteed immediate JOLT the instant your hit lands (a single hard synchronous pulse),
+            // then the fuller StrikeLanded sequence for the follow-through. The lone pulse ensures you
+            // ALWAYS feel the connect even if the coroutine sequence gets starved.
+            VRHaptics.Pulse(hand, 1f, 0.14f);
+            VRHaptics.StrikeLanded(hand);
+        }
     }
     [ClientRpc] private void RpcGloveHurt()   { if (_gloveGlow != null) _gloveGlow.FlashHurt(); }
 
@@ -861,6 +890,8 @@ public class PlayerCombat : NetworkBehaviour
         // lock the power and scale by beat-closeness.
         bool  gotRelease    = false;
         float releaseCharge = 0f;
+        bool  gotSwing      = false;   // FAIL-SAFE: a raw on-beat punch (no shout, no trigger)
+        float swingSpeed    = 0f;
         if (VRCameraDriver.VRActive && _cardManager != null)
         {
             CardFamily fam = _cardManager.FamilyOfTrigger(currentMove);
@@ -870,9 +901,20 @@ public class PlayerCombat : NetworkBehaviour
             else if (isDefense) gotRelease = VRHands.ConsumeRelease(false, out releaseCharge); // left hand
             else                gotRelease = VRHands.ConsumeRelease(true, out releaseCharge)   // Support: either hand
                                           || VRHands.ConsumeRelease(false, out releaseCharge);
+
+            // FAIL-SAFE for showcases: if they neither shouted nor pulled the trigger, a real SWING of
+            // the matching hand on the beat still fires the move — so a first-timer who just punches
+            // (as they instinctively will) connects. Same hand mapping as the trigger.
+            if (!gotShout && !gotRelease && swingLockInEnabled)
+            {
+                if (isOffense)      gotSwing = VRHands.IsSwinging(true,  swingLockInMinSpeed, out swingSpeed);
+                else if (isDefense) gotSwing = VRHands.IsSwinging(false, swingLockInMinSpeed, out swingSpeed);
+                else                gotSwing = VRHands.IsSwinging(true,  swingLockInMinSpeed, out swingSpeed)
+                                            || VRHands.IsSwinging(false, swingLockInMinSpeed, out swingSpeed);
+            }
         }
 
-        if (!gotShout && !gotRelease) return; // need a shout OR the matching-hand trigger release on the beat
+        if (!gotShout && !gotRelease && !gotSwing) return; // shout OR trigger-release OR a real swing on the beat
 
         float currentVol;
         bool  usedShout = gotShout;
@@ -883,6 +925,9 @@ public class PlayerCombat : NetworkBehaviour
             // release also captured the charge at the let-go moment). A loud shout tops it up a little.
             float charge = VRHands.ConsumeCharge();
             if (gotRelease) charge = Mathf.Max(charge, releaseCharge);
+            // Swing fail-safe: derive power straight from how hard they swung (no charge built), so a
+            // committed punch still lands a solid hit even with an empty charge meter.
+            if (gotSwing) charge = Mathf.Max(charge, Mathf.Clamp01(swingSpeed / 6f));
             float shoutBonus = gotShout
                 ? Mathf.Clamp01((shoutVol - _vcm.parryVolumeThreshold) / Mathf.Max(0.01f, 1f - _vcm.parryVolumeThreshold))
                 : 0f;
@@ -1129,9 +1174,10 @@ public class PlayerCombat : NetworkBehaviour
     [Tooltip("THE single hurt animation everyone uses when taking a hit (the old random Hurt 1–4 is " +
              "gone). Match this to the SAME state BotBeatApproach plays for got-hit recovery.")]
     public string hurtState = "Knockback";
-    [Tooltip("Playback speed for the BOT's move/attack animation so its swing finishes before the beat " +
-             "(it arrives at the attack point only a hair early). ~2 = roughly double speed.")]
-    [Range(1f, 4f)] public float botMoveAnimSpeed = 2f;
+    [Tooltip("Playback speed for the BOT's move/attack animation. Now that the swing starts ~windUpTime " +
+             "(0.62s) before the beat WHILE already planted, it plays at natural speed (1) so its impact " +
+             "lands on the beat instead of finishing early. Nudge up only if the swing still lands late.")]
+    [Range(1f, 4f)] public float botMoveAnimSpeed = 1f;
 
     [ClientRpc]
     private void RpcPlayHeldStagger(bool on)
@@ -1176,6 +1222,20 @@ public class PlayerCombat : NetworkBehaviour
             default:
                 return trigger;
         }
+    }
+
+    // The BOT plays one of THREE random animations for any Strike/Throw-family attack so its offense
+    // reads with variety. Picked ONCE on the server per attack and threaded through the RPC so every
+    // view plays the same one (a per-view roll would desync the bot's local + remote animations).
+    // Returns "" for anything that should keep the NORMAL trigger-driven animation (humans, and the
+    // bot's Block/Parry/Dash/Support) — an empty string means "no random override, use the usual path".
+    private static readonly string[] BotStrikeThrowAnims = { "Attack 1", "Attack 2", "Jab" };
+    private string ResolveBotStrikeThrowAnim(string trigger)
+    {
+        var fam = _cardManager != null ? _cardManager.FamilyOfTrigger(trigger) : CardFamily.Support;
+        if (GetComponent<BotController>() != null && (fam == CardFamily.Strike || fam == CardFamily.Throw))
+            return BotStrikeThrowAnims[Random.Range(0, BotStrikeThrowAnims.Length)];
+        return ""; // not a bot Strike/Throw → no override; the normal AnimName/trigger path is used
     }
 
     private IEnumerator PerformAttack(string trigger)
@@ -1434,9 +1494,13 @@ public class PlayerCombat : NetworkBehaviour
 
         if (!string.IsNullOrEmpty(attack))
         {
-            // Map the logical trigger to its Animator state name (see AnimName).
+            // Bot Strike/Throw only: pick ONE of the 3 random anims here (server-side), remember it so
+            // the RPC broadcasts the SAME pick. Empty for everything else = keep the normal path.
+            _resolvedAttackState = ResolveBotStrikeThrowAnim(attack);
+
+            // Play the animation: the random state if one was picked, otherwise the normal AnimName state.
             if (animator != null)
-                animator.Play(AnimName(attack), 0, 0f);
+                animator.Play(!string.IsNullOrEmpty(_resolvedAttackState) ? _resolvedAttackState : AnimName(attack), 0, 0f);
 
             if (isLocalPlayer || (isServer && connectionToClient == null))
             {
@@ -1468,9 +1532,14 @@ public class PlayerCombat : NetworkBehaviour
             var h = weaponGloveRight.GetComponent<HitboxProperties>();
             if (h != null) h.currentDamage = damage;
         }
-        RpcTriggerAttack(t);
+        // Resolve the state to broadcast HERE on the server. For the bot (server-owned) ExecuteMoveEffect
+        // already ran server-side and picked its random Strike/Throw anim into _resolvedAttackState, so
+        // reuse that exact pick. For a human (whose ExecuteMoveEffect ran on THEIR client, not here) send
+        // empty and let each remote view map the trigger itself — no cross-context stale value.
+        bool isBot = GetComponent<BotController>() != null;
+        RpcTriggerAttack(t, isBot ? _resolvedAttackState : "");
     }
-    [ClientRpc] void RpcTriggerAttack(string t)
+    [ClientRpc] void RpcTriggerAttack(string t, string resolvedState)
     {
         if (isLocalPlayer) return;
         // A held-stagger fighter (drone segment) must never play a move anim — that's what made the bot
@@ -1478,7 +1547,14 @@ public class PlayerCombat : NetworkBehaviour
         if (HeldStaggerActive) return;
         if (animator != null)
         {
-            animator.SetTrigger(AnimName(t));
+            // Only the bot's random Strike/Throw pick comes through as a non-empty resolvedState — play
+            // that state directly so every view shows the SAME random anim. EVERYTHING ELSE (humans, and
+            // the bot's Block/Parry/Dash) keeps the ORIGINAL trigger-driven transition (SetTrigger), so
+            // block/parry animations fire through the Animator's transition graph exactly as before.
+            if (!string.IsNullOrEmpty(resolvedState))
+                animator.Play(resolvedState, 0, 0f);
+            else
+                animator.SetTrigger(AnimName(t));
             // BOT only: speed up the move animation so the swing FINISHES before the beat (it arrives at
             // the attack point only a fraction of a second early). Reset back to 1 shortly after.
             if (GetComponent<BotController>() != null)
@@ -1545,6 +1621,11 @@ public class PlayerCombat : NetworkBehaviour
         RpcTriggerHurt(hurtState, hurtDelay, damage, hitPower01);
         RpcShowDamageNumber(damage, isOpponentDamage);
         RpcGloveHurt();
+        // GUARANTEED hurt sound: fire it HERE, at the single damage chokepoint, so EVERY hit is
+        // audible no matter which trade branch caused it (normal hit, trap, cage, failed reverse/clutch
+        // self-damage, a reflected counter landing on the attacker, combo-mode hits…). Individual call
+        // sites used to each remember to call this and several didn't, leaving silent hits.
+        if (damage > 0 && connectionToClient != null) TargetPlaySuccessSound("Hurt");
         if (knockbackDir != default) RpcNudgeBack(knockbackDir);
     }
 
@@ -1800,28 +1881,11 @@ public class PlayerCombat : NetworkBehaviour
             GUI.color = Color.white;
         }
 
-        // --- HURT FLASH (red vignette) ---
-        if (_hurtFlashFade > 0)
-        {
-            _hurtFlashFade -= Time.deltaTime * 2.5f;
-            float flashAlpha = Mathf.Clamp01(_hurtFlashFade) * 0.65f;
-            GUI.color = new Color(1f, 0.1f, 0.1f, flashAlpha);
-            GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), _whiteTexture);
-            GUI.color = Color.white;
-
-            float vignetteAlpha = Mathf.Clamp01(_hurtFlashFade) * 0.4f;
-            float vignetteSize = Mathf.Lerp(100f, 300f, Mathf.Clamp01(_hurtFlashFade));
-            GUI.color = new Color(0.8f, 0f, 0f, vignetteAlpha);
-            for (int i = 0; i < 4; i++)
-            {
-                float offset = vignetteSize * (1f - Mathf.Clamp01(_hurtFlashFade));
-                if (i == 0) GUI.DrawTexture(new Rect(-offset, -offset, Screen.width + offset * 2, vignetteSize), _whiteTexture);
-                else if (i == 1) GUI.DrawTexture(new Rect(-offset, Screen.height - vignetteSize + offset, Screen.width + offset * 2, vignetteSize), _whiteTexture);
-                else if (i == 2) GUI.DrawTexture(new Rect(-offset, 0, vignetteSize, Screen.height), _whiteTexture);
-                else GUI.DrawTexture(new Rect(Screen.width - vignetteSize + offset, 0, vignetteSize, Screen.height), _whiteTexture);
-            }
-            GUI.color = Color.white;
-        }
+        // --- HURT FLASH PERMANENTLY REMOVED ---
+        // The full-screen 65%-opacity red wash + red edge vignette on every hit — eye-blinding, strobes
+        // constantly in fast sections. Removed for good; blood-on-hit is the hit feedback. (Fade var
+        // still ticks down in case anything else reads it.)
+        if (_hurtFlashFade > 0) _hurtFlashFade -= Time.deltaTime * 2.5f;
 
         // --- PARRY/BLOCK SUCCESS FLASH (cyan vignette) ---
         if (_successFlashFade > 0)

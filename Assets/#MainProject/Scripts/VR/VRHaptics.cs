@@ -126,6 +126,14 @@ public static class VRHaptics
     /// You got knocked out: long rumble decaying to silence.
     public static void Knockout() => Play(KnockoutSeq());
 
+    /// Drone-rush BALL PUNCH: a single sharp IMPACT JOLT (not a buzz), harder the more power you put
+    /// in — knuckle crack → fast decay. This is the "I hit something solid" feel.
+    public static void BallImpact(Hand strikingHand, float power01) => Play(BallImpactSeq(strikingHand, Mathf.Clamp01(power01)));
+
+    /// One crisp tick the instant the ball enters strike range — a "NOW" cue, fired ONCE per ball
+    /// (not every frame), so the continuous approach buzz is gone.
+    public static void BallReady(Hand hand) => Pulse(hand, 0.5f, 0.05f);
+
     /// Opponent knocked out: rising triple tick.
     public static void Victory() => Play(VictorySeq());
 
@@ -220,6 +228,18 @@ public static class VRHaptics
             Pulse(Hand.Both, Mathf.Lerp(0.30f, 1.0f, i / 3f), 0.06f);
             yield return new WaitForSeconds(0.07f);
         }
+    }
+
+    // A solid ball strike: hard knuckle crack on the striking hand scaled by power, then two quick
+    // decays so it reads as ONE impact that radiates and dies — never a sustained rumble.
+    private static IEnumerator BallImpactSeq(Hand strikingHand, float power)
+    {
+        float peak = Mathf.Lerp(0.6f, 1.0f, power);
+        Pulse(strikingHand, peak, 0.09f);            // the crack
+        yield return new WaitForSeconds(0.05f);
+        Pulse(strikingHand, peak * 0.5f, 0.05f);     // first decay
+        yield return new WaitForSeconds(0.05f);
+        Pulse(strikingHand, peak * 0.22f, 0.04f);    // tail
     }
 
     private static IEnumerator KnockoutSeq()

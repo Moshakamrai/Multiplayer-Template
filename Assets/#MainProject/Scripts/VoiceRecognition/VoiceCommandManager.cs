@@ -202,20 +202,22 @@ public class VoiceCommandManager : NetworkBehaviour
             // STRICT matching (Match): an exact word, OR a near-exact fuzzy match where the bar is
             // higher for SHORT words (short words false-trigger easily). Loose junk aliases like
             // "near"/"tall"/"sweet"/"over" were removed — they were what casual talk kept tripping.
+            // Football aliases (World Cup event build): SHOOT→Cross, WALL→Block, COUNTER→Parry,
+            // NUTMEG→Fake, HEADER→Uppercut. All English words Vosk hears reliably.
             if      (Match(word, "jab")     || Match(word, "punch"))   { trigger = "Jab"; recognized = true; }
-            else if (Match(word, "cross"))                            { trigger = "Cross"; recognized = true; }
+            else if (Match(word, "cross")   || Match(word, "shoot"))  { trigger = "Cross"; recognized = true; }
             else if (Match(word, "hook"))                             { trigger = "Hook"; recognized = true; }
-            else if (Match(word, "block"))                            { trigger = "Block"; recognized = true; }
-            else if (Match(word, "reflect") || Match(word, "parry"))  { trigger = "ParryIntent"; recognized = true; }
+            else if (Match(word, "block")   || Match(word, "wall"))   { trigger = "Block"; recognized = true; }
+            else if (Match(word, "reflect") || Match(word, "parry") || Match(word, "counter")) { trigger = "ParryIntent"; recognized = true; }
             else if (Match(word, "boom")    || Match(word, "crush"))  { trigger = "UnbreakablePunch"; recognized = true; }
             else if (Match(word, "left"))   { trigger = "Left";  dashDir = Vector3.left;  recognized = true; }
             else if (Match(word, "right"))  { trigger = "Right"; dashDir = Vector3.right; recognized = true; }
             // ── NEW CARDS (Basic) ──
             else if (Match(word, "grapple"))                          { trigger = "Grapple"; recognized = true; }
-            else if (Match(word, "fake"))                             { trigger = "Fake"; recognized = true; }
+            else if (Match(word, "fake")    || Match(word, "nutmeg")) { trigger = "Fake"; recognized = true; }
             else if (Match(word, "clutch"))                           { trigger = "Clutch"; recognized = true; }
             // ── NEW CARDS (Advanced) ──
-            else if (Match(word, "uppercut"))                         { trigger = "Uppercut"; recognized = true; }
+            else if (Match(word, "uppercut")|| Match(word, "header")) { trigger = "Uppercut"; recognized = true; }
             else if (Match(word, "sweep"))                            { trigger = "Sweep"; recognized = true; }
             else if (Match(word, "focus"))                            { trigger = "Focus"; recognized = true; }
             else if (Match(word, "taunt"))                            { trigger = "Taunt"; recognized = true; }

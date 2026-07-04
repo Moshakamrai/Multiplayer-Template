@@ -20,7 +20,9 @@ public class DroneRushSegment : NetworkBehaviour
     public static DroneRushSegment Instance;
 
     [Header("Prefabs (assign your portal + drone)")]
-    [Tooltip("Portal prefab spawned near the bot for the segment.")]
+    [Tooltip("Portal for the segment. Accepts EITHER a prefab (spawned/destroyed as before) OR a scene " +
+             "object like the goalpost (just toggled on/off with the segment — placed where you put it, " +
+             "never moved). Scene objects are auto-hidden on load so the goal only appears mid-rush.")]
     public GameObject portalPrefab;
     [Tooltip("Drone prefab — must have the Drone component + a TrailRenderer.")]
     public GameObject dronePrefab;
@@ -59,6 +61,23 @@ public class DroneRushSegment : NetworkBehaviour
              "hit one, then the next. Bigger = more spaced out.")]
     public float minArrivalGap = 0.7f;
 
+    [Header("World Cup event (football feel)")]
+    [Tooltip("Stadium crowd ambience looped (2D) for the whole segment. Optional — silent if empty.")]
+    public AudioClip crowdLoop;
+    public float crowdVolume = 0.35f;
+    [Tooltip("Crowd roar when a punched ball smashes into the bot — the GOAL moment. Optional.")]
+    public AudioClip goalRoar;
+    public float goalRoarVolume = 0.9f;
+    [Tooltip("Crowd 'ooooh' when a ball gets past you. Optional.")]
+    public AudioClip missOoh;
+    public float missOohVolume = 0.7f;
+    [Tooltip("Show the world-space GOAL! text pop in front of the player when a ball hits the bot.")]
+    public bool showGoalText = true;
+    [Tooltip("Goal mouth behind the bot (assign an empty at the centre of your goalpost). When set, " +
+             "well-timed punched balls fly INTO it (GOAL!), sloppy ones veer wide (WIDE!). Bot damage " +
+             "is unchanged — it's applied at the punch. Leave empty for the classic bounce-to-bot.")]
+    public Transform goalTarget;
+
     private int _nextThreshold;   // next score multiple of scoreTrigger that fires a segment
     private bool _running;         // a segment is currently in progress
     private GameObject _portal;
@@ -73,7 +92,15 @@ public class DroneRushSegment : NetworkBehaviour
     // (during the rush the player should ONLY be hitting drones).
     [SyncVar] public bool SegmentActive = false;
 
-    private void Awake() { if (Instance == null) Instance = this; }
+    // Is the portal slot holding a live SCENE object (the goalpost) rather than a prefab asset?
+    private bool PortalIsSceneObject => portalPrefab != null && portalPrefab.scene.IsValid();
+
+    private void Awake()
+    {
+        if (Instance == null) Instance = this;
+        // The scene goalpost must start hidden — it only exists during a rush.
+        if (PortalIsSceneObject) portalPrefab.SetActive(false);
+    }
 
     // Called by PlayerCombat on the SERVER when a fighter's score changes. Fires a segment EVERY time
     // the score crosses a new multiple of scoreTrigger (40k, 80k, 120k…), not just once.
@@ -294,7 +321,13 @@ public class DroneRushSegment : NetworkBehaviour
     [ClientRpc]
     private void RpcOpenPortal(Vector3 pos, Quaternion rot)
     {
+        StartCrowd();
         if (portalPrefab == null) return;
+        if (PortalIsSceneObject)
+        {
+            portalPrefab.SetActive(true); // goalpost lives in the scene — just reveal it where it sits
+            return;
+        }
         if (_portal != null) Destroy(_portal);
         _portal = Instantiate(portalPrefab, pos, rot);
     }
@@ -302,8 +335,117 @@ public class DroneRushSegment : NetworkBehaviour
     [ClientRpc]
     private void RpcClosePortal()
     {
+        StopCrowd();
+        if (PortalIsSceneObject) portalPrefab.SetActive(false);
         if (_portal != null) Destroy(_portal, 0.3f);
         _combo = 0;
+    }
+
+    // ── World Cup event: crowd audio + GOAL! pop (all local/cosmetic) ──────────────────────────
+    private static AudioSource _crowdSrc;   // looping stadium ambience
+    private static AudioSource _eventSrc;   // one-shot roars/oohs
+    private Coroutine _crowdFade;
+
+    private static AudioSource MakeSfxSource(string name)
+    {
+        var go = new GameObject(name);
+        DontDestroyOnLoad(go);
+        var src = go.AddComponent<AudioSource>();
+        src.playOnAwake = false;
+        src.spatialBlend = 0f; // 2D — always clearly audible
+        return src;
+    }
+
+    private void StartCrowd()
+    {
+        if (crowdLoop == null) return;
+        if (_crowdSrc == null) _crowdSrc = MakeSfxSource("~CrowdLoop");
+        if (_crowdFade != null) { StopCoroutine(_crowdFade); _crowdFade = null; }
+        _crowdSrc.clip = crowdLoop;
+        _crowdSrc.loop = true;
+        _crowdSrc.volume = crowdVolume;
+        _crowdSrc.Play();
+    }
+
+    private void StopCrowd()
+    {
+        if (_crowdSrc == null || !_crowdSrc.isPlaying) return;
+        if (_crowdFade != null) StopCoroutine(_crowdFade);
+        _crowdFade = StartCoroutine(FadeOutCrowd(0.8f));
+    }
+
+    private IEnumerator FadeOutCrowd(float dur)
+    {
+        float startVol = _crowdSrc.volume;
+        for (float t = 0f; t < dur && _crowdSrc != null; t += Time.unscaledDeltaTime)
+        {
+            _crowdSrc.volume = Mathf.Lerp(startVol, 0f, t / dur);
+            yield return null;
+        }
+        if (_crowdSrc != null) _crowdSrc.Stop();
+        _crowdFade = null;
+    }
+
+    // Goal roars + oohs share ONE gate: while either is still playing, new ones are DROPPED (not
+    // queued) — a dense rush was stacking half a dozen overlapping roars into mush.
+    private float _crowdSfxBusyUntil;
+    private void PlayCrowdOneShot(AudioClip clip, float volume)
+    {
+        if (clip == null) return;
+        if (Time.unscaledTime < _crowdSfxBusyUntil) return; // previous roar/ooh still going — skip it
+        if (_eventSrc == null) _eventSrc = MakeSfxSource("~CrowdEvents");
+        _eventSrc.PlayOneShot(clip, volume);
+        _crowdSfxBusyUntil = Time.unscaledTime + clip.length;
+    }
+
+    // Big world-space "GOAL!" that pops in front of the player's face (OnGUI doesn't render in the
+    // headset, so this has to live in the world). Rises + fades over ~1.1s, then cleans itself up.
+    private void ShowGoalPop(bool finisher, int combo)
+    {
+        string text = finisher ? "GOOOAL!!!" : (combo >= 2 ? $"GOAL!  x{combo}" : "GOAL!");
+        Color col = finisher ? new Color(1f, 0.75f, 0.1f) : new Color(1f, 0.95f, 0.3f);
+        ShowPopText(text, col, finisher ? 1.5f : 1f);
+    }
+
+    private void ShowPopText(string text, Color col, float sizeMul)
+    {
+        var cam = CachedCamera.Main;
+        if (cam == null) return;
+
+        var go = new GameObject("~GoalPop");
+        var tm = go.AddComponent<TextMesh>();
+        tm.text = text;
+        tm.anchor = TextAnchor.MiddleCenter;
+        tm.alignment = TextAlignment.Center;
+        tm.fontSize = 120;
+        tm.characterSize = 0.02f * sizeMul;
+        tm.fontStyle = FontStyle.Bold;
+        tm.color = col;
+        var font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        if (font != null) { tm.font = font; go.GetComponent<MeshRenderer>().material = font.material; }
+
+        Vector3 fwd = cam.transform.forward; fwd.y = 0f;
+        fwd = fwd.sqrMagnitude > 0.001f ? fwd.normalized : Vector3.forward;
+        go.transform.position = cam.transform.position + fwd * 2.2f + Vector3.up * 0.35f;
+        go.transform.rotation = Quaternion.LookRotation(go.transform.position - cam.transform.position);
+        StartCoroutine(GoalPopAnim(go.transform, tm));
+    }
+
+    private IEnumerator GoalPopAnim(Transform t, TextMesh tm)
+    {
+        const float dur = 1.1f;
+        Vector3 baseScale = t.localScale;
+        float t0 = Time.unscaledTime;
+        while (Time.unscaledTime - t0 < dur && t != null)
+        {
+            float p = (Time.unscaledTime - t0) / dur;
+            float pop = 0.6f + 0.4f * Mathf.Sin(Mathf.Clamp01(p * 4f) * Mathf.PI * 0.5f); // fast pop-in
+            t.localScale = baseScale * pop;
+            t.position += Vector3.up * (0.3f * Time.unscaledDeltaTime);                    // gentle rise
+            var c = tm.color; c.a = 1f - Mathf.Clamp01((p - 0.6f) / 0.4f); tm.color = c;   // late fade
+            yield return null;
+        }
+        if (t != null) Destroy(t.gameObject);
     }
 
     // ── Local client: spawn + drive the drones ─────────────────────────────────────────────────
@@ -385,7 +527,10 @@ public class DroneRushSegment : NetworkBehaviour
         var go = Instantiate(dronePrefab, spawnPos, Quaternion.identity);
         var drone = go.GetComponent<Drone>();
         if (drone == null) { Destroy(go); return; }
-        drone.Init(player, bot, arriveOffset, arriveTime, this, isRight, isFinisher);
+        // Goal mouth: explicit goalTarget if assigned, else the scene goalpost in the portal slot.
+        Transform goal = goalTarget != null ? goalTarget
+                       : (PortalIsSceneObject ? portalPrefab.transform : null);
+        drone.Init(player, bot, arriveOffset, arriveTime, this, isRight, isFinisher, goal);
     }
 
     private Transform FindBotTransform(Vector3 botPos)
@@ -396,10 +541,17 @@ public class DroneRushSegment : NetworkBehaviour
     }
 
     // ── Drone outcome callbacks (local) → route authoritative results to the server ─────────────
+    // A punch connected — that keeps the combo alive, but SCORING waits: with real ball physics the
+    // shot's fate (net / bot / dead in the turf) isn't known until the ball actually gets there.
     public void OnDronePunched(Drone d, float power, float onBeat, bool rightHand, bool finisher)
     {
         _combo++;
-        CmdDroneHit(power, onBeat, _combo, finisher);
+    }
+
+    // The struck ball died on the ground / flew wide — small consolation points, no bot damage.
+    public void OnBallFellShort(Drone d)
+    {
+        if (d != null) CmdDroneHit(d.PunchPower, d.PunchOnBeat, _combo, d.IsFinisher, 0);
     }
 
     public void OnDroneDodged(Drone d)
@@ -411,17 +563,23 @@ public class DroneRushSegment : NetworkBehaviour
     {
         _combo = 0;                       // a true miss breaks the in-segment combo
         ScreenSpark.Flash();              // local screen spark (no real damage to the player)
+        PlayCrowdOneShot(missOoh, missOohVolume); // the crowd winces
         CmdDroneMissed();                 // the drone got past you → the BOT scores
     }
 
-    public void OnDroneHitBot(Drone d)
+    public void OnDroneHitBot(Drone d, bool scored)
     {
-        // Visual only — the actual damage was applied server-side in CmdDroneHit when it was punched.
-        // The bot's own hit VFX + blood play via its normal damage path.
+        // The ball's REAL destination just resolved — apply damage + points now (tier 2 = in the net,
+        // tier 1 = slammed into the bot). Only a goal gets the roar + GOAL! pop; a body hit is carried
+        // by the bot's own hit VFX + blood.
+        if (d != null) CmdDroneHit(d.PunchPower, d.PunchOnBeat, _combo, d.IsFinisher, scored ? 2 : 1);
+        if (!scored) return;
+        PlayCrowdOneShot(goalRoar, goalRoarVolume);
+        if (showGoalText) ShowGoalPop(d != null && d.IsFinisher, _combo);
     }
 
     [Command(requiresAuthority = false)]
-    private void CmdDroneHit(float power, float onBeat, int combo, bool finisher, NetworkConnectionToClient sender = null)
+    private void CmdDroneHit(float power, float onBeat, int combo, bool finisher, int tier, NetworkConnectionToClient sender = null)
     {
         var human = sender != null && sender.identity != null ? sender.identity.GetComponent<PlayerCombat>() : null;
         if (human == null) return;
@@ -432,12 +590,18 @@ public class DroneRushSegment : NetworkBehaviour
         onBeat = Mathf.Clamp01(onBeat);
         float comboMult = 1f + Mathf.Min(combo, 10) * 0.15f; // up to ~2.5× at a 10-combo
 
-        int dmg = Mathf.Max(1, Mathf.RoundToInt(droneBaseDamage * (0.5f + power) * (0.5f + onBeat)));
+        // Tier drives reward: a shanked ball that falls short never touches the bot (no damage,
+        // scraps of points); reaching the bot pays properly; putting it in the NET pays extra.
+        float tierMult = tier >= 2 ? 1.75f : (tier == 1 ? 1f : 0.35f);
         int pts = Mathf.RoundToInt((finisher ? finisherPoints : dronePunchPoints)
-                                   * (0.5f + power) * (0.5f + onBeat) * comboMult);
+                                   * (0.5f + power) * (0.5f + onBeat) * comboMult * tierMult);
 
-        bot.TakeDroneHit(dmg);            // blood spill only — no hurt anim, no knockback (stays staggered)
-        human.AddScore(pts, "drone bounce");
+        if (tier >= 1)
+        {
+            int dmg = Mathf.Max(1, Mathf.RoundToInt(droneBaseDamage * (0.5f + power) * (0.5f + onBeat)));
+            bot.TakeDroneHit(dmg);        // blood spill only — no hurt anim, no knockback (stays staggered)
+        }
+        human.AddScore(pts, tier >= 2 ? "GOAL" : (tier == 1 ? "ball into bot" : "shot fell short"));
     }
 
     [Command(requiresAuthority = false)]

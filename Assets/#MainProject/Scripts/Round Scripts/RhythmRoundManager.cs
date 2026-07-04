@@ -28,7 +28,11 @@ public class RhythmRoundManager : NetworkBehaviour
     [SyncVar] private double _startTime;
 
     [Header("Animation Sync")]
-    public float windUpTime = 0.53f;
+    [Tooltip("How many seconds BEFORE the beat the attack animation starts (wind-up). Larger = the swing " +
+             "begins earlier so it plays at natural speed and its IMPACT lands on the beat. It can start " +
+             "WHILE the bot is still running in (it doesn't need to be planted first) — the swing then " +
+             "plays over the last stretch of the approach. Set near the swing clip's pre-impact length.")]
+    public float windUpTime = 0.85f;
     [Tooltip("How many seconds before the beat the bot decides its move and starts approaching. " +
              "Must be >= windUpTime so the attack animation can still fire at wind-up. Raise this if " +
              "the bot spawns FAR from the player so it has enough runway to reach the attack point on " +
@@ -58,7 +62,7 @@ public class RhythmRoundManager : NetworkBehaviour
     // FORCED drone segments from beatmap density: runs of 3+ beats each <1.0s apart. Each entry is the
     // list of beat times in that dense run. When the song reaches one, a drone segment fires with one
     // drone per beat. Detected at map load; consumed (removed) as each fires so it only triggers once.
-    private const float DENSE_GAP = 1.35f;      // beats closer than this count as part of a dense run
+    private const float DENSE_GAP = 1.4f;       // beats closer than this count as part of a dense run
     private const int   DENSE_MIN = 2;          // a run needs at least this many beats (2+ beats <1.2s = drones)
     private readonly List<List<float>> _denseRuns = new List<List<float>>();
 
@@ -134,6 +138,14 @@ public class RhythmRoundManager : NetworkBehaviour
     [Tooltip("Optional manual point the bot steps to for its attack. Assign an empty GameObject in the scene. " +
              "If empty, the bot computes a point in front of the player instead.")]
     public Transform botAttackPosition;
+    [Tooltip("Bot REST spot after being hit off a GOOD-timed shout — place this at MEDIUM range " +
+             "(between home and the player). Assign an empty GameObject. Empty = returns home as before. " +
+             "(EXCELLENT hits always knock him all the way back home.)")]
+    public Transform botGoodHitPosition;
+    [Tooltip("Bot REST spot when it DIDN'T get hit (landed/defended/clash) or only took a BAD-timed " +
+             "hit — place this CLOSEST to the player (he stays in your face). Assign an empty " +
+             "GameObject. Empty = returns home as before.")]
+    public Transform botBadOrNoHitPosition;
 
     // Human + bot home spots. Use the assigned Start Position Transforms; fall back to the old
     // fixed coords if unassigned. Drive round setup, the bot spawn, AND the LateUpdate home-lock.
@@ -1442,6 +1454,11 @@ public class RhythmRoundManager : NetworkBehaviour
         var m2 = p2.PeekNextMove();
 
         // --- NEW: GRADE TIMING BEFORE DAMAGE ---
+        // Clear the grade before regrading: EvaluateAndSendFeedback bails out early (no write) when a
+        // player has no move/spike to grade this beat, which used to leave LastTimingRating stuck on
+        // whatever it last was — the bot's got-hit reaction could then read an EXCELLENT/BAD from a
+        // totally different, older beat. Clearing first means "nothing to grade" reads as "", not stale.
+        p1.LastTimingRating = ""; p2.LastTimingRating = "";
         EvaluateAndSendFeedback(p1, m1);
         EvaluateAndSendFeedback(p2, m2);
 
@@ -1456,31 +1473,42 @@ public class RhythmRoundManager : NetworkBehaviour
             int dmgFrom1 = p1.lastVocalSpikeTime > 0f ? ComputeComboDamage(m1.attack, p1Off, p1.lastVocalSpikeVolume) : 0;
             int dmgFrom2 = p2.lastVocalSpikeTime > 0f ? ComputeComboDamage(m2.attack, p2Off, p2.lastVocalSpikeVolume) : 0;
 
+            // Grade THIS trade's attacker straight from the offset that actually decided it (p1Off/
+            // p2Off above), not from PlayerCombat.LastTimingRating — that field is only written when
+            // EvaluateAndSendFeedback finds a move to grade, and on beats with no fresh shout it's
+            // stale from whenever it last changed. Reading it here could report an old EXCELLENT/BAD
+            // for a completely different hit, sending the bot to the wrong rest spot.
+            string GradeFromOffset(float off) => off <= 0.18f ? "EXCELLENT" : (off <= 0.45f ? "GOOD" : "BAD");
+
             if (p1Off < p2Off && dmgFrom1 > 0)
             {
                 // p1 wins the timing clash — only p2 takes damage
                 if (p1.connectionToClient != null) p1.TargetPlaySuccessSound("Attack");
-                if (p2.connectionToClient != null) p2.TargetPlaySuccessSound("Hurt");
                 PlayHitParticle(p2.transform.position);
-                p2.TakeDamage(dmgFrom1, (p2.transform.position - p1.transform.position).normalized);
+                p2.TakeDamage(dmgFrom1, (p2.transform.position - p1.transform.position).normalized); // plays Hurt itself
                 RpcLogCombatTrade(pc1.PlayerName, FormatMove(m1), 1, 0,
                                   pc2.PlayerName, FormatMove(m2), -1, dmgFrom1, "Better timing wins");
+                ReportBotTradeOutcome(p1, p2, 0, dmgFrom1, GradeFromOffset(p1Off));
             }
             else if (p2Off < p1Off && dmgFrom2 > 0)
             {
                 // p2 wins the timing clash — only p1 takes damage
                 if (p2.connectionToClient != null) p2.TargetPlaySuccessSound("Attack");
-                if (p1.connectionToClient != null) p1.TargetPlaySuccessSound("Hurt");
                 PlayHitParticle(p1.transform.position);
-                p1.TakeDamage(dmgFrom2, (p1.transform.position - p2.transform.position).normalized);
+                p1.TakeDamage(dmgFrom2, (p1.transform.position - p2.transform.position).normalized); // plays Hurt itself
                 RpcLogCombatTrade(pc1.PlayerName, FormatMove(m1), -1, dmgFrom2,
                                   pc2.PlayerName, FormatMove(m2), 1, 0, "Better timing wins");
+                ReportBotTradeOutcome(p1, p2, dmgFrom2, 0, GradeFromOffset(p2Off));
             }
             else
             {
-                // Tie or both missed — no damage
+                // Tie or both missed — no damage. Still play a whoosh for whoever actually swung so the
+                // beat isn't silent (a swing that connects with nothing still makes a sound).
+                if (!string.IsNullOrEmpty(m1.attack) && p1.connectionToClient != null) p1.TargetPlaySuccessSound("Attack");
+                if (!string.IsNullOrEmpty(m2.attack) && p2.connectionToClient != null) p2.TargetPlaySuccessSound("Attack");
                 RpcLogCombatTrade(pc1.PlayerName, FormatMove(m1), 0, 0,
                                   pc2.PlayerName, FormatMove(m2), 0, 0, "Timing tied");
+                ReportBotTradeOutcome(p1, p2, 0, 0, "");
             }
             return;
         }
@@ -1555,7 +1583,17 @@ public class RhythmRoundManager : NetworkBehaviour
                 var approach = botPc.GetComponent<BotBeatApproach>();
                 if (approach != null && approach.IsApproaching)
                 {
-                    if (botTook > 0)              approach.ReportOutcome(BotBeatApproach.Outcome.GotHit);
+                    if (botTook > 0)
+                    {
+                        // The bot's got-hit reaction depends on the ATTACKING human's shout grade:
+                        // EXCELLENT → classic knockback home; GOOD → "Hurt 2" + closer rest point;
+                        // BAD → knockback but rests at the bad/no-hit point.
+                        var attacker = p1IsBot ? p2 : p1;
+                        string grade = attacker != null ? attacker.LastTimingRating : "";
+                        if      (grade == "GOOD")      approach.ReportOutcome(BotBeatApproach.Outcome.GotHitGood);
+                        else if (grade == "EXCELLENT") approach.ReportOutcome(BotBeatApproach.Outcome.GotHit);
+                        else                           approach.ReportOutcome(BotBeatApproach.Outcome.GotHitBad);
+                    }
                     else if (botDealt > 0)        approach.ReportOutcome(BotBeatApproach.Outcome.LandedHit);
                     else if (botPlayedDefense)    approach.ReportOutcome(BotBeatApproach.Outcome.Defended); // blocked/parried/dodged a hit → confident retreat
                     else                          approach.ReportOutcome(BotBeatApproach.Outcome.Clash);    // neutral whiff
@@ -1731,10 +1769,9 @@ public class RhythmRoundManager : NetworkBehaviour
                 if (attacker.activeTraitId == "trickster")
                     trapDmg *= 2;
                 trapDmg = ApplyTraitMultiplier(trapDmg);
-                defender.TakeDamage(trapDmg, isOpponentDamage: true);
+                defender.TakeDamage(trapDmg, isOpponentDamage: true); // plays Hurt itself
                 damageDealt = trapDmg;
                 tradeReason = "Trap sprung";
-                if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Hurt");
                 PlayHitParticle(defender.transform.position);
                 defender.HasPendingTrap = false;
                 return 1;
@@ -1749,10 +1786,9 @@ public class RhythmRoundManager : NetworkBehaviour
             if (attacker.activeTraitId == "trickster")
                 cageDmg *= 2;
             cageDmg = ApplyTraitMultiplier(cageDmg);
-            defender.TakeDamage(cageDmg, isOpponentDamage: true);
+            defender.TakeDamage(cageDmg, isOpponentDamage: true); // plays Hurt itself
             damageDealt = cageDmg;
             tradeReason = "Cage punished";
-            if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Hurt");
             PlayHitParticle(defender.transform.position);
             defender.HasPendingCage = false;
             return 1;
@@ -1766,6 +1802,8 @@ public class RhythmRoundManager : NetworkBehaviour
             // instead of passing through the winner's attack.
             Vector3 clashMid = Vector3.Lerp(attacker.transform.position, defender.transform.position, 0.5f) + Vector3.up * 1.2f;
             attacker.ServerDissolveSlash(clashMid);
+            // A whiffed swing still made a sound — play the attacker's whoosh so the beat is never silent.
+            if (attacker.connectionToClient != null) attacker.TargetPlaySuccessSound("Attack");
             tradeReason = $"{atk} was interrupted";
             return 0;
         }
@@ -1791,10 +1829,9 @@ public class RhythmRoundManager : NetworkBehaviour
                 else tradeReason = "Fake slipped through";
                 if (attacker.activeTraitId == "trickster") fakeDmg *= 2;
                 fakeDmg = ApplyTraitMultiplier(fakeDmg);
-                if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Hurt");
                 PlayHitParticle(defender.transform.position);
                 Vector3 dir = (defender.transform.position - attacker.transform.position).normalized;
-                defender.TakeDamage(fakeDmg, dir, isOpponentDamage: true);
+                defender.TakeDamage(fakeDmg, dir, isOpponentDamage: true); // plays Hurt itself
                 damageDealt = fakeDmg;
                 return 1;
             }
@@ -2215,7 +2252,7 @@ public class RhythmRoundManager : NetworkBehaviour
 
                 if (atk == "UnbreakablePunch" || atk == "Overclock") _heavyHitThisBeat = true;
                 if (attacker.connectionToClient != null) attacker.TargetPlaySuccessSound("Attack");
-                if (defender.connectionToClient != null) defender.TargetPlaySuccessSound("Hurt");
+                // (defender's Hurt sound now fires inside TakeDamage below — no explicit call needed)
                 attacker.GloveStrikeFlash(atk); // gloves flare + haptic on the striking hand
                 // ON-HIT VFX REMOVED — only BLOOD plays on a landed hit now (BloodOnHit watches the
                 // damage). The sword-impact burst and the per-family hit spark are disabled per design.
@@ -2938,6 +2975,32 @@ public class RhythmRoundManager : NetworkBehaviour
         return Mathf.Max(1, Mathf.RoundToInt(baseDmg * timingMult * powerMult));
     }
 
+    // Tell the bot's run-in how a trade went so it picks the right recovery anim + rest spot. `grade`
+    // is the ATTACKING human's timing on THIS specific trade (passed in by the caller from the same
+    // offset that decided the damage) — never re-read from PlayerCombat.LastTimingRating, which is
+    // only updated when EvaluateAndSendFeedback finds a fresh move to grade and goes stale otherwise.
+    [Server]
+    private void ReportBotTradeOutcome(PlayerCombat pA, PlayerCombat pB, int aTook, int bTook, string grade)
+    {
+        bool aIsBot = pA.GetComponent<BotController>() != null;
+        bool bIsBot = pB.GetComponent<BotController>() != null;
+        PlayerCombat bot = aIsBot ? pA : (bIsBot ? pB : null);
+        if (bot == null) return;
+        var approach = bot.GetComponent<BotBeatApproach>();
+        if (approach == null || !approach.IsApproaching) return;
+
+        int botTook  = bot == pA ? aTook : bTook;
+        int botDealt = bot == pA ? bTook : aTook;
+        if (botTook > 0)
+        {
+            if      (grade == "GOOD")      approach.ReportOutcome(BotBeatApproach.Outcome.GotHitGood);
+            else if (grade == "EXCELLENT") approach.ReportOutcome(BotBeatApproach.Outcome.GotHit);
+            else                           approach.ReportOutcome(BotBeatApproach.Outcome.GotHitBad);
+        }
+        else if (botDealt > 0) approach.ReportOutcome(BotBeatApproach.Outcome.LandedHit);
+        else                   approach.ReportOutcome(BotBeatApproach.Outcome.Clash);
+    }
+
     [Server]
     private void EvaluateAndSendFeedback(PlayerCombat pc, PlayerCombat.RhythmAction move)
     {
@@ -2957,6 +3020,7 @@ public class RhythmRoundManager : NetworkBehaviour
             if (pc.lastVocalSpikeTime <= 0)
             {
                 Debug.Log($"<color=orange>[TIMING]</color> {pc.name} - CHAIN | No Vocal Spike -> BAD");
+                pc.LastTimingRating = "BAD";
                 pc.TargetShowTimingFeedback("BAD");
                 return;
             }
@@ -2966,6 +3030,7 @@ public class RhythmRoundManager : NetworkBehaviour
                 ? pc.lastVocalSpikeOffset
                 : Mathf.Abs(targetBeat - pc.lastVocalSpikeTime);
             string chainRating = (chainOffset <= 0.18f) ? "EXCELLENT" : "GOOD";
+            pc.LastTimingRating = chainRating;
             if (chainRating == "EXCELLENT") pc.roundExcellentCount++;
             if (chainRating == "EXCELLENT") pc.AddScore(PlayerCombat.SCORE_ONBEAT_EXCELLENT, "EXCELLENT chain");
             else pc.AddScore(PlayerCombat.SCORE_ONBEAT_GOOD, "GOOD chain");
@@ -2978,6 +3043,7 @@ public class RhythmRoundManager : NetworkBehaviour
         if (pc.lastVocalSpikeTime <= 0)
         {
             Debug.Log($"<color=orange>[TIMING]</color> {pc.name} - Move: {(string.IsNullOrEmpty(move.attack) ? "DODGE" : move.attack)} | No Vocal Spike Detected -> BAD");
+            pc.LastTimingRating = "BAD";
             pc.TargetShowTimingFeedback("BAD");
             return;
         }
@@ -3008,6 +3074,7 @@ public class RhythmRoundManager : NetworkBehaviour
         if (offset <= 0.18f) rating = "EXCELLENT"; // wider EXCELLENT sweet-spot (was 0.1)
         else if (offset <= window) rating = "GOOD";
 
+        pc.LastTimingRating = rating;
         if (rating == "EXCELLENT") pc.roundExcellentCount++;
 
         // SCORE: base reward just for playing the move in rhythm. Landing/defending bonuses are added

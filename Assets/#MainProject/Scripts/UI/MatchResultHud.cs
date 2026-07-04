@@ -1,5 +1,6 @@
 using System.Text;
 using UnityEngine;
+using UnityEngine.UI;
 
 /// World-space match-end display: two 3D panels in front of the player, slanted inward toward them
 /// (like an open book / cockpit), built entirely from code (TextMesh + quad backings — no TMP, no
@@ -48,6 +49,9 @@ public class MatchResultHud : MonoBehaviour
     private static readonly Color PanelBg  = new Color(0.02f, 0.03f, 0.06f, 0.92f);
 
     private bool _won, _draw;
+    // World Cup event build: win → "MAN OF THE MATCH", lose → "FULL TIME". Flip off after the event.
+    public static bool WorldCupMode = true;
+
     private string _name;
     private int _score, _rank;
     private Font _font;
@@ -78,19 +82,20 @@ public class MatchResultHud : MonoBehaviour
     }
 
     // Single centered card for the per-round result; destroys itself after `seconds`.
-    // Clean, well-proportioned: a wide short card, a glowing accent bar in the result colour, a bold
-    // headline with depth shadow, a subtitle, and a quick pop-in scale so it lands with weight.
+    // Built as a WORLD-SPACE CANVAS with the exact same pixel size + world scale + distance as the VR
+    // shop panel (VRMenus.BuildShop: 3000×1820 @ 0.00128, 2.6m out), so the two read as one UI family.
+    // uGUI Text with best-fit keeps every string INSIDE the panel regardless of headline length.
     private void BuildRoundOnly(float seconds)
     {
         _font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf")
              ?? Resources.GetBuiltinResource<Font>("Arial.ttf");
-        _quadMat = new Material(Shader.Find("Sprites/Default"));
 
         Camera cam = Camera.main;
         Vector3 camPos = cam != null ? cam.transform.position : Vector3.zero;
-        Vector3 fwd = cam != null ? cam.transform.forward : Vector3.forward; fwd.y = 0f;
+        Vector3 fwd = cam != null ? cam.transform.forward : Vector3.forward;
+        fwd.y *= 0.25f; // same gentle vertical damping as VRMenus.PlacePanel
         if (fwd.sqrMagnitude < 0.001f) fwd = Vector3.forward; fwd.Normalize();
-        Vector3 center = camPos + fwd * (DISTANCE - 0.4f); center.y = camPos.y; // a touch closer than the match panels
+        Vector3 center = camPos + fwd * 2.6f; // PANEL_DISTANCE used by the shop
 
         Color c = _draw ? DrawCol : (_won ? WinCol : LoseCol);
         string headline = _draw ? "DRAW" : (_won ? "ROUND WON" : "ROUND LOST");
@@ -100,23 +105,69 @@ public class MatchResultHud : MonoBehaviour
         card.SetParent(transform, false);
         card.SetPositionAndRotation(center, Quaternion.LookRotation(center - camPos));
 
-        // Proportioned backing: wide and short, not the tall match-panel block.
-        const float cardW = 2.3f, cardH = 1.05f;
-        MakeQuad(card, new Vector3(0f, 0f, 0.03f), new Vector3(cardW, cardH, 1f), PanelBg);
-        // Thin coloured frame just behind, slightly larger, glowing in the result colour.
-        MakeQuad(card, new Vector3(0f, 0f, 0.05f), new Vector3(cardW + 0.08f, cardH + 0.08f, 1f),
-                 new Color(c.r, c.g, c.b, 0.35f));
-        // Accent bar under the headline.
-        MakeQuad(card, new Vector3(0f, -0.16f, 0.01f), new Vector3(cardW * 0.78f, 0.025f, 1f), c);
+        // Canvas — shop-panel dimensions exactly.
+        var canvasGo = new GameObject("Canvas");
+        canvasGo.transform.SetParent(card, false);
+        var canvas = canvasGo.AddComponent<Canvas>();
+        canvas.renderMode = RenderMode.WorldSpace;
+        var scaler = canvasGo.AddComponent<CanvasScaler>();
+        scaler.dynamicPixelsPerUnit = 4f;      // crisp text in the headset
+        scaler.referencePixelsPerUnit = 100f;
+        var crt = (RectTransform)canvasGo.transform;
+        crt.sizeDelta = new Vector2(3000f, 1820f);
+        crt.localScale = Vector3.one * 0.00128f;
 
-        // Headline: dark depth copy + coloured front.
-        MakeText(card, headline, 0.34f, new Vector3(0f, 0.16f, 0f), new Color(0f, 0f, 0f, 0.9f), 0.025f);
-        MakeText(card, headline, 0.34f, new Vector3(0f, 0.16f, 0f), c, 0f);
+        // Result-coloured glow frame (full panel) with the dark backing inset on top of it.
+        MakeUiImage(crt, new Color(c.r, c.g, c.b, 0.40f), Vector2.zero, new Vector2(3000f, 1820f));
+        MakeUiImage(crt, PanelBg, Vector2.zero, new Vector2(2960f, 1780f));
+
+        // Headline — best-fit inside a rect well inside the panel, so it can never spill out.
+        var h = MakeUiText(crt, headline, 420, new Vector2(0f, 220f), new Vector2(2700f, 640f));
+        h.color = c; h.fontStyle = FontStyle.Bold;
+        h.resizeTextForBestFit = true; h.resizeTextMaxSize = 420; h.resizeTextMinSize = 80;
+
+        // Accent bar under the headline.
+        MakeUiImage(crt, c, new Vector2(0f, -180f), new Vector2(2200f, 16f));
+
         // Subtitle.
-        MakeText(card, "DECIDED BY POINTS", 0.10f, new Vector3(0f, -0.30f, 0f), new Color(0.78f, 0.83f, 0.95f), 0f);
+        var s = MakeUiText(crt, "DECIDED BY POINTS", 120, new Vector2(0f, -420f), new Vector2(2600f, 200f));
+        s.color = new Color(0.78f, 0.83f, 0.95f);
+        s.resizeTextForBestFit = true; s.resizeTextMaxSize = 120; s.resizeTextMinSize = 40;
 
         StartCoroutine(PopIn(card));
         Destroy(gameObject, seconds);
+    }
+
+    // Minimal uGUI helpers for the round card (same recipe as VRMenus' panel builders).
+    private Image MakeUiImage(RectTransform parent, Color color, Vector2 pos, Vector2 size)
+    {
+        var go = new GameObject("Img", typeof(RectTransform));
+        var rt = (RectTransform)go.transform;
+        rt.SetParent(parent, false);
+        rt.anchoredPosition = pos;
+        rt.sizeDelta = size;
+        var img = go.AddComponent<Image>();
+        img.color = color;
+        return img;
+    }
+
+    private Text MakeUiText(RectTransform parent, string content, int size, Vector2 pos, Vector2 dim)
+    {
+        var go = new GameObject("Txt", typeof(RectTransform));
+        var rt = (RectTransform)go.transform;
+        rt.SetParent(parent, false);
+        rt.anchoredPosition = pos;
+        rt.sizeDelta = dim;
+        var t = go.AddComponent<Text>();
+        t.font = _font;
+        t.text = content;
+        t.fontSize = size;
+        t.alignment = TextAnchor.MiddleCenter;
+        t.color = Color.white;
+        // Deliberately NOT overflow — wrap/truncate keeps everything inside the panel.
+        t.horizontalOverflow = HorizontalWrapMode.Wrap;
+        t.verticalOverflow = VerticalWrapMode.Truncate;
+        return t;
     }
 
     // Quick spring-ish pop: scale from small → slight overshoot → settle. Makes the card land with weight.
@@ -158,11 +209,15 @@ public class MatchResultHud : MonoBehaviour
         var panel = MakePanel(pos, rot, "ResultPanel");
 
         Color c = _draw ? DrawCol : (_won ? WinCol : LoseCol);
-        string headline = _draw ? "DRAW" : (_won ? "YOU WIN" : "YOU LOSE");
+        string headline = _draw ? "DRAW"
+            : (_won ? (WorldCupMode ? "MAN OF THE MATCH" : "YOU WIN")
+                    : (WorldCupMode ? "FULL TIME" : "YOU LOSE"));
+        // Long event headline needs a smaller size to stay inside the panel.
+        float hSize = headline.Length > 10 ? 0.26f : 0.45f;
 
         // Big headline with a dark shadow copy behind for 3D pop.
-        MakeText(panel, headline, 0.45f, new Vector3(0f, 0.7f, 0f), Color.black, 0.03f);
-        MakeText(panel, headline, 0.45f, new Vector3(0f, 0.7f, 0f), c, 0f);
+        MakeText(panel, headline, hSize, new Vector3(0f, 0.7f, 0f), Color.black, 0.03f);
+        MakeText(panel, headline, hSize, new Vector3(0f, 0.7f, 0f), c, 0f);
 
         MakeText(panel, _name.ToUpper(), 0.16f, new Vector3(0f, 0.05f, 0f), Color.white, 0f);
         MakeText(panel, $"{_score:N0} PTS", 0.22f, new Vector3(0f, -0.35f, 0f), new Color(1f, 0.95f, 0.5f), 0f);

@@ -53,7 +53,12 @@ public class SoundManagerMain : MonoBehaviour
         else if (type == "Block") clip = blockClip;
         else if (type == "Parry") clip = parryClip;
         else if (type == "Dash") clip = dashClip;
-        else if (type == "Hurt") clip = attackClip;
+        else if (type == "Hurt") clip = hurtClip;   // was wrongly using attackClip — getting hit now
+                                                    // plays the actual hurt clip.
+
+        // Fallback so an UNASSIGNED slot doesn't go silent: a missing Hurt/Block/Parry/Dash clip falls
+        // back to the attack clip (better than nothing), so at least a hit/block always makes a sound.
+        if (clip == null) clip = attackClip;
 
         PlayWithPitch(clip, Random.Range(0.92f, 1.08f));
     }

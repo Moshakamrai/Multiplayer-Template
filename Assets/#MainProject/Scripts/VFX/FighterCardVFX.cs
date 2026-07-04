@@ -92,6 +92,10 @@ public class FighterCardVFX : MonoBehaviour
     public ElementVfx wind = new ElementVfx();
 
     [Header("Spawn Settings")]
+    [Tooltip("BLOOD-ONLY MODE: when ON, the element status/reaction VFX (fire BURN loop, etc.) are NOT " +
+             "spawned — only the game's blood-on-hit shows. The status MECHANICS (damage multipliers) " +
+             "still work; just the big lingering elemental visuals are suppressed. Turn ON to go blood-only.")]
+    public bool suppressElementVfx = true;
     [Tooltip("Chest-height offset for status/reaction/hit effects.")]
     public float effectHeight = 1.2f;
     [Tooltip("Seconds before one-shot VFX instances are cleaned up.")]
@@ -173,6 +177,10 @@ public class FighterCardVFX : MonoBehaviour
     /// turns ON the family's weapon-aura object (a child of this prefab) and applies the sword tint.
     public void OnCardTriggered(string trigger)
     {
+        // DRONE/FOOTBALL SEGMENT: only the drone hit VFX + blood are allowed — no weapon aura, no
+        // sword tint, no card VFX of any kind while the rush is running.
+        if (DroneRushSegment.Instance != null && DroneRushSegment.Instance.SegmentActive) return;
+
         var set = SetForFamily(FamilyOf(trigger));
         if (set == null) return;
 
@@ -265,31 +273,15 @@ public class FighterCardVFX : MonoBehaviour
         _                 => null,
     };
 
-    public void PlayStatusApply(Element e)
-    {
-        var set = SetOf(e);
-        if (set?.statusApplyVfx == null) return;
-        var go = Instantiate(set.statusApplyVfx, transform.position + Vector3.up * effectHeight, transform.rotation);
-        ScaleEffect(go);
-        Destroy(go, oneShotLifetime);
-    }
+    // ELEMENT VFX HARD-DISABLED (permanent, per design): the fire BURN loop + status/reaction bursts
+    // are eye-blinding red spam. These are unconditional no-ops — deliberately NOT gated on the
+    // suppressElementVfx flag anymore, because a stale serialized inspector value on the prefabs kept
+    // re-enabling them. The element MECHANICS (damage multipliers, statuses) still work; only the
+    // visuals are dead. To ever bring them back, restore the Instantiate bodies from git history.
+    public void PlayStatusApply(Element e) { }
 
-    /// Returns the loop instance; PlayerCombat destroys it when the status ends.
-    public GameObject AttachLoop(Element e)
-    {
-        var set = SetOf(e);
-        if (set?.statusLoopVfx == null) return null;
-        var loop = Instantiate(set.statusLoopVfx, transform.position + Vector3.up * effectHeight, transform.rotation, transform);
-        ScaleEffect(loop);
-        return loop;
-    }
+    /// Returns the loop instance; PlayerCombat destroys it when the status ends. (Always null now.)
+    public GameObject AttachLoop(Element e) { return null; }
 
-    public void PlayReaction(Element statusElement)
-    {
-        var set = SetOf(statusElement);
-        if (set?.reactionVfx == null) return;
-        var go = Instantiate(set.reactionVfx, transform.position + Vector3.up * effectHeight, transform.rotation);
-        ScaleEffect(go);
-        Destroy(go, Mathf.Max(oneShotLifetime, 4f));
-    }
+    public void PlayReaction(Element statusElement) { }
 }

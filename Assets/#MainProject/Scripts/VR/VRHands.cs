@@ -36,12 +36,16 @@ public class VRHands : MonoBehaviour
     [Tooltip("Scales how far the gloves sit from your head. 1 = real arm distance.")]
     public float reach = 1f;
 
-    [Header("Trigger-charge power (VR)")]
-    [Tooltip("Hold the trigger and pulse the controller to BUILD power. Charge gained per (m/s of motion · second) while the trigger is held. Higher = fills faster.")]
-    public float chargeGain = 0.5f;
-    [Tooltip("How fast the power charge dissolves (per second) when you stop moving or release the trigger.")]
-    public float chargeDecay = 0.55f;
-    [Tooltip("Controller speed (m/s) above which motion counts as a 'pulse' that builds charge.")]
+    [Header("Swing power (VR)")]
+    [Tooltip("Hand speed (m/s) that reads as FULL power on the meter — matches the hit logic's speed/6 " +
+             "mapping (a hard ~6 m/s punch = 100%). Higher = harder to fill the bar; lower = easier.")]
+    public float fullPowerSpeed = 6f;
+    [Tooltip("How fast the power meter RISES toward the current swing strength (per second). The meter " +
+             "tracks how hard you're swinging RIGHT NOW, not an accumulating charge.")]
+    public float powerRise = 6f;
+    [Tooltip("How fast the power meter FALLS when you slow down (per second). Lower = lingers longer.")]
+    public float powerFall = 2.5f;
+    [Tooltip("Controller speed (m/s) below which motion is treated as idle (no power).")]
     public float motionThreshold = 0.4f;
 
     [Header("Optional")]
@@ -76,6 +80,7 @@ public class VRHands : MonoBehaviour
     // and "head moved aside = a dodge", without re-reading XR input themselves.
     private static Vector3 _leftHandPos, _rightHandPos, _headPos;
     private static float   _leftSpeed, _rightSpeed;
+    private static Vector3 _leftVel, _rightVel; // world-space swing velocity (lightly smoothed)
     private static bool    _tracking;
 
     public static bool  Tracking      => _tracking;
@@ -83,7 +88,12 @@ public class VRHands : MonoBehaviour
     public static Vector3 RightHandPos=> _rightHandPos;
     public static float LeftSpeed     => _leftSpeed;
     public static float RightSpeed    => _rightSpeed;
+    public static Vector3 LeftVelocity  => _leftVel;   // direction + speed of the left swing
+    public static Vector3 RightVelocity => _rightVel;  // direction + speed of the right swing
     public static Vector3 HeadPos     => _headPos;
+
+    private Vector3 _prevLWorld, _prevRWorld;
+    private bool _havePrevWorld;
 
     /// True if either hand is within `radius` of `worldPos` while moving at least `minSpeed` (m/s) —
     /// i.e. a punch landed on something there. Outputs which hand and that hand's speed (punch power).
@@ -97,6 +107,15 @@ public class VRHands : MonoBehaviour
         if (rHit && (_rightSpeed >= _leftSpeed || !lHit)) { rightHand = true;  speed = _rightSpeed; return true; }
         if (lHit)                                          { rightHand = false; speed = _leftSpeed;  return true; }
         return false;
+    }
+
+    /// FAIL-SAFE lock-in for showcases: is the given hand SWINGING right now (speed ≥ minSpeed)?
+    /// Non-consuming — just peeks the live per-hand speed. Lets a raw punch (no shout, no trigger) fire
+    /// the move on the beat, so first-timers who forget to shout/pull still hit. Returns that speed too.
+    public static bool IsSwinging(bool rightHand, float minSpeed, out float speed)
+    {
+        speed = rightHand ? _rightSpeed : _leftSpeed;
+        return _tracking && speed >= minSpeed;
     }
 
     /// Take the current charge as punch power and reset it (called when the lock-in fires on the beat).
@@ -195,6 +214,16 @@ public class VRHands : MonoBehaviour
         if (_rightAnchor != null) _rightHandPos = _rightAnchor.position;
         _headPos = cam.transform.position;
         _tracking = true;
+
+        // World-space swing VELOCITY per hand (for launching the football along the real punch
+        // direction). Lightly smoothed so one frame of tracking jitter can't flip the shot's angle.
+        float vdt = Time.deltaTime;
+        if (vdt > 0f && _havePrevWorld)
+        {
+            _leftVel  = Vector3.Lerp(_leftVel,  (_leftHandPos  - _prevLWorld) / vdt, 0.5f);
+            _rightVel = Vector3.Lerp(_rightVel, (_rightHandPos - _prevRWorld) / vdt, 0.5f);
+        }
+        _prevLWorld = _leftHandPos; _prevRWorld = _rightHandPos; _havePrevWorld = true;
     }
 
     /// Creates an empty anchor at the glove's true mesh center and reparents the glove under it.
@@ -246,27 +275,23 @@ public class VRHands : MonoBehaviour
 
         bool ltrig = ReadBtn(lh, CommonUsages.triggerButton);
         bool rtrig = ReadBtn(rh, CommonUsages.triggerButton);
-        bool anyTrig = ltrig || rtrig;
         float speed = Mathf.Max(lspeed, rspeed);
 
+        // POWER = how hard you're swinging RIGHT NOW, mapped through the SAME speed/fullPowerSpeed the
+        // hit logic uses (so the bar honestly previews your next hit's power). No trigger needed and no
+        // runaway accumulation — the old code kept ADDING charge every frame you moved, so any sustained
+        // wave pinned it to 100% instantly. Now it eases toward the live swing strength and falls back
+        // when you slow down.
         float prevCharge = _charge;
-        if (anyTrig && speed > motionThreshold)
-            _charge = Mathf.Clamp01(_charge + speed * chargeGain * dt); // pulse to build power
-        else
-            _charge = Mathf.Max(0f, _charge - chargeDecay * dt);        // dissolve with no motion
+        float targetPower = speed > motionThreshold ? Mathf.Clamp01(speed / Mathf.Max(0.5f, fullPowerSpeed)) : 0f;
+        float rate = targetPower > _charge ? powerRise : powerFall;
+        _charge = Mathf.MoveTowards(_charge, targetPower, rate * dt);
 
-        // HAPTICS: holding a trigger rumbles that hand, growing with the charge (engine-rev feel),
-        // and a double-blip fires the moment the bar maxes so you know you're full without looking.
-        if (_charge > 0.02f)
-        {
-            float rumble = 0.06f + 0.40f * _charge;
-            if (ltrig) VRHaptics.Rumble(VRHaptics.Hand.Left, rumble);
-            if (rtrig) VRHaptics.Rumble(VRHaptics.Hand.Right, rumble);
-        }
+        // HAPTICS: a double-blip the moment you reach full power on a swing, so you know a max hit is
+        // primed without looking. (No more constant trigger-hold rumble — that was tied to the old
+        // pulse-to-charge model and just buzzed continuously.)
         if (_charge >= 1f && prevCharge < 1f)
-            VRHaptics.FullCharge(ltrig && !rtrig ? VRHaptics.Hand.Left
-                               : rtrig && !ltrig ? VRHaptics.Hand.Right
-                               : VRHaptics.Hand.Both);
+            VRHaptics.FullCharge(lspeed >= rspeed ? VRHaptics.Hand.Left : VRHaptics.Hand.Right);
 
         // Trigger RELEASE near the beat = lock-in, latched PER HAND (right = Strike/Throw, left = Block/Parry).
         float now = Time.time;

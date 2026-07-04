@@ -2452,9 +2452,13 @@ MonoBehaviour:
   slashRotationOffset: {x: 0, y: 0, z: 0}
   slashSizeScale: 0.5
   slashAimsAtOpponent: 1
+  swingLockInEnabled: 1
+  swingLockInMinSpeed: 1.6
   HeldStaggerActive: 0
   heldStaggerState: Held Stagger State
   idleState: Boxing Idle
+  hurtState: Knockback
+  botMoveAnimSpeed: 1
 --- !u!114 &8845738990167672434
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2720,8 +2724,9 @@ MonoBehaviour:
   leftGlove: {fileID: 3375781535240649837}
   rightGlove: {fileID: 6410129354583715210}
   reach: 1
-  chargeGain: 0.85
-  chargeDecay: 0.45
+  fullPowerSpeed: 6
+  powerRise: 6
+  powerFall: 2.5
   motionThreshold: 0.4
   disableAnimator: 0
 --- !u!114 &6131653939100703817
@@ -2795,6 +2800,7 @@ MonoBehaviour:
     statusApplyVfx: {fileID: 2588488796607357093}
     statusLoopVfx: {fileID: 1652799960059976, guid: 3fda2b3c82a8c8149a167a69819276c0, type: 3}
     reactionVfx: {fileID: 1652799960059976, guid: 3fda2b3c82a8c8149a167a69819276c0, type: 3}
+  suppressElementVfx: 0
   effectHeight: 1.2
   oneShotLifetime: 3
   effectSizeScale: 0.1
@@ -5179,15 +5185,15 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 7514351113423532227, guid: 08078d833f28c4a458616d2c6ce585f4, type: 3}
       propertyPath: m_LocalScale.x
-      value: 2
+      value: 2.4596
       objectReference: {fileID: 0}
     - target: {fileID: 7514351113423532227, guid: 08078d833f28c4a458616d2c6ce585f4, type: 3}
       propertyPath: m_LocalScale.y
-      value: 2
+      value: 2.4596
       objectReference: {fileID: 0}
     - target: {fileID: 7514351113423532227, guid: 08078d833f28c4a458616d2c6ce585f4, type: 3}
       propertyPath: m_LocalScale.z
-      value: 2
+      value: 2.4596
       objectReference: {fileID: 0}
     - target: {fileID: 7514351113423532227, guid: 08078d833f28c4a458616d2c6ce585f4, type: 3}
       propertyPath: m_LocalPosition.x
@@ -5195,7 +5201,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 7514351113423532227, guid: 08078d833f28c4a458616d2c6ce585f4, type: 3}
       propertyPath: m_LocalPosition.y
-      value: 0.849
+      value: 1.247
       objectReference: {fileID: 0}
     - target: {fileID: 7514351113423532227, guid: 08078d833f28c4a458616d2c6ce585f4, type: 3}
       propertyPath: m_LocalPosition.z

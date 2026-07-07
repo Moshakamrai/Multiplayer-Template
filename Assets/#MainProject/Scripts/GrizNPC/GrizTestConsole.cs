@@ -21,6 +21,14 @@ public class GrizTestConsole : MonoBehaviour
     bool _micStarted;
     Vector2 _scroll;
 
+    void Awake()
+    {
+        // Must be set before VoskSpeechToText.Start() builds the recognizer:
+        // conversation needs full-vocabulary dictation, not the card-word grammar.
+        if (Vosk == null) Vosk = FindObjectOfType<VoskSpeechToText>();
+        if (Vosk != null) Vosk.FreeDictation = true;
+    }
+
     void Start()
     {
         if (Brain == null) Brain = FindObjectOfType<GrizBrain>();

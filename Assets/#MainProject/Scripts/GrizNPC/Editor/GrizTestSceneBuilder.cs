@@ -24,6 +24,7 @@ public static class GrizTestSceneBuilder
         stt.VoiceProcessor = vp;
         stt.AutoStart = true;
         stt.KeyPhrases = new List<string>();   // EMPTY = full free-speech recognition
+        stt.FreeDictation = true;              // no card-word grammar — full sentences
         stt.MaxAlternatives = 0;
         stt.MaxRecordLength = 8;               // allow full sentences before restart
 

@@ -28,6 +28,10 @@ public class VoskSpeechToText : MonoBehaviour
     [Tooltip("The phrases that will be detected. If left empty, all words will be detected.")]
     public List<string> KeyPhrases = new List<string>();
 
+    [Tooltip("TRUE = no grammar at all: full free-speech dictation (NPC conversation mode). " +
+             "FALSE = card-word grammar (combat mode, fast + accurate).")]
+    public bool FreeDictation = false;
+
     //Cached version of the Vosk Model.
     private Model _model;
 
@@ -209,6 +213,13 @@ public class VoskSpeechToText : MonoBehaviour
 
     private void UpdateGrammar()
     {
+        if (FreeDictation)
+        {
+            // No grammar → recognizer uses the model's FULL vocabulary (sentences).
+            _grammar = "";
+            Debug.Log("<color=cyan>VOSK GRAMMAR:</color> FREE DICTATION — no grammar, full vocabulary.");
+            return;
+        }
         // Start with the base grammar (all possible words + mishears).
         // This is used before the player's hand is known (menu, lobby, etc.)
         _baseGrammar = BuildGrammarFromTriggers(null);
@@ -222,6 +233,7 @@ public class VoskSpeechToText : MonoBehaviour
     /// </summary>
     public void RebuildGrammar(List<string> handTriggers)
     {
+        if (FreeDictation) return; // conversation mode: never narrow to card words
         _currentHandTriggers = handTriggers ?? new List<string>();
         string newGrammar = BuildGrammarFromTriggers(_currentHandTriggers);
 

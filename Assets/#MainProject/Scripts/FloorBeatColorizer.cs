@@ -145,6 +145,8 @@ public class FloorBeatColorizer : MonoBehaviour
         }
         if (_hitTimer > 0f)
             _hitTimer = Mathf.Max(0f, _hitTimer - Time.deltaTime * hitDecayRate);
+        // Beat pulse for CyberPixel/RimLit materials — rim glow spikes on each beat
+        Shader.SetGlobalFloat("_CyberBeatPulse", _hitTimer);
 
         // ── Time to next beat + learn the beat interval (so the wave matches tempo) ──
         float toBeat = 999f;

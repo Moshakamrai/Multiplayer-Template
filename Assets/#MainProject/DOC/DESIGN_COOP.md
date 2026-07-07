@@ -27,7 +27,7 @@ Lobby (host + join via EOS code)
   → Overworld map (shared party token, pick route together)
     → Node: Fight / Event / Rest / Shop / Boss
       → Fight = song + beat map (existing combat loop, now alternating between players)
-    → Loot: card upgrades, HP, modifiers
+    → Loot: weapons (your 4 voice cards), slot modifiers, HP
   → Boss node ends the biome → next biome or run end
   → Run ends (win or party wipe) → result screen → back to lobby
 ```
@@ -87,7 +87,96 @@ case in gameplay at all.
 
 ---
 
-## 4. Overworld & Biomes
+## 4. Weapons & Cards (For The King-style movesets)
+
+**A weapon = the 4 words you can shout.** (Decision 2026-07-05, replaces the global shared
+card pool.) Players loot weapons on the map and carry ONE; your weapon defines YOUR 4 voice
+cards. Two players with different weapons shout different vocabularies at the same fight.
+
+**Engine stays intact:** every weapon card maps to an existing family (Strike / Throw /
+Block / Parry / Dash) under the hood — a card is `voice word + family + modifier`. The
+rock-paper-scissors table, timing ratings, animations, and RhythmRoundManager resolution
+are untouched (same architecture as the football-alias reskin idea from DESIGN.md).
+
+### Card slot structure (4 slots per weapon)
+1. **Primary attack** — the weapon's identity (Strike or Throw family).
+2. **Secondary attack** — different family / different rhythm feel (bigger damage,
+   tighter window, chain bonus…).
+3. **Defense** — Block OR Parry; the weapon chooses which → defensive personality.
+4. **Co-op card** — ALWAYS affects the partner (heal, widen their next window, absorb
+   their next miss-damage, enable an echo). Co-op is baked into every deck.
+
+### Weapon TYPES (type = when/how you act, not just flavor)
+| Type | Rule twist | Slot bias |
+|------|-----------|-----------|
+| **Melee** | Acts on YOUR beats, full power — the baseline | Strong attacks |
+| **Ranged** | Weaker on own beats, but the co-op card fires on the PARTNER's beat (cover fire / intercepts) | Attack + intervention |
+| **Arcane** | Weakest attacks, strongest utility/co-op: heals, persistent shields, window-bending for BOTH players | Support |
+| **Exotic** | Rule-breakers, one per run max | Anything goes |
+
+### Weapon roster (launch target ~10; Katana + Warhammer built first)
+**Melee**
+- **Katana** — SLASH (strike) · THRUST (throw, +dmg on EXCELLENT) · DEFLECT (parry) ·
+  FOCUS (partner window +30%). *Precision.*
+- **Warhammer** — SMASH (strike, 2x dmg, EXCELLENT-only) · QUAKE (throw, enemy skips next
+  beat) · GUARD (block) · BRACE (absorb partner's next miss). *Tank.*
+- **Gauntlets** — JAB (strike, 2-chain bonus) · HOOK (throw) · WEAVE (dash) ·
+  RALLY (heal partner on your EXCELLENT). *Combo.*
+
+**Ranged**
+- **Longbow** — VOLLEY (throw) · PIERCE (strike, ignores block) · ROLL (dash) ·
+  MARK (co-op, on partner's beat: their hit gains +50% dmg). *Setup.*
+- **Twin Pistols** — FAN (strike) · SNIPE (throw, EXCELLENT-only 2x) · DUCK (dash) ·
+  COVER (co-op, on partner's beat: intercept their miss, halve the damage). *Bodyguard at range.*
+
+**Arcane**
+- **Storm Staff** — BOLT (strike) · SURGE (throw) · WARD (block, shield persists one extra
+  beat) · MEND (heal partner). *Healer.*
+- **Chime Orb** — TOLL (strike) · BIND (parry) · SLOW (enemy run-in slows: wider window for
+  BOTH players' next beats) · ECHO (enables partner echo-combo on your next EXCELLENT). *Tempo mage.*
+
+**Exotic**
+- **Moonblade** — MOONFALL (strike, massive dmg) — and NOTHING else. The FTK homage: one
+  overpowered card, no defense, no co-op. Someone will always pick it.
+- **Megaphone** — BLAST (strike, damage scales with mic VOLUME) · TAUNT (enemy retargets
+  to you) · AMP (partner's next card boosted) · HUSH (block). Ties into the Hype Meter (§10).
+
+### Traits = CLASSES (passive cards — the FTK attribute layer)
+Traits are the class system: **passive, never shouted** — zero extra Vosk load. Pick ONE
+at run start (that's your class), find more as run loot, **max 3 equipped**.
+- **Berserker** — attack timing windows +20%, defense windows −15%.
+- **Sentinel** — damage you take from partner misses −50%.
+- **Maestro** — your assists and co-op cards 50% stronger.
+- **Duelist** — consecutive EXCELLENTs stack a damage chain.
+- **Loudmouth** — all mic-volume-based effects amplified (Hype Meter, Megaphone).
+Build identity = trait + weapon: Sentinel+Warhammer (bodyguard), Maestro+Storm Staff
+(healer), Loudmouth+Megaphone (the screamer). Traits and weapons drop separately, so
+every run remixes the combo.
+
+### Voice constraints (hard rules per weapon)
+- The 4 words must be Vosk-distinct: different syllable counts/vowels, no rhymes
+  (DESIGN.md documents "start" mishearing as guard/card/star — this is real).
+- One or two syllables, common English words only.
+- Cross-player collisions are tolerable (players alternate beats; only the active
+  player's mic result counts), but avoid them in weapon pools where cheap.
+
+### Loot loop
+- Weapons drop at fight/shop nodes from biome-flavored pools; rarity tiers.
+- Run modifiers (§6) attach to a weapon SLOT ("Parry slot: window +20%") — a build =
+  weapon + stacked slot modifiers.
+- Weapons can be swapped at rest nodes and TRADED between players — handing your friend
+  the Warhammer because they keep missing beats is the co-op conversation.
+
+### Implementation shape (mostly data)
+- `WeaponDef` ScriptableObject: name, rarity, biome pool, 4 card entries
+  (word, Vosk aliases, family, modifier id).
+- `VoiceCommandManager` matches against the player's CURRENT WEAPON's words (not a global
+  list); `CardManager` displays the weapon's 4 cards.
+- Combat resolution unchanged.
+
+---
+
+## 5. Overworld & Biomes
 
 ### Map
 - Node graph, For The King / Slay the Spire style: 10–15 nodes, 2–4 branches wide.
@@ -115,20 +204,72 @@ Each biome defines: song pool + beat maps, enemy/drone skins, ambient palette
 
 ---
 
-## 5. Roguelite Progression
+## 6. Roguelite Progression
 
 - **Run-based.** Nothing persists between runs except cosmetics/unlocked songs (later).
 - Party shares HP pool? NO — individual HP, but miss-damage goes to partner (see §3).
   Party wipes when BOTH are down (revive window while one stands).
-- **Loot = card modifiers**, attached to a card family for the rest of the run:
-  - "Parry window +20%" · "Strike: EXCELLENT deals double" · "Dash refunds a miss (1/fight)"
+- **Loot = weapons (§4) + slot modifiers.** Modifiers attach to a weapon card SLOT for
+  the rest of the run:
+  - "Defense slot: window +20%" · "Primary: EXCELLENT deals double" · "Dash refunds a miss (1/fight)"
   - "Echo: partner's assist also gives YOU the wider window"
-- Rest nodes allow trading one modifier between players.
+- Rest nodes allow trading weapons and modifiers between players.
 - 3 rounds/match → reframed as N enemies per fight node; boss nodes = 1 long song.
 
 ---
 
-## 6. Networking Architecture
+## 7. Hub, Story & Voice NPCs (decision 2026-07-07)
+
+**The second half of the hook: your voice is your weapon in combat — and your tongue in
+the hub.** Between fights, both players walk around a SHARED hub (the arena's backstage /
+underbelly), mics live, and TALK to NPCs: negotiate prices, charm quest-givers, talk
+their way into trouble. Story is delivered light-touch: environmental + NPC memory across
+runs, no cutscenes.
+
+### Tech tiers (build in this order)
+1. **Keyword-rule intents** (weekend prototype): Vosk transcript → rule scoring → intent.
+2. **Sentence similarity**: MiniLM-class embedding model via Unity Sentis (~20MB, offline,
+   free) matching transcripts to intent examples. Ship tier.
+3. **LLM paraphrase layer** (optional, later): rewrites authored beats for line variety.
+   The game must be great WITHOUT this tier.
+
+### Negotiation is a GAME SYSTEM, not a chatbot
+NPC hidden state (`price`, `patience`, `respect[player]`, `fear`) moved by detected
+intents (`haggle`, `flatter`, `threaten`, `beg`, `ask_info`, `insult`, `smalltalk`,
+`buy`). Personality = authored response pools gated by state — the classifier finds the
+player's MOVE; the writing does the humor.
+
+### Style reactivity (react to HOW players talk — all cheap signals)
+- **Volume** (already captured): shouting = threat modifier; whispering gets called out.
+- **Word count**: ramblers get cut off; curt players get "a man of few words. I respect it."
+- **Interruption**: mic spike while NPC is mid-line → he notices and objects.
+- **Repetition**: third flattery in a row gets flagged in-character.
+- **Talk-share between the two players**: the NPC develops a FAVORITE and teases the other.
+
+### Design laws
+- **Failure is content**: mishearings never dead-end — NPC #1 is canonically hard of
+  hearing, so every Vosk mangle is HIS character flaw and a comedy beat. Clips of this
+  are the marketing.
+- **Co-op negotiation**: both mics live at one NPC — good cop / bad cop as a real
+  mechanic (one player farms `patience`/`respect`, the other hammers `price`).
+- **Voice is the delight, never the wall**: every interaction also works with 2–3 button
+  choices; no progress gated on recognition.
+- **NPC memory persists across runs** (debts, grudges, favorites — a save file, cheap).
+
+### NPC roster (build ONE first, learn, then template)
+1. **Griz — merchant/arms dealer** (FIRST): slightly deaf (load-bearing trait), keeps a
+   grudge "ledger" (a napkin), plays favorites, respects loud confidence, secretly
+   cowardly (`threaten` + volume works — once). The negotiation showcase.
+2. **The Fixer — quest-giver**: run objectives ("win a fight using only Parry — double
+   pay"). Literal-minded; takes everything you say at face value.
+3. **The Bookie**: bets on your own performance; negotiate the odds with them.
+
+### Networking note
+Voice audio is NEVER networked. Each client's Vosk transcribes locally; transcripts/
+intents go to the host as tiny text messages; NPC state is host-authoritative; response
+line IDs sync so both players hear the same authored line.
+
+## 8. Networking Architecture
 
 ### Transport: Epic Online Services (decision made)
 - Mirror + **EOSTransport** (community transport for Mirror) from day one — all testing is
@@ -160,30 +301,38 @@ Each biome defines: song pool + beat maps, enemy/drone skins, ambient palette
 - Auto-ready lobby flow (PlayerController.Start → SetReady(true)) is fine for co-op but the
   scene-change flow needs testing with a real second client.
 - `DroneRushSegment` — no longer a fix needed: the segment is DELETED on the PC branch
-  (see §3 Burst Mode). Removal itself is a task: strip the script, scene object, and all
+  (see §3 dense-beats authoring rule). Removal itself is a task: strip the script, scene object, and all
   `AnySegmentActive` call sites.
 
 ---
 
-## 7. Build Order (risk-first)
+## 9. Build Order (risk-first)
 
 1. **Transport swap:** remove Steam, install EOSTransport, host+join via code. Existing
    single-player fight must run with a second client merely CONNECTED and spectating.
-2. **Clock sync + local beat judging refactor** (§6). Verify: remote client's EXCELLENT
+2. **Clock sync + local beat judging refactor** (§8). Verify: remote client's EXCELLENT
    ratings match what they see/hear locally at 100ms+ simulated ping (Mirror latency sim).
 3. **Alternating beats:** A/B beat assignment, partner-damage, per-player BeatInput setting,
    second PlayerCombat/anim path. One full fight, 2 real machines. ← *first fun milestone*
 4. **Minimal map:** 5 nodes, 1 biome (Meadow), fight/rest/boss only, vote-to-move.
-5. **Run structure:** HP carryover, party wipe, 2–3 card modifiers as loot, result screen
-   (reuse MatchResultHud rewrite — still pending from DESIGN.md).
-6. **Drone segment removal** + SmartBeatMapper 1.5s-gap save warning, then events,
-   shop, second biome, polish.
+5. **Weapon layer:** WeaponDef ScriptableObjects, VoiceCommandManager matches current
+   weapon's words, CardManager shows weapon cards. Katana + Warhammer first (co-op cards
+   included — they're the point).
+6. **Run structure:** HP carryover, party wipe, weapon drops + 2–3 slot modifiers as loot,
+   result screen (reuse MatchResultHud rewrite — still pending from DESIGN.md).
+7. **Drone segment removal** + SmartBeatMapper 1.5s-gap save warning, then events, shop,
+   traits (start with Berserker + Sentinel), ranged/arcane weapons, second biome, polish.
+
+**Parallel track (any time, single-scene prototype): Griz the merchant (§7).**
+Keyword-rule intents + price/patience state + ~40 authored lines. Judge ONE thing: is
+haggling with him fun for 5 minutes? If yes → embeddings, style reactivity, co-op mics,
+hub scene. If no → fix the writing, not the tech.
 
 Do not build biome content before milestone 3 is fun on two real machines.
 
 ---
 
-## 8. Uniqueness Hooks (idea backlog — pick a few, not all)
+## 10. Uniqueness Hooks (idea backlog — pick a few, not all)
 
 Ideas to make the game unmistakably ITS OWN thing. Rough priority order by
 (impact ÷ effort); none block the §7 milestones.
@@ -212,7 +361,7 @@ Ideas to make the game unmistakably ITS OWN thing. Rough priority order by
    name once; the crowd/announcer uses the recorded clip for round intros and MAN OF THE
    MATCH. Recorded locally, played locally — nothing networked or stored.
 
-## 9. Open Questions
+## 11. Open Questions
 
 - [ ] Beat map A/B tagging format — extend SmartBeatMapper output or tag at load?
 - [ ] Does the non-host player need the bot to be a NetworkIdentity at all, or fully
@@ -220,8 +369,13 @@ Ideas to make the game unmistakably ITS OWN thing. Rough priority order by
 - [ ] Assist mechanic ("HYPE!") — v1 or cut? (Cheap, but adds a second live mic path.)
 - [ ] Solo mode: keep playable alone (bot partner / all beats yours) or co-op only?
 - [ ] EOS account/product setup — who owns the Epic org?
+- [ ] Weapon drops: one shared drop both players negotiate over, or per-player drops?
+- [ ] Moonblade balancing: how does a no-defense player survive alternating beats?
+      (Leaning: their partner's co-op cards are the counterweight — or partner damage
+      doubles, making it a duo decision, not a solo pick.)
+- [ ] Do bot/enemies also get weapon movesets per biome (telegraphed by announcer VO)?
 
-## 10. Explicitly Preserved from Current Game
+## 12. Explicitly Preserved from Current Game
 
 - Voice card selection (Vosk, strict match, no PTT, >3-word guard)
 - Rock-paper-scissors outcome table + timing ratings (EXCELLENT/GOOD/BAD)

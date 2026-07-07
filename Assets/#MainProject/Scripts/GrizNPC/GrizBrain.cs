@@ -27,7 +27,7 @@ public class GrizBrain : MonoBehaviour
     public bool DealClosed { get; private set; }
     public bool KickedOut { get; private set; }
 
-    public enum Intent { Greet, Haggle, Offer, Flatter, Threaten, Beg, Insult, AskInfo, Buy, Unknown }
+    public enum Intent { Greet, Haggle, Offer, Flatter, Threaten, Beg, Insult, AskInfo, Smalltalk, Buy, Unknown }
 
     Intent _lastIntent = Intent.Unknown;
     int _repeat;                 // same intent in a row
@@ -101,6 +101,14 @@ public class GrizBrain : MonoBehaviour
                     : Pick(
                         "You already said hello. Once is polite, twice is a scheme.",
                         "Yes, yes, hello, hi, wonderful. BUY something.");
+                break;
+
+            case Intent.Smalltalk:
+                r.line = Pick(
+                    "How am I DOING? I'm surrounded by weapons and debt, kid. Living the dream.",
+                    "Business is bad, my knee is worse, and you're not buying anything. So — perfect, thanks.",
+                    $"Small talk is free. Everything else is {Price} gold.",
+                    "Oh we're CHATTING now? Sure. Lovely weather. Underground. Where there is no weather.");
                 break;
 
             case Intent.AskInfo:
@@ -294,6 +302,8 @@ public class GrizBrain : MonoBehaviour
         int threaten = Score(text, "or else", "kill", "hurt", "break your", "burn", "smash", "regret", "punch", "destroy", "make you", "last chance");
         int beg = Score(text, "please", "broke", "poor", "mercy", "help me out", "for free", "nothing left", "i beg");
         int insult = Score(text, "ugly", "stupid", "idiot", "scam", "thief", "trash", "garbage", "rip off", "ripoff", "old man", "crook", "hate you");
+        int smalltalk = Score(text, "how are you", "how you doing", "how are you doing", "how's it", "hows it",
+            "what's up", "whats up", "how is business", "how's business", "you good", "you okay", "nice place");
         int askInfo = Score(text, "what", "who", "where", "why", "how", "tell me", "story", "about this", "about the");
 
         // Offers: a number plus offer-ish context, or just a bare number
@@ -307,6 +317,7 @@ public class GrizBrain : MonoBehaviour
         if (haggle > 0) return Intent.Haggle;
         if (beg > 0) return Intent.Beg;
         if (flatter > 0) return Intent.Flatter;
+        if (smalltalk > 0) return Intent.Smalltalk;
         if (greet > 0) return Intent.Greet;
         if (askInfo > 0) return Intent.AskInfo;
         return Intent.Unknown;

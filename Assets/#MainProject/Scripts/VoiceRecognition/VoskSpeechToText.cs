@@ -444,7 +444,12 @@ public class VoskSpeechToText : MonoBehaviour
             if (Time.time - lastLatticeReset > IDLE_RESET_INTERVAL &&
                 Time.time - LastPartialTime  > IDLE_PARTIAL_THRESHOLD)
             {
-                _recognizer.FinalResult();
+                // This flush used to DISCARD the result — in FreeDictation mode that
+                // silently ate any sentence Vosk hadn't yet finalized via silence
+                // detection ("it heard me but nothing happened"). Deliver it instead.
+                string flushed = _recognizer.FinalResult();
+                if (System.Text.RegularExpressions.Regex.IsMatch(flushed ?? "", "\"text\"\\s*:\\s*\"[^\"]"))
+                    _threadedResultQueue.Enqueue(flushed);
                 _lastEnqueuedPartial = "";
                 lastLatticeReset = Time.time;
             }

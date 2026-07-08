@@ -27,7 +27,7 @@ public class GrizBrain : MonoBehaviour
     public bool DealClosed { get; private set; }
     public bool KickedOut { get; private set; }
 
-    public enum Intent { Greet, Haggle, Offer, Flatter, Threaten, Beg, Insult, AskInfo, Smalltalk, Buy, Accept, Barter, Backstory, Unknown }
+    public enum Intent { Greet, Haggle, Offer, Flatter, Threaten, Beg, Insult, AskInfo, Smalltalk, Buy, Accept, Barter, Backstory, Inventory, Unknown }
 
     Intent _lastIntent = Intent.Unknown;
     int _repeat;                 // same intent in a row
@@ -158,6 +158,17 @@ public class GrizBrain : MonoBehaviour
                 r.line = Pick(
                     $"DONE. {Price} gold. Shake on it — not too hard, the arm's original.",
                     $"{Price} it is. A pleasure doing business. Mostly my pleasure.");
+                break;
+
+            case Intent.Inventory:
+                r.line = _repeat == 0
+                    ? Pick(
+                        $"Else? ELSE? You're LOOKING at the inventory. The rest is napkins and regret. {itemName}, {Price} gold.",
+                        "Oh sure, let me check the back. (does not move) ...No. It's the sword or nothing.",
+                        $"Today's stock: one legendary sword. Yesterday's stock: same sword. It's a slow-moving legend. {Price} gold.")
+                    : Pick(
+                        "Asking twice doesn't restock the shelf, kid.",
+                        $"Still just the sword. It's getting self-conscious. {Price}, and apologize to it.");
                 break;
 
             case Intent.Barter:
@@ -339,7 +350,10 @@ public class GrizBrain : MonoBehaviour
             "what's up", "whats up", "how is business", "how's business", "you good", "you okay", "nice place");
         int backstory = Score(text, "your story", "about you", "who are you", "your life", "how did you", "why are you here",
             "about yourself", "your name", "where are you from", "what happened to you");
-        int barter = Score(text, "trade", "swap", "exchange", "barter", "something else", "instead of gold");
+        int barter = Score(text, "trade", "swap", "exchange", "barter", "instead of gold");
+        int inventory = Score(text, "anything else", "what else", "something else", "what do you have", "what you got",
+            "what have you got", "do you have", "you have any", "what do you sell", "what are you selling", "selling",
+            "show me", "other weapon", "other stuff", "more weapons", "inventory", "stock", "what's in", "whats in");
         int accept = Score(text, "okay", "ok", "fine", "sure", "alright", "yes", "yeah", "yep", "agreed");
         int askInfo = Score(text, "what", "who", "where", "why", "how", "tell me", "story", "about this", "about the");
 
@@ -352,6 +366,7 @@ public class GrizBrain : MonoBehaviour
         if (buy > 0) return Intent.Buy;
         // Bare agreement while Griz has a price on the table = accepting his counter
         if (_counterPending && accept > 0 && CountWords(text) <= 4) return Intent.Accept;
+        if (inventory > 0) return Intent.Inventory;
         if (barter > 0) return Intent.Barter;
         if (insult > flatter && insult > 0) return Intent.Insult;
         if (haggle > 0) return Intent.Haggle;

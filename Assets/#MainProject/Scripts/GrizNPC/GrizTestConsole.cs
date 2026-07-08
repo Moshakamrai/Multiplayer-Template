@@ -162,41 +162,58 @@ public class GrizTestConsole : MonoBehaviour
 
     void OnGUI()
     {
-        const int W = 640;
-        int H = Screen.height - 40;
-        GUILayout.BeginArea(new Rect(20, 20, W, H), GUI.skin.box);
+        // Fullscreen, scaled to resolution (test harness only — real game UI comes later)
+        int margin = Mathf.RoundToInt(Screen.width * 0.03f);
+        int W = Screen.width - margin * 2;
+        int H = Screen.height - margin * 2;
+        float k = Screen.height / 1080f; // font scale factor
+        int fBig = Mathf.RoundToInt(34 * k);
+        int fLog = Mathf.RoundToInt(26 * k);
+        int fSmall = Mathf.RoundToInt(20 * k);
 
-        GUILayout.Label("<b>GRIZ — negotiation prototype</b>  (talk, or type below and press Enter)",
-            Rich(14));
+        GUILayout.BeginArea(new Rect(margin, margin, W, H), GUI.skin.box);
+
+        GUILayout.Label("<b>GRIZ — negotiation prototype</b>   <color=#888888>(talk, or type below and press Enter)</color>",
+            Rich(fBig));
 
         // status row
         var vp = Vosk != null ? Vosk.VoiceProcessor : null;
         bool mic = vp != null && vp.IsRecording;
         float vol = mic ? vp.CurrentRawVolume : 0f;
-        GUILayout.Label($"Mic: {(mic ? "LIVE" : "starting… (typing works now)")}   " +
+        GUILayout.Label($"Mic: <b>{(mic ? "<color=#66ff66>LIVE</color>" : "starting… (typing works now)")}</b>   " +
                         $"Vol: {Bar(vol)}   Peak: {_peakVolume:0.00}   " +
-                        $"{(Vosk != null ? Vosk.StatusMessage : "no Vosk in scene")}", Rich(11));
+                        $"<color=#888888>{(Vosk != null ? Vosk.StatusMessage : "no Vosk in scene")}</color>", Rich(fSmall));
         if (!string.IsNullOrEmpty(_partial) || !string.IsNullOrEmpty(_pendingText))
         {
             string composing = (_pendingText + " " + _partial).Trim();
             float quiet = Time.time - _lastVoiceActivity;
-            GUILayout.Label($"hearing: “{composing}…”  (sends after {Mathf.Max(0f, silenceToSendSeconds - quiet):0.0}s of silence)", Rich(11));
+            GUILayout.Label($"<color=#ffe066>hearing: “{composing}…”  (sends after {Mathf.Max(0f, silenceToSendSeconds - quiet):0.0}s of silence)</color>", Rich(fSmall));
         }
 
-        // conversation log
-        _scroll = GUILayout.BeginScrollView(_scroll, GUILayout.Height(H - 190));
+        // conversation log — takes all remaining vertical space
+        float reserved = fBig + fSmall * 4 + 90 * k + 60;
+        _scroll = GUILayout.BeginScrollView(_scroll, GUILayout.Height(H - reserved));
         foreach (var line in _log)
-            GUILayout.Label(line, Rich(13));
+        {
+            string colored = line.StartsWith("[GRIZ]") ? $"<color=#ffb366>{line}</color>"
+                           : line.StartsWith("[YOU]") ? $"<color=#99ccff>{line}</color>"
+                           : $"<color=#aaffaa>{line}</color>";
+            GUILayout.Label(colored, Rich(fLog));
+            GUILayout.Space(6 * k);
+        }
         GUILayout.EndScrollView();
 
         // typed input
         GUI.SetNextControlName("grizInput");
-        _typed = GUILayout.TextField(_typed, GUILayout.Height(24));
+        var inputStyle = new GUIStyle(GUI.skin.textField) { fontSize = fLog };
+        _typed = GUILayout.TextField(_typed, inputStyle, GUILayout.Height(46 * k));
         bool submit = Event.current.type == EventType.KeyUp &&
                       (Event.current.keyCode == KeyCode.Return || Event.current.keyCode == KeyCode.KeypadEnter) &&
                       GUI.GetNameOfFocusedControl() == "grizInput";
+        var btnStyle = new GUIStyle(GUI.skin.button) { fontSize = fSmall };
         GUILayout.BeginHorizontal();
-        if ((GUILayout.Button("Send (typed)", GUILayout.Width(120)) || submit) && !string.IsNullOrWhiteSpace(_typed))
+        if ((GUILayout.Button("Send (typed)", btnStyle, GUILayout.Width(220 * k), GUILayout.Height(40 * k)) || submit)
+            && !string.IsNullOrWhiteSpace(_typed))
         {
             // typed input: fake a calm volume; append ! to simulate shouting
             float vol2 = _typed.EndsWith("!") ? 0.6f : 0.1f;
@@ -204,20 +221,22 @@ public class GrizTestConsole : MonoBehaviour
             _typed = "";
             GUI.FocusControl("grizInput");
         }
-        if (GUILayout.Button("Reset Griz", GUILayout.Width(100)))
+        if (GUILayout.Button("Reset Griz", btnStyle, GUILayout.Width(180 * k), GUILayout.Height(40 * k)))
         {
             Brain.ResetGriz();
             _log.Clear();
             Say("GRIZ", "(He flattens a fresh napkin.) Clean slate. TALK.");
         }
-        showDebugState = GUILayout.Toggle(showDebugState, "state");
+        var toggleStyle = new GUIStyle(GUI.skin.toggle) { fontSize = fSmall };
+        showDebugState = GUILayout.Toggle(showDebugState, " state", toggleStyle);
+        GUILayout.FlexibleSpace();
+        GUILayout.Label("<color=#888888>tip: typed input ending in ! counts as shouting</color>", Rich(fSmall));
         GUILayout.EndHorizontal();
 
         if (showDebugState && Brain != null)
-            GUILayout.Label($"price {Brain.Price}  |  patience {Brain.Patience:0}  |  respect {Brain.Respect:0}  |  fear {Brain.Fear:0}" +
-                            $"{(Brain.DealClosed ? "  |  DEAL" : "")}{(Brain.KickedOut ? "  |  KICKED OUT" : "")}", Rich(11));
+            GUILayout.Label($"price <b>{Brain.Price}</b>  |  patience {Brain.Patience:0}  |  respect {Brain.Respect:0}  |  fear {Brain.Fear:0}" +
+                            $"{(Brain.DealClosed ? "  |  <color=#66ff66>DEAL</color>" : "")}{(Brain.KickedOut ? "  |  <color=#ff6666>KICKED OUT</color>" : "")}", Rich(fSmall));
 
-        GUILayout.Label("tip: typed input ending in ! counts as shouting", Rich(10));
         GUILayout.EndArea();
     }
 

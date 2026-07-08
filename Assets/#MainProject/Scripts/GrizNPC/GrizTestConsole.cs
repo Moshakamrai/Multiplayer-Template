@@ -10,6 +10,7 @@ public class GrizTestConsole : MonoBehaviour
 {
     public VoskSpeechToText Vosk;
     public GrizBrain Brain;
+    public GrizVoice Voice;
 
     [Tooltip("Show the hidden state panel (price/patience/respect/fear).")]
     public bool showDebugState = true;
@@ -37,6 +38,7 @@ public class GrizTestConsole : MonoBehaviour
     {
         if (Brain == null) Brain = FindObjectOfType<GrizBrain>();
         if (Vosk == null) Vosk = FindObjectOfType<VoskSpeechToText>();
+        if (Voice == null) Voice = Brain != null ? Brain.gameObject.AddComponent<GrizVoice>() : null;
         if (Vosk != null)
         {
             Vosk.OnTranscriptionResult += OnFinalResult;
@@ -73,7 +75,9 @@ public class GrizTestConsole : MonoBehaviour
         if (Brain != null && !Brain.DealClosed && !Brain.KickedOut &&
             Time.time - _lastExchangeTime > idleBlabberSeconds)
         {
-            Say("GRIZ", Brain.IdleMutter());
+            string mutter = Brain.IdleMutter();
+            Say("GRIZ", mutter);
+            if (Voice != null) Voice.Speak(mutter, 0.9f); // muttering = lower, slower
             _lastExchangeTime = Time.time;
         }
     }
@@ -90,9 +94,12 @@ public class GrizTestConsole : MonoBehaviour
     void HandleUtterance(string text, float peakVolume)
     {
         _lastExchangeTime = Time.time;
+        if (Voice != null && Voice.IsSpeaking) Voice.Stop(); // audibly cut off = interruption
         Say("YOU", $"{text}   <vol {peakVolume:0.00}>");
         var reply = Brain.Process(text, peakVolume);
         Say("GRIZ", $"{reply.line}   <{reply.intent}>");
+        // agitation rises as patience falls
+        if (Voice != null) Voice.Speak(reply.line, 1f + (60f - Brain.Patience) / 150f);
         if (reply.dealClosed) Say("*", "── DEAL CLOSED ── (Reset to go again)");
         if (reply.kickedOut) Say("*", "── KICKED OUT ── (Reset to grovel your way back in)");
     }

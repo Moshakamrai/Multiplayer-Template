@@ -27,12 +27,14 @@ public class GrizBrain : MonoBehaviour
     public bool DealClosed { get; private set; }
     public bool KickedOut { get; private set; }
 
-    public enum Intent { Greet, Haggle, Offer, Flatter, Threaten, Beg, Insult, AskInfo, Smalltalk, Buy, Unknown }
+    public enum Intent { Greet, Haggle, Offer, Flatter, Threaten, Beg, Insult, AskInfo, Smalltalk, Buy, Accept, Barter, Backstory, Unknown }
 
     Intent _lastIntent = Intent.Unknown;
     int _repeat;                 // same intent in a row
     int _unknownCount;
     bool _threatSpent;           // the coward card only works once
+    bool _counterPending;        // Griz just named a price → a bare "okay" accepts it
+    int _storyIndex;
     float _lastReplyTime = -99f;
     readonly System.Random _rng = new System.Random();
 
@@ -78,6 +80,7 @@ public class GrizBrain : MonoBehaviour
         _repeat = (intent == _lastIntent) ? _repeat + 1 : 0;
         _lastIntent = intent;
         r.intent = intent;
+        _counterPending = false; // re-set below by any branch that puts a price on the table
 
         // Interruption gets noticed before anything else
         if (interrupted && intent != Intent.Unknown)
@@ -122,6 +125,7 @@ public class GrizBrain : MonoBehaviour
                 if (_repeat == 0)
                 {
                     Price = Mathf.Max(hiddenFloor, Price - Mathf.RoundToInt(basePrice * 0.10f));
+                    _counterPending = true;
                     r.line = Pick(
                         $"Ohh, a negotiator. Fine. {Price}. Because you made me laugh inside. Deep inside.",
                         $"You wound me. WOUND me. ...{Price}. Final. Probably.");
@@ -130,6 +134,7 @@ public class GrizBrain : MonoBehaviour
                 {
                     Price = Mathf.Max(hiddenFloor, Price - Mathf.RoundToInt(basePrice * 0.05f));
                     Patience -= 10f;
+                    _counterPending = true;
                     r.line = Pick(
                         $"AGAIN with the haggling. {Price}. My children will starve. I don't have children. STILL.",
                         $"{Price}, and I want you to know I'm frowning. This is my frowning face.");
@@ -145,6 +150,25 @@ public class GrizBrain : MonoBehaviour
 
             case Intent.Offer:
                 r = HandleOffer(offer, r);
+                break;
+
+            case Intent.Accept:
+                DealClosed = true;
+                r.dealClosed = true;
+                r.line = Pick(
+                    $"DONE. {Price} gold. Shake on it — not too hard, the arm's original.",
+                    $"{Price} it is. A pleasure doing business. Mostly my pleasure.");
+                break;
+
+            case Intent.Barter:
+                r.line = Pick(
+                    "TRADE? What've you got, pockets full of AMBITION? Gold, kid. The napkin only counts gold.",
+                    "I did barter once. Now I own three goats and a grudge. GOLD only.",
+                    "Unless it jingles, I don't want it.");
+                break;
+
+            case Intent.Backstory:
+                r.line = NextStoryLine();
                 break;
 
             case Intent.Buy:
@@ -181,7 +205,15 @@ public class GrizBrain : MonoBehaviour
                 break;
 
             case Intent.Threaten:
-                if (!shouting)
+                if (offer > 0)
+                {
+                    Patience -= 5f;
+                    _counterPending = true;
+                    r.line = Pick(
+                        $"{offer} gold AND a death threat? That's not haggling, that's a mugging with extra steps. {Price}.",
+                        $"You offer {offer} and threaten the family I don't HAVE. Bold. Insane, but bold. Price is still {Price}.");
+                }
+                else if (!shouting)
                 {
                     Patience -= 5f;
                     r.line = Pick(
@@ -274,6 +306,7 @@ public class GrizBrain : MonoBehaviour
         else
         {
             Price = Mathf.Max(hiddenFloor, (Price + offer) / 2);
+            _counterPending = true;
             r.line = Pick(
                 $"{offer}? Cute. Meet me at {Price} and we'll both hate it equally.",
                 $"Not {offer}. {Price}. That's the sound of me compromising. Savor it.");
@@ -295,39 +328,59 @@ public class GrizBrain : MonoBehaviour
     {
         if (string.IsNullOrWhiteSpace(text)) return Intent.Unknown;
 
-        int greet = Score(text, "hello", "hi ", "hey", "yo ", "greetings", "sup", "good day");
+        int greet = Score(text, "hello", "hi", "hey", "yo", "greetings", "sup", "good day");
         int buy = Score(text, "deal", "sold", "i'll take", "ill take", "i'll buy", "ill buy", "take it", "buy it", "we're done", "done deal", "you got a deal");
         int haggle = Score(text, "cheaper", "discount", "lower", "too much", "expensive", "less", "drop the price", "come down", "better price", "best price");
         int flatter = Score(text, "nice", "love", "best", "handsome", "great", "amazing", "beautiful", "friend", "legend", "genius", "wonderful", "charming");
-        int threaten = Score(text, "or else", "kill", "hurt", "break your", "burn", "smash", "regret", "punch", "destroy", "make you", "last chance");
+        int threaten = Score(text, "or else", "kill", "hurt", "break your", "burn", "smash", "regret", "punch", "destroy", "make you", "last chance", "stab", "dead");
         int beg = Score(text, "please", "broke", "poor", "mercy", "help me out", "for free", "nothing left", "i beg");
         int insult = Score(text, "ugly", "stupid", "idiot", "scam", "thief", "trash", "garbage", "rip off", "ripoff", "old man", "crook", "hate you");
         int smalltalk = Score(text, "how are you", "how you doing", "how are you doing", "how's it", "hows it",
             "what's up", "whats up", "how is business", "how's business", "you good", "you okay", "nice place");
+        int backstory = Score(text, "your story", "about you", "who are you", "your life", "how did you", "why are you here",
+            "about yourself", "your name", "where are you from", "what happened to you");
+        int barter = Score(text, "trade", "swap", "exchange", "barter", "something else", "instead of gold");
+        int accept = Score(text, "okay", "ok", "fine", "sure", "alright", "yes", "yeah", "yep", "agreed");
         int askInfo = Score(text, "what", "who", "where", "why", "how", "tell me", "story", "about this", "about the");
 
-        // Offers: a number plus offer-ish context, or just a bare number
-        bool offerContext = offer > 0 && (Score(text, "gold", "coin", "give you", "offer", "how about", "pay", "i got", "i have", "take ") > 0
+        bool offerContext = offer > 0 && (Score(text, "gold", "coin", "give you", "offer", "how about", "pay", "i got", "i have", "take") > 0
                                           || CountWords(text) <= 3);
+
+        // Threats outrank everything — "twenty gold or else" is a threat, not an offer
+        if (threaten > 0) return Intent.Threaten;
         if (offerContext) return Intent.Offer;
         if (buy > 0) return Intent.Buy;
-        if (shouting && threaten > 0) return Intent.Threaten;
-        if (threaten > 0) return Intent.Threaten;
+        // Bare agreement while Griz has a price on the table = accepting his counter
+        if (_counterPending && accept > 0 && CountWords(text) <= 4) return Intent.Accept;
+        if (barter > 0) return Intent.Barter;
         if (insult > flatter && insult > 0) return Intent.Insult;
         if (haggle > 0) return Intent.Haggle;
         if (beg > 0) return Intent.Beg;
         if (flatter > 0) return Intent.Flatter;
         if (smalltalk > 0) return Intent.Smalltalk;
+        if (backstory > 0) return Intent.Backstory;
         if (greet > 0) return Intent.Greet;
         if (askInfo > 0) return Intent.AskInfo;
         return Intent.Unknown;
     }
 
+    // Single words match on WORD BOUNDARIES ("how" must not match inside "however");
+    // multi-word phrases use plain substring matching.
     static int Score(string text, params string[] keys)
     {
         int s = 0;
-        foreach (var k in keys)
-            if (text.Contains(k)) s++;
+        foreach (var raw in keys)
+        {
+            string k = raw.Trim();
+            if (k.Contains(" "))
+            {
+                if (text.Contains(k)) s++;
+            }
+            else if (Regex.IsMatch(text, @"\b" + Regex.Escape(k) + @"\b"))
+            {
+                s++;
+            }
+        }
         return s;
     }
 
@@ -366,4 +419,37 @@ public class GrizBrain : MonoBehaviour
     }
 
     string Pick(params string[] options) => options[_rng.Next(options.Length)];
+
+    // ── Backstory: every NPC blabbers lore. Sequential so stories don't repeat. ──
+    static readonly string[] StoryLines =
+    {
+        "Me? Twenty years I fought up THERE. The crowd chants your name until one day it chants someone else's. So now I sell the chanters their swords.",
+        "Lost the ear in the semifinals of '09. Not the hearing — the EAR. Won the fight though. Kept the ear. It's in a box somewhere.",
+        "This shop was my manager's. He owed me money, then he owed me the shop, then he ran. His name's top of the napkin. THE ORIGINAL napkin.",
+        "The arena wasn't always music, you know. Used to be just screaming. Then some genius added DRUMS to the screaming and sold tickets. Civilization!",
+        "Every weapon here has a story. Usually the story is: a fighter stopped needing it. Suddenly. Mid-sentence.",
+        "I had a partner once. A caller. Best voice in the business. One night the crowd was too loud and the striker couldn't hear him. That was that. SPEAK UP — that's my point.",
+        "Kid came in last month, bought the janky blade, saved thirty gold. Very proud of himself. The arena keeps his boots by the door now. Nice boots.",
+        "Why 'Griz'? Short for something. Nobody alive remembers what. I enjoy the mystery. Also I forgot.",
+    };
+
+    public string NextStoryLine()
+    {
+        string line = StoryLines[_storyIndex % StoryLines.Length];
+        _storyIndex++;
+        return line;
+    }
+
+    // Unprompted rambling when the players go quiet — called by the hub/console on a timer.
+    public string IdleMutter()
+    {
+        int roll = _rng.Next(3);
+        if (roll == 0) return NextStoryLine();
+        return Pick(
+            "(muttering) ...and SHE said the axe was 'decorative'...",
+            "(scratches a new name onto the napkin, glances up at you, scratches harder)",
+            "You browse like someone who can't read price tags.",
+            "(hums the arena anthem, badly, with feeling)",
+            $"That's {itemName} you keep eyeballing. It can tell. It's needy like that.");
+    }
 }

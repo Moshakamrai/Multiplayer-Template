@@ -14,6 +14,10 @@ public class GrizTestConsole : MonoBehaviour
     [Tooltip("Show the hidden state panel (price/patience/respect/fear).")]
     public bool showDebugState = true;
 
+    [Tooltip("Seconds of silence before Griz starts rambling unprompted.")]
+    public float idleBlabberSeconds = 25f;
+    float _lastExchangeTime;
+
     readonly List<string> _log = new List<string>();
     string _typed = "";
     string _partial = "";
@@ -64,6 +68,14 @@ public class GrizTestConsole : MonoBehaviour
         var vp = Vosk != null ? Vosk.VoiceProcessor : null;
         if (vp != null && vp.IsRecording)
             _peakVolume = Mathf.Max(_peakVolume, vp.CurrentRawVolume);
+
+        // Go quiet too long and he fills the silence himself
+        if (Brain != null && !Brain.DealClosed && !Brain.KickedOut &&
+            Time.time - _lastExchangeTime > idleBlabberSeconds)
+        {
+            Say("GRIZ", Brain.IdleMutter());
+            _lastExchangeTime = Time.time;
+        }
     }
 
     void OnFinalResult(string json)
@@ -77,6 +89,7 @@ public class GrizTestConsole : MonoBehaviour
 
     void HandleUtterance(string text, float peakVolume)
     {
+        _lastExchangeTime = Time.time;
         Say("YOU", $"{text}   <vol {peakVolume:0.00}>");
         var reply = Brain.Process(text, peakVolume);
         Say("GRIZ", $"{reply.line}   <{reply.intent}>");

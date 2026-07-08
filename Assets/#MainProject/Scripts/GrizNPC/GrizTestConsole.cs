@@ -19,6 +19,12 @@ public class GrizTestConsole : MonoBehaviour
     public float idleBlabberSeconds = 25f;
     float _lastExchangeTime;
 
+    [Tooltip("How long Griz waits after you stop talking before he answers. If you keep talking, the fragments merge into one utterance.")]
+    public float replySilenceSeconds = 2f;
+    string _pendingText = "";
+    float _pendingVolume;
+    Coroutine _pendingReply;
+
     readonly List<string> _log = new List<string>();
     string _typed = "";
     string _partial = "";
@@ -87,16 +93,46 @@ public class GrizTestConsole : MonoBehaviour
         string text = ExtractText(json);
         _partial = "";
         if (string.IsNullOrWhiteSpace(text)) { _peakVolume = 0f; return; }
-        HandleUtterance(text, _peakVolume);
+        HandleUtterance(text, _peakVolume, immediate: false);
         _peakVolume = 0f;
     }
 
-    void HandleUtterance(string text, float peakVolume)
+    // Voice input: buffer for replySilenceSeconds so the player can finish their thought —
+    // more speech during the wait MERGES into one utterance (fixes Vosk chopping sentences).
+    // Typed input replies immediately.
+    void HandleUtterance(string text, float peakVolume, bool immediate)
     {
         _lastExchangeTime = Time.time;
         if (Voice != null && Voice.IsSpeaking) Voice.Stop(); // audibly cut off = interruption
         Say("YOU", $"{text}   <vol {peakVolume:0.00}>");
-        var reply = Brain.Process(text, peakVolume);
+
+        _pendingText = string.IsNullOrEmpty(_pendingText) ? text : _pendingText + " " + text;
+        _pendingVolume = Mathf.Max(_pendingVolume, peakVolume);
+
+        if (_pendingReply != null) StopCoroutine(_pendingReply);
+        if (immediate) ReplyNow();
+        else _pendingReply = StartCoroutine(ReplyAfterSilence());
+    }
+
+    IEnumerator ReplyAfterSilence()
+    {
+        yield return new WaitForSeconds(replySilenceSeconds);
+        // if Vosk is mid-word on something new, give it a moment more
+        while (!string.IsNullOrEmpty(_partial)) yield return null;
+        ReplyNow();
+    }
+
+    void ReplyNow()
+    {
+        _pendingReply = null;
+        string text = _pendingText;
+        float vol = _pendingVolume;
+        _pendingText = "";
+        _pendingVolume = 0f;
+        if (string.IsNullOrWhiteSpace(text)) return;
+
+        _lastExchangeTime = Time.time;
+        var reply = Brain.Process(text, vol);
         Say("GRIZ", $"{reply.line}   <{reply.intent}>");
         // agitation rises as patience falls
         if (Voice != null) Voice.Speak(reply.line, 1f + (60f - Brain.Patience) / 150f);
@@ -155,7 +191,7 @@ public class GrizTestConsole : MonoBehaviour
         {
             // typed input: fake a calm volume; append ! to simulate shouting
             float vol2 = _typed.EndsWith("!") ? 0.6f : 0.1f;
-            HandleUtterance(_typed.TrimEnd('!'), vol2);
+            HandleUtterance(_typed.TrimEnd('!'), vol2, immediate: true);
             _typed = "";
             GUI.FocusControl("grizInput");
         }

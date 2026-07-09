@@ -11,6 +11,7 @@ public class GrizTestConsole : MonoBehaviour
     public VoskSpeechToText Vosk;
     public GrizBrain Brain;
     public GrizVoice Voice;
+    public PiperVoice Piper;
 
     [Tooltip("Show the hidden state panel (price/patience/respect/fear).")]
     public bool showDebugState = true;
@@ -47,6 +48,13 @@ public class GrizTestConsole : MonoBehaviour
         if (Brain == null) Brain = FindObjectOfType<GrizBrain>();
         if (Vosk == null) Vosk = FindObjectOfType<VoskSpeechToText>();
         if (Voice == null) Voice = Brain != null ? Brain.gameObject.AddComponent<GrizVoice>() : null;
+        if (Piper == null && Brain != null)
+        {
+            // own child GameObject so its AudioSource doesn't fight GrizVoice's
+            var go = new GameObject("PiperVoice");
+            go.transform.SetParent(Brain.transform, false);
+            Piper = go.AddComponent<PiperVoice>();
+        }
         if (Vosk != null)
         {
             Vosk.OnTranscriptionResult += OnFinalResult;
@@ -97,7 +105,7 @@ public class GrizTestConsole : MonoBehaviour
         {
             string mutter = Brain.IdleMutter();
             Say("GRIZ", mutter);
-            if (Voice != null) Voice.Speak(mutter, 0.9f); // muttering = lower, slower
+            SpeakLine(mutter, muttering: true);
             _lastExchangeTime = Time.time;
         }
     }
@@ -118,7 +126,9 @@ public class GrizTestConsole : MonoBehaviour
     void HandleUtterance(string text, float peakVolume, bool immediate)
     {
         _lastExchangeTime = Time.time;
-        if (Voice != null && Voice.IsSpeaking) Voice.Stop(); // audibly cut off = interruption
+        // audibly cut off = interruption
+        if (Voice != null && Voice.IsSpeaking) Voice.Stop();
+        if (Piper != null && Piper.IsSpeaking) Piper.Stop();
 
         _pendingText = string.IsNullOrEmpty(_pendingText) ? text : _pendingText + " " + text;
         _pendingVolume = Mathf.Max(_pendingVolume, peakVolume);
@@ -139,10 +149,24 @@ public class GrizTestConsole : MonoBehaviour
         Say("YOU", $"{text}   <vol {vol:0.00}>");
         var reply = Brain.Process(text, vol);
         Say("GRIZ", $"{reply.line}   <{reply.intent}>");
-        // agitation rises as patience falls
-        if (Voice != null) Voice.Speak(reply.line, 1f + (60f - Brain.Patience) / 150f);
+        SpeakLine(reply.line);
         if (reply.dealClosed) Say("*", "── DEAL CLOSED ── (Reset to go again)");
         if (reply.kickedOut) Say("*", "── KICKED OUT ── (Reset to grovel your way back in)");
+    }
+
+    // Piper (real TTS) when installed, procedural gibberish otherwise
+    void SpeakLine(string line, bool muttering = false)
+    {
+        if (Piper != null && Piper.Available)
+        {
+            Piper.Speak(line);
+        }
+        else if (Voice != null)
+        {
+            // gibberish agitation rises as patience falls; muttering = lower and slower
+            float mood = muttering ? 0.9f : 1f + (60f - (Brain != null ? Brain.Patience : 60f)) / 150f;
+            Voice.Speak(line, mood);
+        }
     }
 
     void Say(string who, string line)
@@ -180,8 +204,11 @@ public class GrizTestConsole : MonoBehaviour
         var vp = Vosk != null ? Vosk.VoiceProcessor : null;
         bool mic = vp != null && vp.IsRecording;
         float vol = mic ? vp.CurrentRawVolume : 0f;
+        string voiceMode = Piper != null && Piper.Available
+            ? "<color=#66ff66>Piper TTS</color>"
+            : "gibberish <color=#888888>(run Tools > Griz > Check Piper Setup for real TTS)</color>";
         GUILayout.Label($"Mic: <b>{(mic ? "<color=#66ff66>LIVE</color>" : "starting… (typing works now)")}</b>   " +
-                        $"Vol: {Bar(vol)}   Peak: {_peakVolume:0.00}   " +
+                        $"Vol: {Bar(vol)}   Peak: {_peakVolume:0.00}   Voice: {voiceMode}   " +
                         $"<color=#888888>{(Vosk != null ? Vosk.StatusMessage : "no Vosk in scene")}</color>", Rich(fSmall));
         if (!string.IsNullOrEmpty(_partial) || !string.IsNullOrEmpty(_pendingText))
         {

@@ -100,7 +100,8 @@ public class GrizBrain : MonoBehaviour
                 r.line = _repeat == 0
                     ? Pick(
                         $"Well well. Fresh meat with FUNCTIONING legs. I'm Griz. This beauty is {itemName}. {Price} gold, and that's me being generous.",
-                        $"Welcome to the finest — okay, the ONLY — shop down here. {itemName}. {Price} gold. Don't touch anything else.")
+                        $"Welcome to the finest — okay, the ONLY — shop down here. {itemName}. {Price} gold. Don't touch anything else.",
+                        $"Ahh, CUSTOMERS! Welcome to Griz's Fine Armaments. Mind the blood — most of it's decorative. {itemName}, {Price} gold, today only. Also every day.")
                     : Pick(
                         "You already said hello. Once is polite, twice is a scheme.",
                         "Yes, yes, hello, hi, wonderful. BUY something.");
@@ -187,7 +188,8 @@ public class GrizBrain : MonoBehaviour
                 r.dealClosed = true;
                 r.line = Pick(
                     $"SOLD! {Price} gold. Pleasure ruining you — DOING business with you.",
-                    $"{Price} gold and {itemName} is yours. No refunds. The napkin says so.");
+                    $"{Price} gold and {itemName} is yours. No refunds. The napkin says so.",
+                    $"SOLD for {Price}! May it serve you well. It won't. But may it.");
                 break;
 
             case Intent.Flatter:

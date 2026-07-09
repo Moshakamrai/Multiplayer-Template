@@ -31,18 +31,38 @@ public class GrizAnimatorLink : MonoBehaviour
     [Tooltip("A line containing any of these words triggers the draw.")]
     public string[] swordWords = { "rust-cutter", "sword" };
 
+    [Header("Head look")]
+    [Tooltip("Look toward the camera while talking (needs Humanoid rig + IK Pass on Base Layer).")]
+    public bool lookAtCamera = true;
+
     bool _swordOut;
     bool _wasSpeaking;
+    // Animation is QUEUED here and only fires when the voice audio actually starts
+    // (Piper synthesis takes ~0.5s — without this the anim leads the voice).
+    string _pendingState;
+    bool _pendingSword;
+    float _pendingSince;
 
     void Start()
     {
         if (animator == null) animator = GetComponentInChildren<Animator>();
         if (piper == null) piper = FindObjectOfType<PiperVoice>();
         if (gibberish == null) gibberish = FindObjectOfType<GrizVoice>();
+
+        if (lookAtCamera && animator != null)
+        {
+            var look = animator.gameObject.GetComponent<GrizHeadLook>();
+            if (look == null) look = animator.gameObject.AddComponent<GrizHeadLook>();
+            look.link = this;
+            if (look.target == null && Camera.main != null) look.target = Camera.main.transform;
+        }
     }
 
     bool Speaking =>
         (piper != null && piper.IsSpeaking) || (gibberish != null && gibberish.IsSpeaking);
+
+    /// <summary>True while his voice is playing — used by GrizHeadLook.</summary>
+    public bool IsTalking => Speaking;
 
     /// <summary>Called by the console/hub whenever Griz starts a line.</summary>
     public void PlayForLine(string line, GrizBrain.Intent intent, GrizBrain brain)
@@ -53,10 +73,10 @@ public class GrizAnimatorLink : MonoBehaviour
         if (!_swordOut && MentionsSword(line))
         {
             _swordOut = true;
-            if (swordObject != null) swordObject.SetActive(true);
+            _pendingSword = true;
             if (!string.IsNullOrEmpty(unsheatheState))
             {
-                animator.CrossFadeInFixedTime(unsheatheState, crossFadeSeconds);
+                QueueState(unsheatheState);
                 return; // your Animator transition carries it into swordIdleState
             }
         }
@@ -69,15 +89,39 @@ public class GrizAnimatorLink : MonoBehaviour
         else state = talkingStates.Length > 0 ? talkingStates[Random.Range(0, talkingStates.Length)] : idleState;
 
         if (!string.IsNullOrEmpty(state))
-            animator.CrossFadeInFixedTime(state, crossFadeSeconds);
+            QueueState(state);
+    }
+
+    void QueueState(string state)
+    {
+        _pendingState = state;
+        _pendingSince = Time.time;
+        if (Speaking) ApplyPending(); // audio already rolling (e.g. cached wav) — fire now
+    }
+
+    void ApplyPending()
+    {
+        if (_pendingSword)
+        {
+            if (swordObject != null) swordObject.SetActive(true);
+            _pendingSword = false;
+        }
+        if (!string.IsNullOrEmpty(_pendingState) && animator != null)
+            animator.CrossFadeInFixedTime(_pendingState, crossFadeSeconds);
+        _pendingState = null;
     }
 
     void Update()
     {
         bool speaking = Speaking;
+
+        // fire the queued state the moment the audio starts (3s fallback if voice never comes)
+        if (_pendingState != null && (speaking || Time.time - _pendingSince > 3f))
+            ApplyPending();
+
         // line finished (or was interrupted) → settle back to idle (sword idle once drawn)
         string rest = _swordOut && !string.IsNullOrEmpty(swordIdleState) ? swordIdleState : idleState;
-        if (_wasSpeaking && !speaking && animator != null && !string.IsNullOrEmpty(rest))
+        if (_wasSpeaking && !speaking && _pendingState == null && animator != null && !string.IsNullOrEmpty(rest))
             animator.CrossFadeInFixedTime(rest, crossFadeSeconds * 2f);
         _wasSpeaking = speaking;
     }

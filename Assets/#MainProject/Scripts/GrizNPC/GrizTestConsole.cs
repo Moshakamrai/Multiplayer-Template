@@ -18,6 +18,8 @@ public class GrizTestConsole : MonoBehaviour
     public bool cinematicMode = false;
     string _lastGrizLine = "";
     float _lastGrizLineTime = -99f;
+    string _lastYouLine = "";
+    float _lastYouLineTime = -99f;
 
     [Tooltip("Show the hidden state panel (price/patience/respect/fear).")]
     public bool showDebugState = true;
@@ -162,6 +164,8 @@ public class GrizTestConsole : MonoBehaviour
 
         _lastExchangeTime = Time.time;
         Say("YOU", $"{text}   <vol {vol:0.00}>");
+        _lastYouLine = text;
+        _lastYouLineTime = Time.time;
         var reply = Brain.Process(text, vol);
         Say("GRIZ", $"{reply.line}   <{reply.intent}>");
         _lastGrizLine = reply.line;
@@ -305,15 +309,33 @@ public class GrizTestConsole : MonoBehaviour
 
         GUI.Label(new Rect(10, 6, 500, 34), "<color=#66666688>F1 — debug console</color>", Rich(fSmall));
 
-        // live "hearing…" indicator, bottom-right, with the send countdown
-        if (!string.IsNullOrEmpty(_partial) || !string.IsNullOrEmpty(_pendingText))
+        // YOUR box, bottom-right: live transcription (big, yellow, with send countdown)
+        // while you talk; the sent line lingers white for a few seconds after.
+        bool composingNow = !string.IsNullOrEmpty(_partial) || !string.IsNullOrEmpty(_pendingText);
+        string youText = null;
+        if (composingNow)
         {
-            string composing = (_pendingText + " " + _partial).Trim();
             float quiet = Time.time - _lastVoiceActivity;
-            var hear = Rich(fSmall);
-            hear.alignment = TextAnchor.LowerRight;
-            GUI.Label(new Rect(Screen.width * 0.5f, Screen.height - 48 * k, Screen.width * 0.47f, 44 * k),
-                $"<color=#ffe066>“{composing}…”  ({Mathf.Max(0f, silenceToSendSeconds - quiet):0.0}s)</color>", hear);
+            youText = $"<color=#ffe066>{(_pendingText + " " + _partial).Trim()}…   " +
+                      $"<size={fSmall}>({Mathf.Max(0f, silenceToSendSeconds - quiet):0.0}s)</size></color>";
+        }
+        else if (Time.time - _lastYouLineTime < 4f && !string.IsNullOrEmpty(_lastYouLine))
+        {
+            youText = $"<color=#ffffff>{_lastYouLine}</color>";
+        }
+        if (youText != null)
+        {
+            float yw = Mathf.Max(480f, Screen.width * 0.36f);
+            int fYou = Mathf.RoundToInt(30 * k);
+            var youStyle = Rich(fYou);
+            float yh = youStyle.CalcHeight(new GUIContent(youText), yw - 36 * k) + 48 * k;
+            var yr = new Rect(Screen.width - yw - 24 * k, Screen.height - yh - 24 * k, yw, yh);
+            GUI.Box(yr, GUIContent.none);
+            GUI.Box(yr, GUIContent.none);
+            GUI.Label(new Rect(yr.x + 18 * k, yr.y + 8 * k, yw - 36 * k, fSmall + 8),
+                "<b><color=#99ccff>YOU</color></b>", Rich(fSmall));
+            GUI.Label(new Rect(yr.x + 18 * k, yr.y + fSmall + 16 * k, yw - 36 * k, yh - fSmall - 20 * k),
+                youText, youStyle);
         }
 
         bool speaking = (Voice != null && Voice.IsSpeaking) || (Piper != null && Piper.IsSpeaking);

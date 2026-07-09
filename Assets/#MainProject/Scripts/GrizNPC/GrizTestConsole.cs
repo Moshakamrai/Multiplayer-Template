@@ -12,6 +12,12 @@ public class GrizTestConsole : MonoBehaviour
     public GrizBrain Brain;
     public GrizVoice Voice;
     public PiperVoice Piper;
+    public GrizAnimatorLink AnimLink;
+
+    [Tooltip("F1 toggles between the full debug console and cinematic mode (corner dialog box only) — use cinematic for showcase videos.")]
+    public bool cinematicMode = false;
+    string _lastGrizLine = "";
+    float _lastGrizLineTime = -99f;
 
     [Tooltip("Show the hidden state panel (price/patience/respect/fear).")]
     public bool showDebugState = true;
@@ -55,6 +61,7 @@ public class GrizTestConsole : MonoBehaviour
             go.transform.SetParent(Brain.transform, false);
             Piper = go.AddComponent<PiperVoice>();
         }
+        if (AnimLink == null) AnimLink = FindObjectOfType<GrizAnimatorLink>();
         if (Vosk != null)
         {
             Vosk.OnTranscriptionResult += OnFinalResult;
@@ -105,7 +112,10 @@ public class GrizTestConsole : MonoBehaviour
         {
             string mutter = Brain.IdleMutter();
             Say("GRIZ", mutter);
+            _lastGrizLine = mutter;
+            _lastGrizLineTime = Time.time;
             SpeakLine(mutter, muttering: true);
+            if (AnimLink != null) AnimLink.PlayForLine(mutter, GrizBrain.Intent.Smalltalk, Brain);
             _lastExchangeTime = Time.time;
         }
     }
@@ -154,7 +164,10 @@ public class GrizTestConsole : MonoBehaviour
         Say("YOU", $"{text}   <vol {vol:0.00}>");
         var reply = Brain.Process(text, vol);
         Say("GRIZ", $"{reply.line}   <{reply.intent}>");
+        _lastGrizLine = reply.line;
+        _lastGrizLineTime = Time.time;
         SpeakLine(reply.line);
+        if (AnimLink != null) AnimLink.PlayForLine(reply.line, reply.intent, Brain);
         if (reply.dealClosed) Say("*", "── DEAL CLOSED ── (Reset to go again)");
         if (reply.kickedOut) Say("*", "── KICKED OUT ── (Reset to grovel your way back in)");
     }
@@ -191,6 +204,15 @@ public class GrizTestConsole : MonoBehaviour
 
     void OnGUI()
     {
+        // F1 toggles cinematic mode (Event-based — works with either input backend)
+        var e = Event.current;
+        if (e.type == EventType.KeyDown && e.keyCode == KeyCode.F1)
+        {
+            cinematicMode = !cinematicMode;
+            e.Use();
+        }
+        if (cinematicMode) { DrawCinematic(); return; }
+
         // Fullscreen, scaled to resolution (test harness only — real game UI comes later)
         int margin = Mathf.RoundToInt(Screen.width * 0.03f);
         int W = Screen.width - margin * 2;
@@ -202,7 +224,7 @@ public class GrizTestConsole : MonoBehaviour
 
         GUILayout.BeginArea(new Rect(margin, margin, W, H), GUI.skin.box);
 
-        GUILayout.Label("<b>GRIZ — negotiation prototype</b>   <color=#888888>(talk, or type below and press Enter)</color>",
+        GUILayout.Label("<b>GRIZ — negotiation prototype</b>   <color=#888888>(talk, or type below and press Enter — F1: cinematic mode)</color>",
             Rich(fBig));
 
         // status row
@@ -270,6 +292,47 @@ public class GrizTestConsole : MonoBehaviour
                             $"{(Brain.DealClosed ? "  |  <color=#66ff66>DEAL</color>" : "")}{(Brain.KickedOut ? "  |  <color=#ff6666>KICKED OUT</color>" : "")}", Rich(fSmall));
 
         GUILayout.EndArea();
+    }
+
+    // Cinematic mode: just a corner dialog box with big text + the live "hearing" hint.
+    // Clean enough to film — the debug console stays one F1 away.
+    void DrawCinematic()
+    {
+        float k = Screen.height / 1080f;
+        int fName = Mathf.RoundToInt(30 * k);
+        int fLine = Mathf.RoundToInt(38 * k);
+        int fSmall = Mathf.RoundToInt(20 * k);
+
+        GUI.Label(new Rect(10, 6, 500, 34), "<color=#66666688>F1 — debug console</color>", Rich(fSmall));
+
+        // live "hearing…" indicator, bottom-right, with the send countdown
+        if (!string.IsNullOrEmpty(_partial) || !string.IsNullOrEmpty(_pendingText))
+        {
+            string composing = (_pendingText + " " + _partial).Trim();
+            float quiet = Time.time - _lastVoiceActivity;
+            var hear = Rich(fSmall);
+            hear.alignment = TextAnchor.LowerRight;
+            GUI.Label(new Rect(Screen.width * 0.5f, Screen.height - 48 * k, Screen.width * 0.47f, 44 * k),
+                $"<color=#ffe066>“{composing}…”  ({Mathf.Max(0f, silenceToSendSeconds - quiet):0.0}s)</color>", hear);
+        }
+
+        bool speaking = (Voice != null && Voice.IsSpeaking) || (Piper != null && Piper.IsSpeaking);
+        bool show = !string.IsNullOrEmpty(_lastGrizLine) &&
+                    (speaking || Time.time - _lastGrizLineTime < 6f);
+        if (!show) return;
+
+        // dialog box, bottom-left corner
+        float w = Mathf.Max(520f, Screen.width * 0.42f);
+        var lineStyle = Rich(fLine);
+        float textH = lineStyle.CalcHeight(new GUIContent(_lastGrizLine), w - 44 * k);
+        float h = textH + fName + 44 * k;
+        var rect = new Rect(24 * k, Screen.height - h - 24 * k, w, h);
+        GUI.Box(rect, GUIContent.none);
+        GUI.Box(rect, GUIContent.none); // stacked for readability over bright scenes
+        GUI.Label(new Rect(rect.x + 22 * k, rect.y + 10 * k, w - 44 * k, fName + 10),
+            "<b><color=#ffb366>GRIZ</color></b>", Rich(fName));
+        GUI.Label(new Rect(rect.x + 22 * k, rect.y + fName + 22 * k, w - 44 * k, textH + 8),
+            $"<color=#ffffff>{_lastGrizLine}</color>", lineStyle);
     }
 
     static GUIStyle Rich(int size)

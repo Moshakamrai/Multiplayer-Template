@@ -1,26 +1,27 @@
 using UnityEngine;
 
-// Drives the shopkeeper model's animations from Griz's voice.
-// Attach to the NPC model (or anywhere), assign the Animator.
-// - talkingBool is set TRUE while he's speaking (Piper or gibberish) → use it to blend
-//   a talk/jaw-flap state in the Animator.
-// - gestureTrigger fires at random intervals WHILE talking → hook arm waves/shrugs.
-// Leave either name empty to skip it. Works with any Animator setup.
+// Drives the shopkeeper model's animations from Griz's mood + voice.
+// NO Animator transitions needed: the script CrossFades directly into states by name —
+// your controller just needs the states to exist (islands are fine).
+//
+// Mapping: kicked out → Yelling · player threatened/insulted him → Standing Arguing ·
+// he didn't understand → Disappointed · shouty line (CAPS words) → Yelling ·
+// otherwise a random Talking variant. Returns to Idle when the voice stops.
 public class GrizAnimatorLink : MonoBehaviour
 {
     public Animator animator;
     public PiperVoice piper;
     public GrizVoice gibberish;
 
-    [Tooltip("Animator bool set while Griz is speaking. Empty = unused.")]
-    public string talkingBool = "Talking";
-    [Tooltip("Animator trigger fired now and then while talking (gestures). Empty = unused.")]
-    public string gestureTrigger = "Gesture";
-    [Tooltip("Average seconds between gesture triggers while talking.")]
-    public float gestureEvery = 4f;
+    [Header("State names as they appear in the Animator Controller")]
+    public string idleState = "Idle";
+    public string[] talkingStates = { "Talking", "Talking 2", "Talking 3", "Talking 4" };
+    public string yellingState = "Yelling";
+    public string arguingState = "Standing Arguing";
+    public string disappointedState = "Disappointed";
+    public float crossFadeSeconds = 0.25f;
 
-    float _nextGesture;
-    bool _wasTalking;
+    bool _wasSpeaking;
 
     void Start()
     {
@@ -32,22 +33,38 @@ public class GrizAnimatorLink : MonoBehaviour
     bool Speaking =>
         (piper != null && piper.IsSpeaking) || (gibberish != null && gibberish.IsSpeaking);
 
-    void Update()
+    /// <summary>Called by the console/hub whenever Griz starts a line.</summary>
+    public void PlayForLine(string line, GrizBrain.Intent intent, GrizBrain brain)
     {
         if (animator == null) return;
-        bool talking = Speaking;
+        string state;
+        if (brain != null && brain.KickedOut) state = yellingState;
+        else if (intent == GrizBrain.Intent.Threaten || intent == GrizBrain.Intent.Insult) state = arguingState;
+        else if (intent == GrizBrain.Intent.Unknown) state = disappointedState;
+        else if (CapsWordCount(line) >= 2) state = yellingState;
+        else state = talkingStates.Length > 0 ? talkingStates[Random.Range(0, talkingStates.Length)] : idleState;
 
-        if (!string.IsNullOrEmpty(talkingBool))
-            animator.SetBool(talkingBool, talking);
+        if (!string.IsNullOrEmpty(state))
+            animator.CrossFadeInFixedTime(state, crossFadeSeconds);
+    }
 
-        if (talking && !_wasTalking)
-            _nextGesture = Time.time + 0.3f; // gesture soon after he starts a line
+    void Update()
+    {
+        bool speaking = Speaking;
+        // line finished (or was interrupted) → settle back to idle
+        if (_wasSpeaking && !speaking && animator != null && !string.IsNullOrEmpty(idleState))
+            animator.CrossFadeInFixedTime(idleState, crossFadeSeconds * 2f);
+        _wasSpeaking = speaking;
+    }
 
-        if (talking && !string.IsNullOrEmpty(gestureTrigger) && Time.time >= _nextGesture)
+    static int CapsWordCount(string line)
+    {
+        if (string.IsNullOrEmpty(line)) return 0;
+        int n = 0;
+        foreach (var w in line.Split(' '))
         {
-            animator.SetTrigger(gestureTrigger);
-            _nextGesture = Time.time + gestureEvery * Random.Range(0.6f, 1.6f);
+            if (w.Length >= 3 && w == w.ToUpperInvariant() && w != w.ToLowerInvariant()) n++;
         }
-        _wasTalking = talking;
+        return n;
     }
 }

@@ -96,6 +96,9 @@ public class GrizAnimatorLink : MonoBehaviour
 
     void QueueState(string state)
     {
+        // re-resolve runtime-created voices in case our Start ran before they existed
+        if (piper == null) piper = FindObjectOfType<PiperVoice>();
+        if (gibberish == null) gibberish = FindObjectOfType<GrizVoice>();
         _pendingState = state;
         _pendingSince = Time.time;
         if (Speaking) ApplyPending(); // audio already rolling (e.g. cached wav) — fire now

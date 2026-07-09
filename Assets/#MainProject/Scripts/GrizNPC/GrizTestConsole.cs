@@ -29,7 +29,7 @@ public class GrizTestConsole : MonoBehaviour
     float _lastExchangeTime;
 
     [Tooltip("Your sentence only ENDS after this much real mic silence — keep talking and it all stays one message. Griz replies immediately once it sends.")]
-    public float silenceToSendSeconds = 2f;
+    public float silenceToSendSeconds = 1f;
     [Tooltip("Mic volume above this counts as still-speaking (keeps the sentence open).")]
     public float speakingVolume = 0.06f;
     string _pendingText = "";
@@ -64,6 +64,14 @@ public class GrizTestConsole : MonoBehaviour
             Piper = go.AddComponent<PiperVoice>();
         }
         if (AnimLink == null) AnimLink = FindObjectOfType<GrizAnimatorLink>();
+        if (AnimLink != null)
+        {
+            // PiperVoice is created at runtime ABOVE — AnimLink's own Start may have run
+            // first and missed it, leaving it blind to the audio (anim then fires on its
+            // 3s fallback = visible lag). Wire the references explicitly.
+            AnimLink.piper = Piper;
+            AnimLink.gibberish = Voice;
+        }
         if (Vosk != null)
         {
             Vosk.OnTranscriptionResult += OnFinalResult;

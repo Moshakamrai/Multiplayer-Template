@@ -126,9 +126,14 @@ public class GrizTestConsole : MonoBehaviour
     void HandleUtterance(string text, float peakVolume, bool immediate)
     {
         _lastExchangeTime = Time.time;
-        // audibly cut off = interruption
-        if (Voice != null && Voice.IsSpeaking) Voice.Stop();
-        if (Piper != null && Piper.IsSpeaking) Piper.Stop();
+        // player spoke while Griz was mid-line → audibly cut him off and let the brain react
+        bool wasSpeaking = (Voice != null && Voice.IsSpeaking) || (Piper != null && Piper.IsSpeaking);
+        if (wasSpeaking)
+        {
+            if (Voice != null) Voice.Stop();
+            if (Piper != null) Piper.Stop();
+            if (Brain != null) Brain.PendingInterruption = true;
+        }
 
         _pendingText = string.IsNullOrEmpty(_pendingText) ? text : _pendingText + " " + text;
         _pendingVolume = Mathf.Max(_pendingVolume, peakVolume);

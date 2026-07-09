@@ -35,8 +35,11 @@ public class GrizBrain : MonoBehaviour
     bool _threatSpent;           // the coward card only works once
     bool _counterPending;        // Griz just named a price → a bare "okay" accepts it
     int _storyIndex;
-    float _lastReplyTime = -99f;
     readonly System.Random _rng = new System.Random();
+
+    // Set by the UI/hub layer when the player starts talking OVER him (his audio was
+    // playing when new speech arrived). Consumed by the next Process call.
+    public bool PendingInterruption;
 
     public struct Reply
     {
@@ -71,8 +74,8 @@ public class GrizBrain : MonoBehaviour
 
         string text = (transcript ?? "").ToLowerInvariant().Trim();
         bool shouting = peakVolume >= shoutVolume;
-        bool interrupted = Time.time - _lastReplyTime < 1.2f;
-        _lastReplyTime = Time.time;
+        bool interrupted = PendingInterruption;
+        PendingInterruption = false;
 
         int offer = ExtractNumber(text);
         Intent intent = Classify(text, offer, shouting);
@@ -89,7 +92,8 @@ public class GrizBrain : MonoBehaviour
             r.line = Pick(
                 "EXCUSE me. I was TALKING. ...Fine. What.",
                 "You interrupt a man mid-sentence? The napkin sees this.",
-                "Wow. Okay. Rude. Continue.");
+                "Wow. Okay. Rude. Continue.",
+                "I was MID-SENTENCE. The audacity. The NERVE. ...Continue.");
             if (CheckPatience(ref r)) return r;
             return r;
         }

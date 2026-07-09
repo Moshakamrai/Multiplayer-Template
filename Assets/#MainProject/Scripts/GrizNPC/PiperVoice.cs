@@ -19,10 +19,12 @@ using UnityEngine.Networking;
 // If piper isn't installed, Available=false and callers fall back to gibberish (GrizVoice).
 public class PiperVoice : MonoBehaviour
 {
-    [Tooltip("Playback pitch — lower = deeper AND slower. For a comic dwarf: pitch ~0.8 + lengthScale ~0.8 (fast speech pitched down = deep but snappy).")]
-    [Range(0.5f, 1.5f)] public float pitch = 0.82f;
-    [Tooltip("Piper speaking speed: <1 = faster, >1 = slower. Pair a low value with low pitch.")]
-    [Range(0.5f, 1.5f)] public float lengthScale = 0.82f;
+    [Tooltip("Part of a voice model filename to prefer when several .onnx files are in StreamingAssets/piper (e.g. \"alan\"). Empty = first one found.")]
+    public string preferredModel = "";
+    [Tooltip("Playback pitch — lower = deeper and grimmer, near 1 = lighter/wry. Comic dwarf: ~0.8. Sarcastic: ~0.95.")]
+    [Range(0.5f, 1.5f)] public float pitch = 0.95f;
+    [Tooltip("Piper speaking speed: <1 = faster, >1 = slower. Quick delivery reads as sharp-tongued.")]
+    [Range(0.5f, 1.5f)] public float lengthScale = 0.85f;
     [Range(0f, 1f)] public float volume = 0.9f;
 
     public bool IsSpeaking => _source != null && _source.isPlaying;
@@ -59,13 +61,20 @@ public class PiperVoice : MonoBehaviour
         string dir = Path.Combine(Application.streamingAssetsPath, "piper");
         _exePath = Path.Combine(dir, "piper.exe");
         if (!File.Exists(_exePath)) return;
-        // first voice model found in the folder is the NPC's voice
         if (!Directory.Exists(dir)) return;
+        // prefer a model whose filename contains preferredModel; else first one found
+        string fallback = null;
         foreach (var f in Directory.GetFiles(dir, "*.onnx"))
         {
-            _modelPath = f;
-            break;
+            if (fallback == null) fallback = f;
+            if (!string.IsNullOrEmpty(preferredModel) &&
+                Path.GetFileName(f).ToLowerInvariant().Contains(preferredModel.ToLowerInvariant()))
+            {
+                _modelPath = f;
+                break;
+            }
         }
+        if (string.IsNullOrEmpty(_modelPath)) _modelPath = fallback;
         if (string.IsNullOrEmpty(_modelPath)) return;
 
         _cacheDir = Path.Combine(Application.persistentDataPath, "piper-cache");

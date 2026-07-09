@@ -43,4 +43,38 @@ public static class GrizPiperSetup
 
         EditorUtility.RevealInFinder(Dir);
     }
+
+    static string LlamaDir => Path.Combine(Application.streamingAssetsPath, "llama");
+
+    [MenuItem("Tools/Griz/Check Llama Setup")]
+    static void CheckLlama()
+    {
+        Directory.CreateDirectory(LlamaDir);
+
+        bool exe = File.Exists(Path.Combine(LlamaDir, "llama-server.exe"));
+        string model = null;
+        foreach (var f in Directory.GetFiles(LlamaDir, "*.gguf")) { model = Path.GetFileName(f); break; }
+
+        if (exe && model != null)
+        {
+            Debug.Log($"[Llama] ✅ READY — llama-server.exe + model '{model}' found. " +
+                      "Griz will use the LLM to understand sentences; keyword classifier stays as fallback.");
+            return;
+        }
+
+        Debug.LogWarning(
+            "[Llama] Setup incomplete. Put these into Assets/StreamingAssets/llama/ :\n" +
+            $"  {(exe ? "✅" : "❌")} llama-server.exe (+ its DLLs)\n" +
+            $"  {(model != null ? "✅ " + model : "❌ a model (.gguf)")}\n\n" +
+            "DOWNLOADS (both free, both offline):\n" +
+            "1) llama.cpp: https://github.com/ggml-org/llama.cpp/releases → llama-bXXXX-bin-win-cpu-x64.zip\n" +
+            "   Extract EVERYTHING (llama-server.exe + all .dll files) into the llama folder.\n" +
+            "2) Model: https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF\n" +
+            "   → download Llama-3.2-1B-Instruct-Q4_K_M.gguf (~0.8GB) into the same folder.\n\n" +
+            "LICENSING: llama.cpp is MIT. Llama 3.2 uses the Llama Community License — fine for a\n" +
+            "commercial indie game; include the license file and 'Built with Llama' attribution.\n" +
+            "The server runs as a SEPARATE exe (subprocess) — keep it that way.");
+
+        EditorUtility.RevealInFinder(LlamaDir);
+    }
 }

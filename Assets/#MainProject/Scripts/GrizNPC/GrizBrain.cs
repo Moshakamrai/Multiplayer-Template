@@ -68,17 +68,40 @@ public class GrizBrain : MonoBehaviour
     // ─────────────────────────────────────────────────────────────
     public Reply Process(string transcript, float peakVolume)
     {
+        string text = Normalize(transcript);
+        int offer = ExtractNumber(text);
+        bool shouting = peakVolume >= shoutVolume;
+        return React(text, Classify(text, offer, shouting), offer, shouting);
+    }
+
+    // LLM-understood path (LlamaIntentService): the language model supplies intent + offer;
+    // the state machine and authored lines stay fully in charge of the response.
+    public Reply ProcessClassified(string transcript, float peakVolume, Intent intent, int llmOffer)
+    {
+        string text = Normalize(transcript);
+        int offer = llmOffer > 0 ? llmOffer : ExtractNumber(text);
+        bool shouting = peakVolume >= shoutVolume;
+        if (intent == Intent.Accept && !_counterPending) intent = Intent.Buy; // no counter on the table
+        if (intent == Intent.Offer && offer <= 0) intent = Intent.Haggle;     // "offer" without a number
+        return React(text, intent, offer, shouting);
+    }
+
+    public bool CounterPending => _counterPending;
+
+    public static bool TryParseIntent(string s, out Intent intent) =>
+        Enum.TryParse(s, true, out intent);
+
+    static string Normalize(string t) => (t ?? "").ToLowerInvariant().Trim();
+
+    Reply React(string text, Intent intent, int offer, bool shouting)
+    {
         var r = new Reply();
         if (DealClosed) { r.line = $"We're DONE. {itemName} is yours. Go hit something with it."; return r; }
         if (KickedOut) { r.kickedOut = true; r.line = "OUT. The napkin remembers."; return r; }
 
-        string text = (transcript ?? "").ToLowerInvariant().Trim();
-        bool shouting = peakVolume >= shoutVolume;
         bool interrupted = PendingInterruption;
         PendingInterruption = false;
-
-        int offer = ExtractNumber(text);
-        Intent intent = Classify(text, offer, shouting);
+        if (string.IsNullOrWhiteSpace(text)) intent = Intent.Unknown;
 
         _repeat = (intent == _lastIntent) ? _repeat + 1 : 0;
         _lastIntent = intent;

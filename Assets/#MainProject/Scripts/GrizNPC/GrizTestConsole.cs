@@ -13,6 +13,7 @@ public class GrizTestConsole : MonoBehaviour
     public GrizVoice Voice;
     public PiperVoice Piper;
     public GrizAnimatorLink AnimLink;
+    public LlamaIntentService Llm;
 
     [Tooltip("F1 toggles between the full debug console and cinematic mode (corner dialog box only) — use cinematic for showcase videos.")]
     public bool cinematicMode = false;
@@ -64,6 +65,12 @@ public class GrizTestConsole : MonoBehaviour
             Piper = go.AddComponent<PiperVoice>();
         }
         if (AnimLink == null) AnimLink = FindObjectOfType<GrizAnimatorLink>();
+        if (Llm == null && Brain != null)
+        {
+            var go = new GameObject("LlamaIntent");
+            go.transform.SetParent(Brain.transform, false);
+            Llm = go.AddComponent<LlamaIntentService>();
+        }
         if (AnimLink != null)
         {
             // PiperVoice is created at runtime ABOVE — AnimLink's own Start may have run
@@ -174,8 +181,35 @@ public class GrizTestConsole : MonoBehaviour
         Say("YOU", $"{text}   <vol {vol:0.00}>");
         _lastYouLine = text;
         _lastYouLineTime = Time.time;
-        var reply = Brain.Process(text, vol);
-        Say("GRIZ", $"{reply.line}   <{reply.intent}>");
+
+        if (Llm != null && Llm.IsReady)
+            StartCoroutine(ClassifyThenReply(text, vol));
+        else
+            FinishReply(Brain.Process(text, vol), "kw");
+    }
+
+    // LLM understands the sentence (intent + offer), the brain still writes the reply.
+    // Any failure/timeout falls back to the keyword classifier — never blocks.
+    IEnumerator ClassifyThenReply(string text, float vol)
+    {
+        GrizBrain.Reply reply = default;
+        bool viaLlm = false;
+        yield return Llm.Classify(text, Brain.CounterPending, (intentStr, offer, ok) =>
+        {
+            if (ok && GrizBrain.TryParseIntent(intentStr, out var intent))
+            {
+                reply = Brain.ProcessClassified(text, vol, intent, offer);
+                viaLlm = true;
+            }
+        });
+        if (!viaLlm) reply = Brain.Process(text, vol);
+        FinishReply(reply, viaLlm ? "llm" : "kw");
+    }
+
+    void FinishReply(GrizBrain.Reply reply, string source)
+    {
+        _lastExchangeTime = Time.time;
+        Say("GRIZ", $"{reply.line}   <{reply.intent}·{source}>");
         _lastGrizLine = reply.line;
         _lastGrizLineTime = Time.time;
         SpeakLine(reply.line);
@@ -246,6 +280,9 @@ public class GrizTestConsole : MonoBehaviour
         string voiceMode = Piper != null && Piper.Available
             ? "<color=#66ff66>Piper TTS</color>"
             : "gibberish <color=#888888>(run Tools > Griz > Check Piper Setup for real TTS)</color>";
+        voiceMode += Llm != null && Llm.IsReady
+            ? "   Brain: <color=#66ff66>LLM</color>"
+            : "   Brain: keywords";
         GUILayout.Label($"Mic: <b>{(mic ? "<color=#66ff66>LIVE</color>" : "starting… (typing works now)")}</b>   " +
                         $"Vol: {Bar(vol)}   Peak: {_peakVolume:0.00}   Voice: {voiceMode}   " +
                         $"<color=#888888>{(Vosk != null ? Vosk.StatusMessage : "no Vosk in scene")}</color>", Rich(fSmall));

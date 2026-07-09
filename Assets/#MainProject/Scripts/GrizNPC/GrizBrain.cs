@@ -85,17 +85,16 @@ public class GrizBrain : MonoBehaviour
         r.intent = intent;
         _counterPending = false; // re-set below by any branch that puts a price on the table
 
-        // Interruption gets noticed before anything else
+        // Interruption: he objects — but still ANSWERS the question (a snark prefix,
+        // never swallowing what the player actually said)
+        string interruptPrefix = "";
         if (interrupted && intent != Intent.Unknown)
         {
             Patience -= 5f;
-            r.line = Pick(
-                "EXCUSE me. I was TALKING. ...Fine. What.",
-                "You interrupt a man mid-sentence? The napkin sees this.",
-                "Wow. Okay. Rude. Continue.",
-                "I was MID-SENTENCE. The audacity. The NERVE. ...Continue.");
-            if (CheckPatience(ref r)) return r;
-            return r;
+            interruptPrefix = Pick(
+                "RUDE. Anyway — ",
+                "I was TALKING. But fine: ",
+                "The audacity. The NERVE. ...So: ");
         }
 
         switch (intent)
@@ -288,6 +287,7 @@ public class GrizBrain : MonoBehaviour
                 break;
         }
 
+        if (interruptPrefix.Length > 0) r.line = interruptPrefix + r.line;
         if (CheckPatience(ref r)) return r;
         return r;
     }
@@ -359,7 +359,8 @@ public class GrizBrain : MonoBehaviour
         int barter = Score(text, "trade", "swap", "exchange", "barter", "instead of gold");
         int inventory = Score(text, "anything else", "what else", "something else", "what do you have", "what you got",
             "what have you got", "do you have", "you have any", "what do you sell", "what are you selling", "selling",
-            "show me", "other weapon", "other stuff", "more weapons", "inventory", "stock", "what's in", "whats in");
+            "show me", "other weapon", "other stuff", "more weapons", "inventory", "stock", "what's in", "whats in",
+            "i need a", "need a sword", "need a weapon", "looking for", "i want a", "want a sword", "want a weapon");
         int accept = Score(text, "okay", "ok", "fine", "sure", "alright", "yes", "yeah", "yep", "agreed");
         int askInfo = Score(text, "what", "who", "where", "why", "how", "tell me", "story", "about this", "about the");
 

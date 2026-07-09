@@ -23,8 +23,10 @@ public class PiperVoice : MonoBehaviour
     public string preferredModel = "";
     [Tooltip("Playback pitch — lower = deeper and grimmer, near 1 = lighter/wry. Comic dwarf: ~0.8. Sarcastic: ~0.95.")]
     [Range(0.5f, 1.5f)] public float pitch = 0.95f;
-    [Tooltip("Piper speaking speed: <1 = faster, >1 = slower. Quick delivery reads as sharp-tongued.")]
+    [Tooltip("Piper speaking speed: <1 = faster, >1 = slower. Quick delivery reads as sharp-tongued; slower reads OLDER.")]
     [Range(0.5f, 1.5f)] public float lengthScale = 0.85f;
+    [Tooltip("Speaker index for MULTI-speaker models (vctk, semaine, aru…). -1 = single-speaker model.")]
+    public int speakerId = -1;
     [Range(0f, 1f)] public float volume = 0.9f;
 
     public bool IsSpeaking => _source != null && _source.isPlaying;
@@ -101,7 +103,7 @@ public class PiperVoice : MonoBehaviour
         string text = CleanForSpeech(rawLine);
         if (string.IsNullOrWhiteSpace(text)) yield break;
 
-        string wavPath = Path.Combine(_cacheDir, Hash($"{text}|{Path.GetFileName(_modelPath)}|{lengthScale:0.00}") + ".wav");
+        string wavPath = Path.Combine(_cacheDir, Hash($"{text}|{Path.GetFileName(_modelPath)}|{lengthScale:0.00}|{speakerId}") + ".wav");
 
         if (!File.Exists(wavPath))
         {
@@ -136,7 +138,8 @@ public class PiperVoice : MonoBehaviour
         var psi = new System.Diagnostics.ProcessStartInfo
         {
             FileName = _exePath,
-            Arguments = $"--model \"{_modelPath}\" --output_file \"{wavPath}\" --length_scale {lengthScale.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)}",
+            Arguments = $"--model \"{_modelPath}\" --output_file \"{wavPath}\" --length_scale {lengthScale.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)}" +
+                        (speakerId >= 0 ? $" --speaker {speakerId}" : ""),
             WorkingDirectory = Path.GetDirectoryName(_exePath),
             UseShellExecute = false,
             RedirectStandardInput = true,

@@ -21,6 +21,17 @@ public class GrizAnimatorLink : MonoBehaviour
     public string disappointedState = "Disappointed";
     public float crossFadeSeconds = 0.25f;
 
+    [Header("Sword bit — unsheathes when he talks about the merchandise")]
+    [Tooltip("The sword GameObject in his hand — disabled in the scene; turned on when he draws.")]
+    public GameObject swordObject;
+    [Tooltip("Plays once when a line mentions the sword; your transition takes it to sword idle.")]
+    public string unsheatheState = "Withdrawing Sword";
+    [Tooltip("Idle used INSTEAD of normal idle once the sword is out.")]
+    public string swordIdleState = "Sword And Shield Idle";
+    [Tooltip("A line containing any of these words triggers the draw.")]
+    public string[] swordWords = { "rust-cutter", "sword" };
+
+    bool _swordOut;
     bool _wasSpeaking;
 
     void Start()
@@ -37,6 +48,19 @@ public class GrizAnimatorLink : MonoBehaviour
     public void PlayForLine(string line, GrizBrain.Intent intent, GrizBrain brain)
     {
         if (animator == null) return;
+
+        // First mention of the merchandise → draw the sword (once), then sword idle takes over
+        if (!_swordOut && MentionsSword(line))
+        {
+            _swordOut = true;
+            if (swordObject != null) swordObject.SetActive(true);
+            if (!string.IsNullOrEmpty(unsheatheState))
+            {
+                animator.CrossFadeInFixedTime(unsheatheState, crossFadeSeconds);
+                return; // your Animator transition carries it into swordIdleState
+            }
+        }
+
         string state;
         if (brain != null && brain.KickedOut) state = yellingState;
         else if (intent == GrizBrain.Intent.Threaten || intent == GrizBrain.Intent.Insult) state = arguingState;
@@ -51,10 +75,20 @@ public class GrizAnimatorLink : MonoBehaviour
     void Update()
     {
         bool speaking = Speaking;
-        // line finished (or was interrupted) → settle back to idle
-        if (_wasSpeaking && !speaking && animator != null && !string.IsNullOrEmpty(idleState))
-            animator.CrossFadeInFixedTime(idleState, crossFadeSeconds * 2f);
+        // line finished (or was interrupted) → settle back to idle (sword idle once drawn)
+        string rest = _swordOut && !string.IsNullOrEmpty(swordIdleState) ? swordIdleState : idleState;
+        if (_wasSpeaking && !speaking && animator != null && !string.IsNullOrEmpty(rest))
+            animator.CrossFadeInFixedTime(rest, crossFadeSeconds * 2f);
         _wasSpeaking = speaking;
+    }
+
+    bool MentionsSword(string line)
+    {
+        if (string.IsNullOrEmpty(line)) return false;
+        string lower = line.ToLowerInvariant();
+        foreach (var w in swordWords)
+            if (!string.IsNullOrEmpty(w) && lower.Contains(w.ToLowerInvariant())) return true;
+        return false;
     }
 
     static int CapsWordCount(string line)

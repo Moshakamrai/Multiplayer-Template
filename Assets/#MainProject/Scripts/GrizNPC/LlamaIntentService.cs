@@ -36,7 +36,9 @@ public class LlamaIntentService : MonoBehaviour
         "haggle = wants a lower price without naming an amount. offer = names an amount. " +
         "accept = agrees to the merchant's open counteroffer (only if counteroffer_open is true). " +
         "buy = wants to complete the purchase. barter = proposes paying with anything besides gold. " +
-        "threaten = any threat of violence or consequences. flatter = compliments. insult = mockery or abuse.";
+        "threaten = any threat of violence or consequences. flatter = compliments. insult = mockery or abuse.\n" +
+        "Use merchant_last_line and current_price as context: short agreements right after a counteroffer are accept; " +
+        "a bare number or 'make it N' is offer with that amount.";
 
     void Start()
     {
@@ -91,12 +93,17 @@ public class LlamaIntentService : MonoBehaviour
         Debug.LogWarning("[Llama] server never became ready — keyword classifier in use.");
     }
 
-    /// <summary>Classify an utterance. done(intentString, offer, success).</summary>
-    public IEnumerator Classify(string utterance, bool counterOpen, Action<string, int, bool> done)
+    /// <summary>Classify an utterance with conversation context. done(intentString, offer, success).</summary>
+    public IEnumerator Classify(string utterance, bool counterOpen, int currentPrice, string merchantLastLine, Action<string, int, bool> done)
     {
         if (!IsReady) { done(null, 0, false); yield break; }
 
-        string user = $"counteroffer_open: {(counterOpen ? "true" : "false")}\nutterance: \"{utterance.Replace('"', '\'')}\"";
+        string lastLine = (merchantLastLine ?? "").Replace('"', '\'');
+        if (lastLine.Length > 140) lastLine = lastLine.Substring(0, 140);
+        string user = $"current_price: {currentPrice}\n" +
+                      $"counteroffer_open: {(counterOpen ? "true" : "false")}\n" +
+                      $"merchant_last_line: \"{lastLine}\"\n" +
+                      $"utterance: \"{utterance.Replace('"', '\'')}\"";
         string body = "{\"temperature\":0,\"max_tokens\":48,\"messages\":[" +
                       $"{{\"role\":\"system\",\"content\":{Json(SystemPrompt)}}}," +
                       $"{{\"role\":\"user\",\"content\":{Json(user)}}}]}}";

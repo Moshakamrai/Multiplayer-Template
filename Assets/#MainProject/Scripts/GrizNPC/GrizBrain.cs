@@ -63,6 +63,8 @@ public class GrizBrain : MonoBehaviour
         _repeat = 0;
         _unknownCount = 0;
         _threatSpent = false;
+        _counterPending = false;
+        _recentLines.Clear();
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -463,7 +465,44 @@ public class GrizBrain : MonoBehaviour
         return found ? total : 0;
     }
 
-    string Pick(params string[] options) => options[_rng.Next(options.Length)];
+    // No-repeat picker: never serves a line that's still in recent memory. If a pool is
+    // fully exhausted, the repeat is OWNED in character ("As I SAID —") — different text
+    // also means Piper synthesizes a fresh delivery instead of replaying the cached wav.
+    readonly List<string> _recentLines = new List<string>();
+
+    static readonly string[] RepeatPrefixes =
+    {
+        "As I SAID — ",
+        "Again, since ears are apparently optional: ",
+        "One more time, for the cheap seats: ",
+        "I've said this before and I'll say it angrier: ",
+    };
+
+    string Pick(params string[] options)
+    {
+        var fresh = new List<string>();
+        foreach (var o in options)
+            if (!_recentLines.Contains(o)) fresh.Add(o);
+
+        bool forcedRepeat = fresh.Count == 0;
+        string choice = forcedRepeat
+            ? options[_rng.Next(options.Length)]
+            : fresh[_rng.Next(fresh.Count)];
+
+        _recentLines.Add(choice);
+        if (_recentLines.Count > 30) _recentLines.RemoveAt(0);
+
+        return forcedRepeat ? RepeatPrefixes[_rng.Next(RepeatPrefixes.Length)] + choice : choice;
+    }
+
+    // Gentle patience recovery while he's calm (called every frame by the console) —
+    // he cools off over time instead of staying one bad joke from eviction forever.
+    public void Tick(float dt)
+    {
+        if (KickedOut || DealClosed) return;
+        if (Patience > 0f && Patience < 60f)
+            Patience = Mathf.Min(60f, Patience + 0.4f * dt);
+    }
 
     // ── Backstory: every NPC blabbers lore. Sequential so stories don't repeat. ──
     static readonly string[] StoryLines =

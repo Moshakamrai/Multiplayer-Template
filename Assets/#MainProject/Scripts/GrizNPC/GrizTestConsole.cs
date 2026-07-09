@@ -111,6 +111,8 @@ public class GrizTestConsole : MonoBehaviour
 
     void Update()
     {
+        if (Brain != null) Brain.Tick(Time.deltaTime); // patience cools off over time
+
         var vp = Vosk != null ? Vosk.VoiceProcessor : null;
         if (vp != null && vp.IsRecording)
         {
@@ -194,7 +196,7 @@ public class GrizTestConsole : MonoBehaviour
     {
         GrizBrain.Reply reply = default;
         bool viaLlm = false;
-        yield return Llm.Classify(text, Brain.CounterPending, (intentStr, offer, ok) =>
+        yield return Llm.Classify(text, Brain.CounterPending, Brain.Price, _lastGrizLine, (intentStr, offer, ok) =>
         {
             if (ok && GrizBrain.TryParseIntent(intentStr, out var intent))
             {

@@ -19,8 +19,10 @@ using UnityEngine.Networking;
 // If piper isn't installed, Available=false and callers fall back to gibberish (GrizVoice).
 public class PiperVoice : MonoBehaviour
 {
-    [Tooltip("Playback pitch — 0.85-0.95 adds gravel to a stock voice.")]
-    [Range(0.5f, 1.5f)] public float pitch = 0.9f;
+    [Tooltip("Playback pitch — lower = deeper AND slower. For a comic dwarf: pitch ~0.8 + lengthScale ~0.8 (fast speech pitched down = deep but snappy).")]
+    [Range(0.5f, 1.5f)] public float pitch = 0.82f;
+    [Tooltip("Piper speaking speed: <1 = faster, >1 = slower. Pair a low value with low pitch.")]
+    [Range(0.5f, 1.5f)] public float lengthScale = 0.82f;
     [Range(0f, 1f)] public float volume = 0.9f;
 
     public bool IsSpeaking => _source != null && _source.isPlaying;
@@ -90,7 +92,7 @@ public class PiperVoice : MonoBehaviour
         string text = CleanForSpeech(rawLine);
         if (string.IsNullOrWhiteSpace(text)) yield break;
 
-        string wavPath = Path.Combine(_cacheDir, Hash(text + Path.GetFileName(_modelPath)) + ".wav");
+        string wavPath = Path.Combine(_cacheDir, Hash($"{text}|{Path.GetFileName(_modelPath)}|{lengthScale:0.00}") + ".wav");
 
         if (!File.Exists(wavPath))
         {
@@ -125,7 +127,7 @@ public class PiperVoice : MonoBehaviour
         var psi = new System.Diagnostics.ProcessStartInfo
         {
             FileName = _exePath,
-            Arguments = $"--model \"{_modelPath}\" --output_file \"{wavPath}\"",
+            Arguments = $"--model \"{_modelPath}\" --output_file \"{wavPath}\" --length_scale {lengthScale.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)}",
             WorkingDirectory = Path.GetDirectoryName(_exePath),
             UseShellExecute = false,
             RedirectStandardInput = true,

@@ -69,8 +69,10 @@ public class GrizAnimatorLink : MonoBehaviour
     {
         if (animator == null) return;
 
-        // First mention of the merchandise → draw the sword (once), then sword idle takes over
-        if (!_swordOut && MentionsSword(line))
+        // Draw the sword ONLY when actually asked about the merchandise (inventory /
+        // item-lore questions) — not just any line that name-drops it (e.g. the greeting).
+        bool askedAboutWares = intent == GrizBrain.Intent.Inventory || intent == GrizBrain.Intent.AskInfo;
+        if (!_swordOut && askedAboutWares && MentionsSword(line))
         {
             _swordOut = true;
             _pendingSword = true;

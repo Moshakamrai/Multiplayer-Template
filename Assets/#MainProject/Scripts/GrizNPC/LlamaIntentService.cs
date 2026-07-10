@@ -22,6 +22,8 @@ public class LlamaIntentService : MonoBehaviour
     public float requestTimeout = 6f;
     [Tooltip("Seconds to wait for a generated reply before falling back to the authored line.")]
     public float generateTimeout = 14f;
+    [Tooltip("Log the full raw server response for every classify/generate call — turn on while debugging quality issues.")]
+    public bool logRawResponses = true;
 
     [Tooltip("Griz's character bible — the system prompt for generated dialogue.")]
     [TextArea(10, 30)]
@@ -142,15 +144,21 @@ public class LlamaIntentService : MonoBehaviour
 
             if (req.result != UnityWebRequest.Result.Success)
             {
+                Debug.LogWarning($"[Llama] Classify request failed: {req.error} — {req.downloadHandler.text}");
                 done(null, 0, false);
                 yield break;
             }
 
-            // The assistant's JSON sits escaped inside the API response — match loosely.
             string content = req.downloadHandler.text;
+            if (logRawResponses) Debug.Log($"[Llama] Classify raw: {content}");
+
             var mi = Regex.Match(content, @"intent[\\""]*\s*:\s*[\\""]*(\w+)");
             var mo = Regex.Match(content, @"offer[\\""]*\s*:\s*[\\""]*(\d+)");
-            if (!mi.Success) { done(null, 0, false); yield break; }
+            if (!mi.Success)
+            {
+                Debug.LogWarning($"[Llama] Classify: no intent field found in response — {content}");
+                done(null, 0, false); yield break;
+            }
             int offer = mo.Success ? int.Parse(mo.Groups[1].Value) : 0;
             done(mi.Groups[1].Value, offer, true);
         }
@@ -180,6 +188,8 @@ public class LlamaIntentService : MonoBehaviour
                 Debug.LogWarning($"[Llama] GenerateReply request failed: {req.error} — {req.downloadHandler.text}");
                 done(null, false); yield break;
             }
+
+            if (logRawResponses) Debug.Log($"[Llama] GenerateReply raw: {req.downloadHandler.text}");
 
             var m = Regex.Match(req.downloadHandler.text,
                 "\"message\"[\\s\\S]*?\"content\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");

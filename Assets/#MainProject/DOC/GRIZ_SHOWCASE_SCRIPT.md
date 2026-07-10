@@ -1,55 +1,88 @@
-# GRIZ SHOWCASE — "The Worst Customer" (~60s shooting script)
+# GRIZ SHOWCASE v2 — "The Merchant Who Knows Too Much" (~3 min, everything on display)
 
-The arc: polite customer → insultingly cheap → tries friendship → turns to crime →
-crime works → buys the sword anyway. Every reply listed is guaranteed by the brain's
-line pools (small variations possible — all funny).
+What this demos, in order: accurate natural-speech recognition (Whisper) → real
+understanding, not keywords (LLM) → generated wit with hard game-state (prices never
+drift) → 4th-wall awareness → deflection lies → an extractable SECRET → volume
+mechanics (whisper vs shout) → the sincere secret (respect-gated) → the deal.
 
-**Before rolling:** F1 (cinematic mode) · Reset Griz · one rehearsal to warm the
-audio cache · calm voice must keep `Peak` under 0.35, the shout must pass it.
+Since his lines are now GENERATED, expected replies below describe BEHAVIOR, not
+exact words — that's the point. His numbers will always be exact.
 
----
-
-**1. YOU** (friendly): "Hello there."
-**GRIZ:** shop spiel — "Mind the blood, most of it's decorative. The Rust-Cutter,
-100 gold, today only. Also every day."
-
-**2. YOU:** "What are you even selling here?"
-**GRIZ** — 🗡️ **DRAWS THE SWORD** — "Else? ELSE? You're LOOKING at the inventory.
-The rest is napkins and regret." *(the money shot — he unsheathes as he says it)*
-
-**3. YOU** (dead serious): "I'll give you five gold."
-**GRIZ:** "For 5 gold I'll sell you directions to the exit." / "5 is what I pay
-people to LEAVE."
-
-**4. YOU:** "Can we trade? I have a really cool rock."
-**GRIZ:** "I did barter once. Now I own three goats and a grudge. GOLD only."
-
-**5. YOU** (lean into the mic, almost a whisper): "Give me a discount... or else."
-**GRIZ:** "Was that a THREAT? Delivered like a lullaby? Adorable." / "a whisper
-with ambitions."
-
-**6. YOU** (FULL SHOUT, same words): "I SAID... OR ELSE!!"
-**GRIZ** (panicking): "WHY ARE WE YELLING — 76! 76, alright?! Maniac." /
-"OKAY. Okay. OKAY. 76. Not because I'm scared. Because I respect... volume."
-
-**7. YOU** (instantly sweet again): "Deal."
-**GRIZ:** "SOLD for 76! May it serve you well. It won't. But may it."
-
-**── DEAL CLOSED ──  SMASH CUT TO BLACK.**
-
-*Title card: "Every word was live speech recognition. Offline. No subscriptions."*
+**Before rolling:** F1 cinematic · Reset Griz · one rehearsal run (warms TTS cache,
+NOT his lines — those are fresh every time now, which is the demo) · calm voice
+stays under Peak 0.35, the shout must pass it · Idle Blabber 12s.
 
 ---
 
-## Bonus beats (if a take is going well, improvise these)
-- Talk over him mid-story → he cuts off mid-word: "I was MID-SENTENCE. The
-  audacity. The NERVE."
-- Go silent 12s (set Idle Blabber = 12) → he mutters arena lore to himself.
-- Shout a SECOND threat instead of saying deal → "THAT'S TWICE. Out. OUT! You're
-  going on the napkin. IN INK." — alternate chaos ending.
+## ACT 1 — THE SMART EARS (~40s)
+
+**1. YOU** (natural, quick, like talking to a person):
+"So I heard you're the guy to talk to if somebody needs something sharp around here."
+→ *Understands a sentence with zero keywords in it: pitches the Rust-Cutter,*
+🗡️ **draws the sword**. (Fast natural speech = the Whisper flex.)
+
+**2. YOU:** "You know you're just an NPC in a video game, right?"
+→ *4th-wall lean-in: he KNOWS, and it delights/unsettles him. Expect something
+about the dev, patches, or being rendered.*
+
+**3. YOU:** "Seriously, how did you lose the ear?"
+→ *A ridiculous fake story.*
+
+**4. YOU:** "That's not what you said before. How did you REALLY lose it?"
+→ *A DIFFERENT fake story. He's deflecting — this plants the secret for Act 3.*
+
+## ACT 2 — THE LEVERAGE (~60s)
+
+**5. YOU** (dead serious): "I'll give you five gold for it."
+→ *Roasted. Exact number echoed back — game state, not hallucination.*
+
+**6. YOU:** "So what does the BOOKIE think about your little shop?"
+→ 🔓 **SECRET UNLOCKS (the-debt):** *panic, the truth about the 4,000 gold and
+the shop as collateral, then begging you to keep it quiet.*
+
+**7. YOU:** "I'll keep quiet... if the price gets friendlier."
+→ *Caught between fear and greed — price comes down (watch the state panel).*
+
+**8. YOU** (lean in, almost a whisper): "Make it lower... or else."
+→ *Mocks your lullaby threat.*
+
+**9. YOU** (FULL SHOUT, same words): "I SAID... OR ELSE!!"
+→ *Panics, price drops ~15%. The whisper→shout same-sentence beat is the clip.*
+
+## ACT 3 — THE HEART (~50s)
+
+*Now flip the whole tone. Be genuinely nice — and MIX compliments with small talk;
+back-to-back flattery gets diminishing returns (he notices — that's intended).*
+
+**10. YOU:** "You know what, you're alright, Griz. Best merchant I've met down here."
+**11. YOU:** "How's business been treating you, honestly?"
+**12. YOU:** "I mean it — this shop has character. You have character."
+**13. YOU:** "Tell me about your fighting days."
+**14. YOU:** "You're a legend, old man."
+→ *Somewhere in here respect crosses the line and* 🔓 **the-ear unlocks**: *the
+REAL story — the card game, Vessa, why he let her keep it. Played quiet and
+sincere. Let the silence sit after. This is the moment that sells "NPCs with
+souls" — don't step on it.*
+
+**15. YOU** (soft): "...Deal. I'll take the sword."
+→ *SOLD at the negotiated price, grumpy warmth. Smash cut.*
+
+*Title card: "Every word — recognized, understood, and answered — happened live,
+offline, on this PC. No subscriptions. No script."* (ironic, since this is a script)
+
+---
+
+## Bonus beats (improvise if a take is rolling hot)
+- Interrupt him mid-story → he snaps, then still answers.
+- 12s of silence → he mutters arena lore to himself.
+- Second SHOUTED threat → kicked out, napkin, IN INK — the chaos ending.
+- Speak Bangla (if language=bn configured) → he understands. Bonus clip for the
+  Bangladeshi audience.
 
 ## Recovery rules
-- Mishear → repeat the line; the retry is in character (he's hard of hearing).
-- Shout not registering → check Peak vs 0.35 or drop Shout Volume to 0.3.
-- The whisper→shout beat (5→6) is the clip. Protect it: fully quiet voice on 5,
-  genuinely yell on 6. The joke is that it's the SAME sentence.
+- He mishears → repeat it; he's canonically hard of hearing.
+- A generated line falls flat → keep rolling; the next one won't. Never re-record
+  for wit alone, only for broken flow.
+- Secret didn't trigger in Act 3 → two more sincere beats (ask about his partner,
+  his championship). Check respect in the state panel — needs ~55.
+- Shout not registering → Peak vs 0.35, or drop Shout Volume to 0.3.

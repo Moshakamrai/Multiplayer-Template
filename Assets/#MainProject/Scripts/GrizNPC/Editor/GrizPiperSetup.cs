@@ -77,4 +77,40 @@ public static class GrizPiperSetup
 
         EditorUtility.RevealInFinder(LlamaDir);
     }
+
+    static string WhisperDir => Path.Combine(Application.streamingAssetsPath, "whisper");
+
+    [MenuItem("Tools/Griz/Check Whisper Setup")]
+    static void CheckWhisper()
+    {
+        Directory.CreateDirectory(WhisperDir);
+
+        bool exe = File.Exists(Path.Combine(WhisperDir, "whisper-server.exe")) ||
+                   File.Exists(Path.Combine(WhisperDir, "server.exe"));
+        string model = null;
+        foreach (var f in Directory.GetFiles(WhisperDir, "*.bin")) { model = Path.GetFileName(f); break; }
+
+        if (exe && model != null)
+        {
+            Debug.Log($"[Whisper] ✅ READY — server + model '{model}' found. Hub finals use Whisper; " +
+                      "Vosk keeps live feedback + combat. Set language/translate on the WhisperTranscriber component (bn = Bangla).");
+            return;
+        }
+
+        Debug.LogWarning(
+            "[Whisper] Setup incomplete. Put these into Assets/StreamingAssets/whisper/ :\n" +
+            $"  {(exe ? "✅" : "❌")} whisper-server.exe (+ its DLLs)\n" +
+            $"  {(model != null ? "✅ " + model : "❌ a model (ggml-*.bin)")}\n\n" +
+            "DOWNLOADS (both free, both offline):\n" +
+            "1) whisper.cpp: https://github.com/ggml-org/whisper.cpp/releases\n" +
+            "   → the Windows x64 binary zip (cuda variant if you have an NVIDIA card).\n" +
+            "   Extract EVERYTHING (whisper-server.exe + all .dll files) into the whisper folder.\n" +
+            "2) Model: https://huggingface.co/ggerganov/whisper.cpp/tree/main\n" +
+            "   → ggml-small.bin (~466MB, recommended) into the same folder.\n" +
+            "   (ggml-base.bin ~142MB is a lighter fallback; ggml-medium.bin if Bangla becomes primary.)\n\n" +
+            "BANGLA: set language=bn and translateToEnglish=true on the WhisperTranscriber component —\n" +
+            "players speak Bangla, the NPC pipeline receives English. whisper.cpp is MIT licensed.");
+
+        EditorUtility.RevealInFinder(WhisperDir);
+    }
 }

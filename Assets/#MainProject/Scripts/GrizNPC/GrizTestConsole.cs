@@ -14,6 +14,8 @@ public class GrizTestConsole : MonoBehaviour
     public PiperVoice Piper;
     public GrizAnimatorLink AnimLink;
     public LlamaIntentService Llm;
+    public WhisperTranscriber Whisper;
+    bool _utteranceOpen;
 
     [Tooltip("F1 toggles between the full debug console and cinematic mode (corner dialog box only) — use cinematic for showcase videos.")]
     public bool cinematicMode = false;
@@ -71,6 +73,12 @@ public class GrizTestConsole : MonoBehaviour
             go.transform.SetParent(Brain.transform, false);
             Llm = go.AddComponent<LlamaIntentService>();
         }
+        if (Whisper == null && Brain != null)
+        {
+            var go = new GameObject("Whisper");
+            go.transform.SetParent(Brain.transform, false);
+            Whisper = go.AddComponent<WhisperTranscriber>();
+        }
         if (AnimLink != null)
         {
             // PiperVoice is created at runtime ABOVE — AnimLink's own Start may have run
@@ -85,7 +93,15 @@ public class GrizTestConsole : MonoBehaviour
             Vosk.OnPartialResult += p =>
             {
                 _partial = ExtractText(p);
-                if (!string.IsNullOrEmpty(_partial)) _lastVoiceActivity = Time.time;
+                if (!string.IsNullOrEmpty(_partial))
+                {
+                    _lastVoiceActivity = Time.time;
+                    if (!_utteranceOpen)
+                    {
+                        _utteranceOpen = true;
+                        if (Whisper != null) Whisper.MarkUtteranceStart();
+                    }
+                }
             };
             StartCoroutine(KickMicrophone());
         }
@@ -168,19 +184,40 @@ public class GrizTestConsole : MonoBehaviour
         _pendingVolume = Mathf.Max(_pendingVolume, peakVolume);
         _lastVoiceActivity = Time.time;
 
-        if (immediate) ReplyNow();
+        if (immediate) ReplyNow(skipWhisper: true);
     }
 
-    void ReplyNow()
+    void ReplyNow(bool skipWhisper = false)
     {
         string text = _pendingText;
         float vol = _pendingVolume;
         _pendingText = "";
         _pendingVolume = 0f;
-        if (string.IsNullOrWhiteSpace(text)) return;
+        if (string.IsNullOrWhiteSpace(text)) { _utteranceOpen = false; return; }
 
+        if (!skipWhisper && Whisper != null && Whisper.IsReady && _utteranceOpen)
+            StartCoroutine(RefineThenSend(text, vol));
+        else
+        {
+            _utteranceOpen = false;
+            SendToBrain(text, vol, "");
+        }
+    }
+
+    // Whisper re-transcribes the utterance audio; its text replaces Vosk's if it delivers.
+    IEnumerator RefineThenSend(string voskText, float vol)
+    {
+        _utteranceOpen = false;
+        string refined = null;
+        yield return Whisper.EndUtteranceAndTranscribe(t => refined = t);
+        bool useWhisper = !string.IsNullOrWhiteSpace(refined);
+        SendToBrain(useWhisper ? refined : voskText, vol, useWhisper ? "·w" : "·v");
+    }
+
+    void SendToBrain(string text, float vol, string srcTag)
+    {
         _lastExchangeTime = Time.time;
-        Say("YOU", $"{text}   <vol {vol:0.00}>");
+        Say("YOU", $"{text}   <vol {vol:0.00}{srcTag}>");
         _lastYouLine = text;
         _lastYouLineTime = Time.time;
 
@@ -285,6 +322,9 @@ public class GrizTestConsole : MonoBehaviour
         voiceMode += Llm != null && Llm.IsReady
             ? "   Brain: <color=#66ff66>LLM</color>"
             : "   Brain: keywords";
+        voiceMode += Whisper != null && Whisper.IsReady
+            ? "   Ears: <color=#66ff66>Whisper</color>"
+            : "   Ears: Vosk";
         GUILayout.Label($"Mic: <b>{(mic ? "<color=#66ff66>LIVE</color>" : "starting… (typing works now)")}</b>   " +
                         $"Vol: {Bar(vol)}   Peak: {_peakVolume:0.00}   Voice: {voiceMode}   " +
                         $"<color=#888888>{(Vosk != null ? Vosk.StatusMessage : "no Vosk in scene")}</color>", Rich(fSmall));

@@ -79,7 +79,10 @@ public class LlamaIntentService : MonoBehaviour
         var psi = new System.Diagnostics.ProcessStartInfo
         {
             FileName = exe,
-            Arguments = $"-m \"{model}\" --port {port} -c 1024",
+            // -c 1024 was too small: persona (~300 tok) + classify prompt (~200) + history/facts
+            // routinely blew past it, so GenerateReply's request got silently truncated/rejected
+            // and every line fell back to the authored text — no error, no ·gen tag, just silence.
+            Arguments = $"-m \"{model}\" --port {port} -c 4096",
             WorkingDirectory = dir,
             UseShellExecute = false,
             CreateNoWindow = true,
@@ -172,14 +175,26 @@ public class LlamaIntentService : MonoBehaviour
             req.timeout = Mathf.Max(3, Mathf.CeilToInt(generateTimeout));
             yield return req.SendWebRequest();
 
-            if (req.result != UnityWebRequest.Result.Success) { done(null, false); yield break; }
+            if (req.result != UnityWebRequest.Result.Success)
+            {
+                Debug.LogWarning($"[Llama] GenerateReply request failed: {req.error} — {req.downloadHandler.text}");
+                done(null, false); yield break;
+            }
 
             var m = Regex.Match(req.downloadHandler.text,
                 "\"message\"[\\s\\S]*?\"content\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
-            if (!m.Success) { done(null, false); yield break; }
+            if (!m.Success)
+            {
+                Debug.LogWarning($"[Llama] GenerateReply: couldn't parse response — {req.downloadHandler.text}");
+                done(null, false); yield break;
+            }
 
             string line = CleanGenerated(Regex.Unescape(m.Groups[1].Value));
-            if (string.IsNullOrWhiteSpace(line)) { done(null, false); yield break; }
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                Debug.LogWarning($"[Llama] GenerateReply: cleaned line was empty — raw: {m.Groups[1].Value}");
+                done(null, false); yield break;
+            }
             done(line, true);
         }
     }

@@ -431,7 +431,9 @@ public class GrizBrain : MonoBehaviour
         int smalltalk = Score(text, "how are you", "how you doing", "how are you doing", "how's it", "hows it",
             "what's up", "whats up", "how is business", "how's business", "you good", "you okay", "nice place");
         int backstory = Score(text, "your story", "about you", "who are you", "your life", "how did you", "why are you here",
-            "about yourself", "your name", "where are you from", "what happened to you");
+            "about yourself", "your name", "where are you from", "what happened to you",
+            // Whisper commonly mishears "ear" as "a year"/"year"/"here" in this exact phrasing
+            "lose the ear", "lose your ear", "lose a year", "lose your year", "your ear", "the ear", "missing ear");
         int barter = Score(text, "trade", "swap", "exchange", "barter", "instead of gold");
         int inventory = Score(text, "anything else", "what else", "something else", "what do you have", "what you got",
             "what have you got", "do you have", "you have any", "what do you sell", "what are you selling", "selling",

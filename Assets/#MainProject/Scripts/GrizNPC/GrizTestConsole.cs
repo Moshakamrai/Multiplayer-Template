@@ -17,6 +17,7 @@ public class GrizTestConsole : MonoBehaviour
     public LlamaIntentService Llm;
     public WhisperTranscriber Whisper;
     bool _utteranceOpen;
+    int _pendingRequests; // classify/generate coroutines in flight — suppress idle mutter while >0
     readonly List<string> _history = new List<string>(); // clean transcript for the LLM
 
     [Tooltip("F1 toggles between the full debug console and cinematic mode (corner dialog box only) — use cinematic for showcase videos.")]
@@ -29,8 +30,8 @@ public class GrizTestConsole : MonoBehaviour
     [Tooltip("Show the hidden state panel (price/patience/respect/fear).")]
     public bool showDebugState = true;
 
-    [Tooltip("Seconds of silence before Griz starts rambling unprompted.")]
-    public float idleBlabberSeconds = 25f;
+    [Tooltip("Seconds of TRUE silence (no talking, no pending reply) before Griz starts rambling unprompted.")]
+    public float idleBlabberSeconds = 20f;
     float _lastExchangeTime;
 
     [Tooltip("Your sentence only ENDS after this much real mic silence — keep talking and it all stays one message. Griz replies immediately once it sends.")]
@@ -143,8 +144,10 @@ public class GrizTestConsole : MonoBehaviour
             Time.time - _lastVoiceActivity >= silenceToSendSeconds)
             ReplyNow();
 
-        // Go quiet too long and he fills the silence himself
-        if (Brain != null && !Brain.DealClosed && !Brain.KickedOut &&
+        // Go quiet too long and he fills the silence himself — never while a reply is
+        // still being generated, and never mid-sentence (composing or a pending message).
+        if (Brain != null && !Brain.DealClosed && !Brain.KickedOut && _pendingRequests == 0 &&
+            string.IsNullOrEmpty(_pendingText) && string.IsNullOrEmpty(_partial) &&
             Time.time - _lastExchangeTime > idleBlabberSeconds)
         {
             string mutter = Brain.IdleMutter();
@@ -226,7 +229,10 @@ public class GrizTestConsole : MonoBehaviour
         if (_history.Count > 14) _history.RemoveAt(0);
 
         if (Llm != null && Llm.IsReady)
+        {
+            _pendingRequests++;
             StartCoroutine(ClassifyThenReply(text, vol));
+        }
         else
             FinishReply(Brain.Process(text, vol), "kw");
     }
@@ -263,6 +269,7 @@ public class GrizTestConsole : MonoBehaviour
                 source += "·gen";
             }
         }
+        _pendingRequests--;
         FinishReply(reply, source);
     }
 

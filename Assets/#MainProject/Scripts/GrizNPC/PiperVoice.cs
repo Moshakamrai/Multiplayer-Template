@@ -21,13 +21,15 @@ public class PiperVoice : MonoBehaviour
 {
     [Tooltip("Part of a voice model filename to prefer when several .onnx files are in StreamingAssets/piper (e.g. \"alan\"). Empty = first one found.")]
     public string preferredModel = "";
-    [Tooltip("Playback pitch — lower = deeper and grimmer, near 1 = lighter/wry. Comic dwarf: ~0.8. Sarcastic: ~0.95.")]
-    [Range(0.5f, 1.5f)] public float pitch = 0.95f;
-    [Tooltip("Piper speaking speed: <1 = faster, >1 = slower. Quick delivery reads as sharp-tongued; slower reads OLDER.")]
-    [Range(0.5f, 1.5f)] public float lengthScale = 0.85f;
+    [Tooltip("Playback pitch — lower = deeper and grimmer, near 1 = lighter/wry. Comic dwarf: ~0.8. Sarcastic: ~0.95. Old man: ~0.88.")]
+    [Range(0.5f, 1.5f)] public float pitch = 0.88f;
+    [Tooltip("Piper speaking speed: <1 = faster, >1 = slower. Slower + lower reads OLDER and less machine-like.")]
+    [Range(0.5f, 1.5f)] public float lengthScale = 1.05f;
     [Tooltip("Speaker index for MULTI-speaker models (vctk, semaine, aru…). -1 = single-speaker model.")]
     public int speakerId = -1;
     [Range(0f, 1f)] public float volume = 0.9f;
+    [Tooltip("Tiny per-line random pitch/speed drift so every line doesn't sound identically robotic. 0 = off.")]
+    [Range(0f, 0.15f)] public float naturalVariation = 0.05f;
 
     public bool IsSpeaking => _source != null && _source.isPlaying;
 
@@ -125,7 +127,8 @@ public class PiperVoice : MonoBehaviour
                 yield break;
             }
             var clip = DownloadHandlerAudioClip.GetContent(req);
-            _source.pitch = pitch;
+            float drift = naturalVariation > 0f ? UnityEngine.Random.Range(-naturalVariation, naturalVariation) : 0f;
+            _source.pitch = pitch + drift;
             _source.volume = volume;
             _source.clip = clip;
             _source.Play();

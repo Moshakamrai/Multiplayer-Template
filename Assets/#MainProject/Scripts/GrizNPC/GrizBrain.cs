@@ -47,6 +47,55 @@ public class GrizBrain : MonoBehaviour
         public string line;
         public bool dealClosed;
         public bool kickedOut;
+        public string revealSecret; // content of a secret unlocked THIS turn (null otherwise)
+    }
+
+    // ── Secrets: earned through conversation. The LLM prompt only ever contains the
+    // HINT until the state machine unlocks the CONTENT — un-leakable by design. ──
+    [Serializable]
+    public class Secret
+    {
+        public string id;
+        [TextArea] public string hint;     // always in the prompt: what to guard/deflect
+        [TextArea] public string content;  // enters the prompt only once unlocked
+        public float minRespect;           // >0 → unlocks at this much respect
+        public float minFear;              // >0 → unlocks at this much fear
+        public string triggerWord = "";    // non-empty → mentioning this unlocks it
+        [NonSerialized] public bool Unlocked;
+    }
+
+    [Header("Secrets — earned through conversation")]
+    public List<Secret> secrets = new List<Secret>
+    {
+        new Secret
+        {
+            id = "the-ear", minRespect = 55f,
+            hint = "He NEVER tells the true story of his missing ear — he deflects with a different ridiculous fake story every time he is asked.",
+            content = "THE TRUTH about the ear: he bet it in a card game he was WINNING, until his partner Vessa swapped the deck. He let her keep the ear because he loved her. Still does. He only admits this to someone he genuinely respects — and he goes quiet and sincere when he does."
+        },
+        new Secret
+        {
+            id = "the-debt", minFear = 99f, triggerWord = "bookie",
+            hint = "The top name on his napkin ledger is not someone who owes HIM — it is who HE owes. He gets twitchy if the arena Bookie comes up.",
+            content = "THE TRUTH about the debt: Griz owes the arena Bookie 4,000 gold and the shop itself is collateral. If word spreads he is finished. When this comes out he panics, admits it, then immediately begs the player to keep it quiet."
+        },
+    };
+
+    string EvaluateSecrets(string text)
+    {
+        foreach (var s in secrets)
+        {
+            if (s == null || s.Unlocked) continue;
+            bool byRespect = s.minRespect > 0f && Respect >= s.minRespect;
+            bool byFear = s.minFear > 0f && Fear >= s.minFear;
+            bool byWord = !string.IsNullOrEmpty(s.triggerWord) && text.Contains(s.triggerWord.ToLowerInvariant());
+            if (byRespect || byFear || byWord)
+            {
+                s.Unlocked = true;
+                return s.content;
+            }
+        }
+        return null;
     }
 
     void Awake() { ResetGriz(); }
@@ -65,6 +114,7 @@ public class GrizBrain : MonoBehaviour
         _threatSpent = false;
         _counterPending = false;
         _recentLines.Clear();
+        foreach (var s in secrets) if (s != null) s.Unlocked = false;
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -313,6 +363,7 @@ public class GrizBrain : MonoBehaviour
         }
 
         if (interruptPrefix.Length > 0) r.line = interruptPrefix + r.line;
+        r.revealSecret = EvaluateSecrets(text);
         if (CheckPatience(ref r)) return r;
         return r;
     }

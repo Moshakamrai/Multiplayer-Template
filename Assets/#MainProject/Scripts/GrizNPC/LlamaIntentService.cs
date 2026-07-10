@@ -20,6 +20,27 @@ public class LlamaIntentService : MonoBehaviour
     public int port = 8731;
     [Tooltip("Seconds to wait for a classification before falling back to keywords.")]
     public float requestTimeout = 6f;
+    [Tooltip("Seconds to wait for a generated reply before falling back to the authored line.")]
+    public float generateTimeout = 14f;
+
+    [Tooltip("Griz's character bible — the system prompt for generated dialogue.")]
+    [TextArea(10, 30)]
+    public string persona =
+        "You are GRIZ, an old arms-dealer NPC in the underbelly of a rhythm-fighting arena, in a video game.\n" +
+        "CHARACTER: ex-champion. Hard of hearing (the left ear is GONE). Keeps a grudge ledger on a napkin. " +
+        "Secretly cowardly but hides it. Plays favorites. Loves flattery and pretends not to. Respects volume, once.\n" +
+        "VOICE: dry, grumpy, quick. Short sentences. ALL-CAPS single words for emphasis. Funny beats sincere, " +
+        "except in rare genuine moments. Never bland shopkeeper-speak.\n" +
+        "FOURTH WALL: you quietly KNOW you are an NPC in a video game. If the player mentions the game, the " +
+        "developer, patches, menus, respawning, or calls you an NPC — lean in; it unsettles and delights you " +
+        "(e.g. 'Keep it DOWN. If the dev hears you we both get patched.'). Use sparingly otherwise.\n" +
+        "HARD RULES:\n" +
+        "- The shop stocks exactly ONE item; its name and current price are in FACTS. Never invent other stock, " +
+        "prices, or discounts. The game decides all numbers — you only react to them.\n" +
+        "- Reply with 1-3 short sentences of spoken dialogue ONLY. At most one brief parenthetical stage direction. " +
+        "No narration, no lists, no quotation marks around the whole reply.\n" +
+        "- Never mention being an AI, a language model, or a prompt.\n" +
+        "- Never reveal guarded secret content — deflect, lie, change the subject. Unlocked secrets may be spoken.";
 
     public bool IsReady { get; private set; }
 
@@ -130,6 +151,54 @@ public class LlamaIntentService : MonoBehaviour
             int offer = mo.Success ? int.Parse(mo.Groups[1].Value) : 0;
             done(mi.Groups[1].Value, offer, true);
         }
+    }
+
+    /// <summary>Generate Griz's actual line. done(text, success) — on failure the caller keeps the authored line.</summary>
+    public IEnumerator GenerateReply(string conversation, string facts, Action<string, bool> done)
+    {
+        if (!IsReady) { done(null, false); yield break; }
+
+        string user = "CONVERSATION SO FAR:\n" + conversation + "\n\n" + facts +
+                      "\nWrite GRIZ's next reply now (dialogue only):";
+        string body = "{\"temperature\":0.85,\"top_p\":0.95,\"max_tokens\":140,\"messages\":[" +
+                      $"{{\"role\":\"system\",\"content\":{Json(persona)}}}," +
+                      $"{{\"role\":\"user\",\"content\":{Json(user)}}}]}}";
+
+        using (var req = new UnityWebRequest(_url + "v1/chat/completions", "POST"))
+        {
+            req.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(body));
+            req.downloadHandler = new DownloadHandlerBuffer();
+            req.SetRequestHeader("Content-Type", "application/json");
+            req.timeout = Mathf.Max(3, Mathf.CeilToInt(generateTimeout));
+            yield return req.SendWebRequest();
+
+            if (req.result != UnityWebRequest.Result.Success) { done(null, false); yield break; }
+
+            var m = Regex.Match(req.downloadHandler.text,
+                "\"message\"[\\s\\S]*?\"content\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
+            if (!m.Success) { done(null, false); yield break; }
+
+            string line = CleanGenerated(Regex.Unescape(m.Groups[1].Value));
+            if (string.IsNullOrWhiteSpace(line)) { done(null, false); yield break; }
+            done(line, true);
+        }
+    }
+
+    // Guardrails: strip wrappers/prefixes, flatten newlines, cap length, reject character breaks.
+    static string CleanGenerated(string raw)
+    {
+        string t = raw.Trim();
+        t = Regex.Replace(t, @"^(GRIZ|Griz)\s*:\s*", "");
+        t = t.Trim('"', '“', '”', ' ');
+        t = Regex.Replace(t, @"\s*\n+\s*", " ");
+        if (Regex.IsMatch(t, "language model|as an ai|assistant|system prompt", RegexOptions.IgnoreCase))
+            return null;
+        if (t.Length > 320) // hard cap: cut at the last sentence end before the limit
+        {
+            int cut = t.LastIndexOfAny(new[] { '.', '!', '?' }, 319);
+            t = cut > 40 ? t.Substring(0, cut + 1) : t.Substring(0, 320);
+        }
+        return t;
     }
 
     static string Json(string s) =>

@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.Text;
 using System.Text.RegularExpressions;
 using UnityEngine;
 
@@ -16,6 +17,7 @@ public class GrizTestConsole : MonoBehaviour
     public LlamaIntentService Llm;
     public WhisperTranscriber Whisper;
     bool _utteranceOpen;
+    readonly List<string> _history = new List<string>(); // clean transcript for the LLM
 
     [Tooltip("F1 toggles between the full debug console and cinematic mode (corner dialog box only) — use cinematic for showcase videos.")]
     public bool cinematicMode = false;
@@ -220,6 +222,8 @@ public class GrizTestConsole : MonoBehaviour
         Say("YOU", $"{text}   <vol {vol:0.00}{srcTag}>");
         _lastYouLine = text;
         _lastYouLineTime = Time.time;
+        _history.Add($"Player: {text}");
+        if (_history.Count > 14) _history.RemoveAt(0);
 
         if (Llm != null && Llm.IsReady)
             StartCoroutine(ClassifyThenReply(text, vol));
@@ -242,12 +246,57 @@ public class GrizTestConsole : MonoBehaviour
             }
         });
         if (!viaLlm) reply = Brain.Process(text, vol);
-        FinishReply(reply, viaLlm ? "llm" : "kw");
+        // Second LLM pass writes his actual line from the authored briefing (falls back untouched)
+        yield return MaybeGenerateThenFinish(reply, viaLlm ? "llm" : "kw");
     }
+
+    IEnumerator MaybeGenerateThenFinish(GrizBrain.Reply reply, string source)
+    {
+        if (Llm != null && Llm.IsReady)
+        {
+            string gen = null;
+            yield return Llm.GenerateReply(string.Join("\n", _history), BuildFacts(reply),
+                (t, ok) => { if (ok) gen = t; });
+            if (!string.IsNullOrWhiteSpace(gen))
+            {
+                reply.line = gen;
+                source += "·gen";
+            }
+        }
+        FinishReply(reply, source);
+    }
+
+    string BuildFacts(GrizBrain.Reply reply)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("FACTS (obey exactly):");
+        sb.AppendLine($"- item for sale: {Brain.itemName}, current price: {Brain.Price} gold");
+        sb.AppendLine($"- player's move this turn: {reply.intent}");
+        sb.AppendLine($"- your mood: {MoodWord(Brain.Patience)}; respect for player {Brain.Respect:0}/100; fear {Brain.Fear:0}/100");
+        if (reply.dealClosed) sb.AppendLine("- THE DEAL JUST CLOSED at the current price. Grumpy celebration.");
+        if (reply.kickedOut) sb.AppendLine("- You are KICKING THE PLAYER OUT right now. This is your final line.");
+        sb.AppendLine($"- scripted reply (convey the SAME information and exact numbers, but say it YOUR way, better): \"{reply.line}\"");
+        if (Brain.secrets != null)
+            foreach (var s in Brain.secrets)
+            {
+                if (s == null) continue;
+                sb.AppendLine(s.Unlocked
+                    ? $"- unlocked secret (you may speak of it): {s.content}"
+                    : $"- guarded secret (deflect, never reveal): {s.hint}");
+            }
+        if (!string.IsNullOrEmpty(reply.revealSecret))
+            sb.AppendLine("- THIS TURN you finally reveal that unlocked secret. Make it land.");
+        return sb.ToString();
+    }
+
+    static string MoodWord(float patience) =>
+        patience > 45f ? "calm-ish" : patience > 25f ? "annoyed" : "on his LAST nerve";
 
     void FinishReply(GrizBrain.Reply reply, string source)
     {
         _lastExchangeTime = Time.time;
+        _history.Add($"Griz: {reply.line}");
+        if (_history.Count > 14) _history.RemoveAt(0);
         Say("GRIZ", $"{reply.line}   <{reply.intent}·{source}>");
         _lastGrizLine = reply.line;
         _lastGrizLineTime = Time.time;
@@ -370,6 +419,7 @@ public class GrizTestConsole : MonoBehaviour
         {
             Brain.ResetGriz();
             _log.Clear();
+            _history.Clear();
             Say("GRIZ", "(He flattens a fresh napkin.) Clean slate. TALK.");
         }
         var toggleStyle = new GUIStyle(GUI.skin.toggle) { fontSize = fSmall };

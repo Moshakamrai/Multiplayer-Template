@@ -130,7 +130,7 @@ public class LlamaIntentService : MonoBehaviour
                       $"counteroffer_open: {(counterOpen ? "true" : "false")}\n" +
                       $"merchant_last_line: \"{lastLine}\"\n" +
                       $"utterance: \"{utterance.Replace('"', '\'')}\"";
-        string body = "{\"temperature\":0,\"max_tokens\":48,\"messages\":[" +
+        string body = "{\"temperature\":0,\"max_tokens\":48,\"stream\":false,\"messages\":[" +
                       $"{{\"role\":\"system\",\"content\":{Json(SystemPrompt)}}}," +
                       $"{{\"role\":\"user\",\"content\":{Json(user)}}}]}}";
 
@@ -140,11 +140,23 @@ public class LlamaIntentService : MonoBehaviour
             req.downloadHandler = new DownloadHandlerBuffer();
             req.SetRequestHeader("Content-Type", "application/json");
             req.timeout = Mathf.Max(2, Mathf.CeilToInt(requestTimeout));
-            yield return req.SendWebRequest();
+
+            var op = req.SendWebRequest();
+            float deadline = Time.realtimeSinceStartup + requestTimeout + 3f;
+            while (!op.isDone)
+            {
+                if (Time.realtimeSinceStartup > deadline)
+                {
+                    Debug.LogWarning("[Llama] Classify watchdog aborted a hung request.");
+                    req.Abort();
+                    break;
+                }
+                yield return null;
+            }
 
             if (req.result != UnityWebRequest.Result.Success)
             {
-                Debug.LogWarning($"[Llama] Classify request failed: {req.error} — {req.downloadHandler.text}");
+                Debug.LogWarning($"[Llama] Classify request failed: {req.result} / {req.error} — {req.downloadHandler.text}");
                 done(null, 0, false);
                 yield break;
             }
@@ -171,7 +183,11 @@ public class LlamaIntentService : MonoBehaviour
 
         string user = "CONVERSATION SO FAR:\n" + conversation + "\n\n" + facts +
                       "\nWrite GRIZ's next reply now (dialogue only):";
-        string body = "{\"temperature\":0.85,\"top_p\":0.95,\"max_tokens\":140,\"messages\":[" +
+        // stream explicitly disabled — a streamed response with DownloadHandlerBuffer can sit
+        // waiting on a final chunk that never arrives cleanly, which does NOT trip
+        // UnityWebRequest's timeout (the connection looks "alive"). This silently hung
+        // GenerateReply forever on turns after the first, with zero error ever logged.
+        string body = "{\"temperature\":0.85,\"top_p\":0.95,\"max_tokens\":140,\"stream\":false,\"messages\":[" +
                       $"{{\"role\":\"system\",\"content\":{Json(persona)}}}," +
                       $"{{\"role\":\"user\",\"content\":{Json(user)}}}]}}";
 
@@ -181,11 +197,25 @@ public class LlamaIntentService : MonoBehaviour
             req.downloadHandler = new DownloadHandlerBuffer();
             req.SetRequestHeader("Content-Type", "application/json");
             req.timeout = Mathf.Max(3, Mathf.CeilToInt(generateTimeout));
-            yield return req.SendWebRequest();
+
+            var op = req.SendWebRequest();
+            // hard watchdog independent of req.timeout, which has been observed not to
+            // trigger on some hung-but-"alive" connections
+            float deadline = Time.realtimeSinceStartup + generateTimeout + 3f;
+            while (!op.isDone)
+            {
+                if (Time.realtimeSinceStartup > deadline)
+                {
+                    Debug.LogWarning("[Llama] GenerateReply watchdog aborted a hung request.");
+                    req.Abort();
+                    break;
+                }
+                yield return null;
+            }
 
             if (req.result != UnityWebRequest.Result.Success)
             {
-                Debug.LogWarning($"[Llama] GenerateReply request failed: {req.error} — {req.downloadHandler.text}");
+                Debug.LogWarning($"[Llama] GenerateReply request failed: {req.result} / {req.error} — {req.downloadHandler.text}");
                 done(null, false); yield break;
             }
 

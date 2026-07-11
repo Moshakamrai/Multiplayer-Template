@@ -258,11 +258,15 @@ public class GrizTestConsole : MonoBehaviour
 
     IEnumerator MaybeGenerateThenFinish(GrizBrain.Reply reply, string source)
     {
+        Debug.Log($"[Griz] MaybeGenerateThenFinish entered — Llm={(Llm != null)} IsReady={(Llm != null && Llm.IsReady)}");
         if (Llm != null && Llm.IsReady)
         {
             string gen = null;
-            yield return Llm.GenerateReply(string.Join("\n", _history), BuildFacts(reply),
+            string facts = BuildFacts(reply);
+            Debug.Log($"[Griz] calling GenerateReply, history lines={_history.Count}, facts len={facts.Length}");
+            yield return Llm.GenerateReply(string.Join("\n", _history), facts,
                 (t, ok) => { if (ok) gen = t; });
+            Debug.Log($"[Griz] GenerateReply callback done — gen={(gen ?? "<null>")}");
             if (!string.IsNullOrWhiteSpace(gen))
             {
                 reply.line = gen;

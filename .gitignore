@@ -76,3 +76,10 @@ crashlytics-build.properties
 # Temporary auto-generated Android Assets
 /[Aa]ssets/[Ss]treamingAssets/aa.meta
 /[Aa]ssets/[Ss]treamingAssets/aa/*
+
+# Local AI runtime binaries + models (llama.cpp/whisper.cpp/piper exes + .gguf/.bin/.onnx
+# models) - multi-GB downloaded files, not source, machine-specific setup via
+# Tools > Griz > Check *** Setup menus. Never want these in git history.
+/[Aa]ssets/[Ss]treamingAssets/llama/
+/[Aa]ssets/[Ss]treamingAssets/whisper/
+/[Aa]ssets/[Ss]treamingAssets/piper/

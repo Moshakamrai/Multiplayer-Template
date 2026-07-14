@@ -44,6 +44,32 @@ public class WhisperTranscriber : MonoBehaviour
 
     void Start()
     {
+        Launch();
+        StartCoroutine(HookMicrophone());
+    }
+
+    /// <summary>Kill and relaunch the server with a new language — drives the on-screen
+    /// EN/BN toggle. translate=true makes Whisper output ENGLISH text for foreign speech,
+    /// so Bangla mode needs zero changes anywhere else in the pipeline.</summary>
+    public void Restart(string newLanguage, bool translate)
+    {
+        language = newLanguage;
+        translateToEnglish = translate;
+        IsReady = false;
+        Kill();
+        StartCoroutine(RelaunchAfterPortFrees());
+    }
+
+    // Process.Kill() is async on Windows — the old server can still hold the port for a
+    // moment. A short delay avoids a bind failure on rapid EN/BN toggling.
+    IEnumerator RelaunchAfterPortFrees()
+    {
+        yield return new WaitForSeconds(0.5f);
+        Launch();
+    }
+
+    void Launch()
+    {
         string dir = Path.Combine(Application.streamingAssetsPath, "whisper");
         string exe = Path.Combine(dir, "whisper-server.exe");
         if (!File.Exists(exe)) exe = Path.Combine(dir, "server.exe"); // older release name
@@ -74,7 +100,6 @@ public class WhisperTranscriber : MonoBehaviour
             return;
         }
         StartCoroutine(WaitUntilReady());
-        StartCoroutine(HookMicrophone());
     }
 
     IEnumerator WaitUntilReady()

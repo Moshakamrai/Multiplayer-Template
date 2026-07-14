@@ -17,6 +17,7 @@ public class GrizTestConsole : MonoBehaviour
     public LlamaIntentService Llm;
     public WhisperTranscriber Whisper;
     bool _utteranceOpen;
+    bool _bangla; // EN/BN toggle button state — Whisper does the actual language switch
     int _pendingRequests; // classify/generate coroutines in flight — suppress idle mutter while >0
     readonly List<string> _history = new List<string>(); // clean transcript for the LLM
 
@@ -392,8 +393,8 @@ public class GrizTestConsole : MonoBehaviour
             ? "   Brain: <color=#66ff66>LLM</color>"
             : "   Brain: keywords";
         voiceMode += Whisper != null && Whisper.IsReady
-            ? "   Ears: <color=#66ff66>Whisper</color>"
-            : "   Ears: Vosk";
+            ? $"   Ears: <color=#66ff66>Whisper ({(_bangla ? "BN→EN" : "EN")})</color>"
+            : Whisper != null ? "   Ears: <color=#ffe066>Whisper reloading…</color>" : "   Ears: Vosk";
         GUILayout.Label($"Mic: <b>{(mic ? "<color=#66ff66>LIVE</color>" : "starting… (typing works now)")}</b>   " +
                         $"Vol: {Bar(vol)}   Peak: {_peakVolume:0.00}   Voice: {voiceMode}   " +
                         $"<color=#888888>{(Vosk != null ? Vosk.StatusMessage : "no Vosk in scene")}</color>", Rich(fSmall));
@@ -444,6 +445,22 @@ public class GrizTestConsole : MonoBehaviour
         }
         var toggleStyle = new GUIStyle(GUI.skin.toggle) { fontSize = fSmall };
         showDebugState = GUILayout.Toggle(showDebugState, " state", toggleStyle);
+
+        if (Whisper != null)
+        {
+            string label = _bangla ? "Speaking: BN (switch to EN)" : "Speaking: EN (switch to BN)";
+            Color prevColor = GUI.color;
+            if (_bangla) GUI.color = new Color(0.6f, 1f, 0.6f);
+            if (GUILayout.Button(label, btnStyle, GUILayout.Width(260 * k), GUILayout.Height(40 * k)))
+            {
+                _bangla = !_bangla;
+                Whisper.Restart(_bangla ? "bn" : "en", translate: _bangla);
+                Say("*", _bangla
+                    ? "── Switched to Bangla input (spoken Bangla, understood as English) ──"
+                    : "── Switched back to English input ──");
+            }
+            GUI.color = prevColor;
+        }
         GUILayout.FlexibleSpace();
         GUILayout.Label("<color=#888888>tip: typed input ending in ! counts as shouting</color>", Rich(fSmall));
         GUILayout.EndHorizontal();

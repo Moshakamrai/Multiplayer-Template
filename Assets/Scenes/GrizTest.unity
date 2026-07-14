@@ -1256,7 +1256,7 @@ AudioSource:
   OutputAudioMixerGroup: {fileID: 0}
   m_audioClip: {fileID: 8300000, guid: f208b1f6f67dfe14ca0121d05f9b73d9, type: 3}
   m_PlayOnAwake: 1
-  m_Volume: 0.234
+  m_Volume: 0.18
   m_Pitch: 1
   Loop: 0
   Mute: 0
@@ -1390,6 +1390,8 @@ MonoBehaviour:
   Voice: {fileID: 0}
   Piper: {fileID: 0}
   AnimLink: {fileID: 0}
+  Llm: {fileID: 0}
+  Whisper: {fileID: 0}
   cinematicMode: 0
   showDebugState: 1
   idleBlabberSeconds: 0
@@ -1412,6 +1414,26 @@ MonoBehaviour:
   hiddenFloor: 55
   shoutVolume: 0.35
   PendingInterruption: 0
+  secrets:
+  - id: the-ear
+    hint: "He NEVER tells the true story of his missing ear \u2014 he deflects with
+      a different ridiculous fake story every time he is asked."
+    content: "THE TRUTH about the ear: he bet it in a card game he was WINNING, until
+      his partner Vessa swapped the deck. He let her keep the ear because he loved
+      her. Still does. He only admits this to someone he genuinely respects \u2014
+      and he goes quiet and sincere when he does."
+    minRespect: 55
+    minFear: 0
+    triggerWord: 
+  - id: the-debt
+    hint: "The top name on his napkin ledger is not someone who owes HIM \u2014 it
+      is who HE owes. He gets twitchy if the arena Bookie comes up."
+    content: 'THE TRUTH about the debt: Griz owes the arena Bookie 4,000 gold and
+      the shop itself is collateral. If word spreads he is finished. When this comes
+      out he panics, admits it, then immediately begs the player to keep it quiet.'
+    minRespect: 0
+    minFear: 99
+    triggerWord: bookie
 --- !u!4 &1810039523
 Transform:
   m_ObjectHideFlags: 0

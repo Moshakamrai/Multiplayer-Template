@@ -35,6 +35,10 @@ public class GrizAnimatorLink : MonoBehaviour
     [Tooltip("Look toward the camera while talking (needs Humanoid rig + IK Pass on Base Layer).")]
     public bool lookAtCamera = true;
 
+    [Header("Lipsync")]
+    [Tooltip("Auto-add amplitude-driven mouth movement (MouthLipSync) if the face mesh has a mouth/jaw blendshape.")]
+    public bool autoLipSync = true;
+
     bool _swordOut;
     bool _wasSpeaking;
     // Animation is QUEUED here and only fires when the voice audio actually starts
@@ -55,6 +59,13 @@ public class GrizAnimatorLink : MonoBehaviour
             if (look == null) look = animator.gameObject.AddComponent<GrizHeadLook>();
             look.link = this;
             if (look.target == null && Camera.main != null) look.target = Camera.main.transform;
+        }
+
+        if (autoLipSync && GetComponent<MouthLipSync>() == null)
+        {
+            var lip = gameObject.AddComponent<MouthLipSync>();
+            lip.piperVoice = piper;
+            // MouthLipSync.Start() runs its own blendshape search; nothing else to wire here.
         }
     }
 

@@ -33,6 +33,9 @@ public class PiperVoice : MonoBehaviour
 
     public bool IsSpeaking => _source != null && _source.isPlaying;
 
+    /// <summary>The AudioSource actually playing his voice — lipsync reads live amplitude from this.</summary>
+    public AudioSource Source => _source;
+
     AudioSource _source;
     Coroutine _speaking;
     string _exePath;

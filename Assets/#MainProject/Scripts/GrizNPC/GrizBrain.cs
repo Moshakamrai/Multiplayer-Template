@@ -135,7 +135,26 @@ public class GrizBrain : MonoBehaviour
         bool shouting = peakVolume >= shoutVolume;
         if (intent == Intent.Accept && !_counterPending) intent = Intent.Buy; // no counter on the table
         if (intent == Intent.Offer && offer <= 0) intent = Intent.Haggle;     // "offer" without a number
+
+        // Safety net: Buy must actually be ABOUT the item on sale. The LLM classifier can
+        // still misfire on sentences like "I'm here to buy chickens" (contains "buy", but
+        // isn't a purchase of itemName) - closing the deal on that is a real bug we hit in
+        // testing. If the utterance doesn't mention the item at all, treat it as browsing
+        // (Inventory) instead of letting it silently close the sale.
+        if (intent == Intent.Buy && !MentionsItem(text))
+            intent = Intent.Inventory;
+
         return React(text, intent, offer, shouting);
+    }
+
+    bool MentionsItem(string text)
+    {
+        if (string.IsNullOrEmpty(itemName)) return true;
+        foreach (var word in itemName.ToLowerInvariant().Split(new[] { ' ', '-' }, StringSplitOptions.RemoveEmptyEntries))
+            if (word.Length > 3 && text.Contains(word)) return true;
+        // generic purchase words ("it", "the sword", "that") count as referring to the
+        // single item on sale - only reject when the player named something ELSE specific
+        return Regex.IsMatch(text, @"\b(it|that|this|the sword|the item|the weapon)\b");
     }
 
     public bool CounterPending => _counterPending;

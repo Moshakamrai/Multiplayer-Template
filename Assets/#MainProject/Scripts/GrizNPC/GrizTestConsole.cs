@@ -244,7 +244,7 @@ public class GrizTestConsole : MonoBehaviour
     {
         GrizBrain.Reply reply = default;
         bool viaLlm = false;
-        yield return Llm.Classify(text, Brain.CounterPending, Brain.Price, _lastGrizLine, (intentStr, offer, ok) =>
+        yield return Llm.Classify(text, Brain.CounterPending, Brain.Price, _lastGrizLine, Brain.itemName, (intentStr, offer, ok) =>
         {
             if (ok && GrizBrain.TryParseIntent(intentStr, out var intent))
             {

@@ -61,7 +61,10 @@ public class LlamaIntentService : MonoBehaviour
         "askinfo = asking about the item itself. backstory = asking about the merchant himself. " +
         "haggle = wants a lower price without naming an amount. offer = names an amount. " +
         "accept = agrees to the merchant's open counteroffer (only if counteroffer_open is true). " +
-        "buy = wants to complete the purchase. barter = proposes paying with anything besides gold. " +
+        "buy = wants to complete the purchase OF THE ITEM ACTUALLY FOR SALE (see item_for_sale below) at the " +
+        "current price, e.g. 'I'll take it', 'sold', 'buy it'. If they say 'buy'/'purchase' about something " +
+        "that is NOT item_for_sale (a different object, an animal, food, etc.), that is inventory, NOT buy. " +
+        "barter = proposes paying with anything besides gold. " +
         "threaten = any threat of violence or consequences. flatter = compliments. insult = mockery or abuse.\n" +
         "Use merchant_last_line and current_price as context: short agreements right after a counteroffer are accept; " +
         "a bare number or 'make it N' is offer with that amount.";
@@ -128,13 +131,15 @@ public class LlamaIntentService : MonoBehaviour
     }
 
     /// <summary>Classify an utterance with conversation context. done(intentString, offer, success).</summary>
-    public IEnumerator Classify(string utterance, bool counterOpen, int currentPrice, string merchantLastLine, Action<string, int, bool> done)
+    public IEnumerator Classify(string utterance, bool counterOpen, int currentPrice, string merchantLastLine,
+        string itemForSale, Action<string, int, bool> done)
     {
         if (!IsReady) { done(null, 0, false); yield break; }
 
         string lastLine = (merchantLastLine ?? "").Replace('"', '\'');
         if (lastLine.Length > 140) lastLine = lastLine.Substring(0, 140);
-        string user = $"current_price: {currentPrice}\n" +
+        string user = $"item_for_sale: {(itemForSale ?? "the item")}\n" +
+                      $"current_price: {currentPrice}\n" +
                       $"counteroffer_open: {(counterOpen ? "true" : "false")}\n" +
                       $"merchant_last_line: \"{lastLine}\"\n" +
                       $"utterance: \"{utterance.Replace('"', '\'')}\"";

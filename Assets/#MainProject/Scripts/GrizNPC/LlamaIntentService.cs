@@ -25,6 +25,9 @@ public class LlamaIntentService : MonoBehaviour
     [Tooltip("Log the full raw server response for every classify/generate call — turn on while debugging quality issues.")]
     public bool logRawResponses = true;
 
+    [Tooltip("Model layers to offload to the GPU (-ngl). 99 = everything (needs the CUDA build + an NVIDIA card). 0 = CPU only. Without this the model runs CPU-only even with the CUDA build installed.")]
+    public int gpuLayers = 99;
+
     [Tooltip("Griz's character bible — the system prompt for generated dialogue.")]
     [TextArea(10, 30)]
     public string persona =
@@ -84,7 +87,7 @@ public class LlamaIntentService : MonoBehaviour
             // -c 1024 was too small: persona (~300 tok) + classify prompt (~200) + history/facts
             // routinely blew past it, so GenerateReply's request got silently truncated/rejected
             // and every line fell back to the authored text — no error, no ·gen tag, just silence.
-            Arguments = $"-m \"{model}\" --port {port} -c 4096",
+            Arguments = $"-m \"{model}\" --port {port} -c 4096 -ngl {Mathf.Max(0, gpuLayers)}",
             WorkingDirectory = dir,
             UseShellExecute = false,
             CreateNoWindow = true,

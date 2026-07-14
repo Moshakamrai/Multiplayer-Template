@@ -23,7 +23,7 @@ public class LlamaIntentService : MonoBehaviour
     [Tooltip("Seconds to wait for a generated reply before falling back to the authored line.")]
     public float generateTimeout = 14f;
     [Tooltip("Log the full raw server response for every classify/generate call — turn on while debugging quality issues.")]
-    public bool logRawResponses = true;
+    public bool logRawResponses = false;
 
     [Tooltip("Model layers to offload to the GPU (-ngl). 99 = everything (needs the CUDA build + an NVIDIA card). 0 = CPU only. Without this the model runs CPU-only even with the CUDA build installed.")]
     public int gpuLayers = 99;
@@ -87,7 +87,12 @@ public class LlamaIntentService : MonoBehaviour
             // -c 1024 was too small: persona (~300 tok) + classify prompt (~200) + history/facts
             // routinely blew past it, so GenerateReply's request got silently truncated/rejected
             // and every line fell back to the authored text — no error, no ·gen tag, just silence.
-            Arguments = $"-m \"{model}\" --port {port} -c 4096 -ngl {Mathf.Max(0, gpuLayers)}",
+            // --parallel 1 (single slot): with the default 4 slots, classify and generate
+            // calls for the SAME conversation could land on different slots and never reuse
+            // each other's KV cache, forcing a full prompt re-process every time. One slot
+            // means the persona/history prefix stays warm between calls (visible as
+            // "cached_tokens" > 0 in the server's own response timings).
+            Arguments = $"-m \"{model}\" --port {port} -c 4096 -ngl {Mathf.Max(0, gpuLayers)} --parallel 1 -b 512",
             WorkingDirectory = dir,
             UseShellExecute = false,
             CreateNoWindow = true,
@@ -133,7 +138,9 @@ public class LlamaIntentService : MonoBehaviour
                       $"counteroffer_open: {(counterOpen ? "true" : "false")}\n" +
                       $"merchant_last_line: \"{lastLine}\"\n" +
                       $"utterance: \"{utterance.Replace('"', '\'')}\"";
-        string body = "{\"temperature\":0,\"max_tokens\":48,\"stream\":false,\"messages\":[" +
+        // max_tokens trimmed to what the JSON actually needs (was 48; the whole reply is
+        // ~11-12 tokens) - shaves a little generation time on every classify call.
+        string body = "{\"temperature\":0,\"max_tokens\":20,\"stream\":false,\"messages\":[" +
                       $"{{\"role\":\"system\",\"content\":{Json(SystemPrompt)}}}," +
                       $"{{\"role\":\"user\",\"content\":{Json(user)}}}]}}";
 

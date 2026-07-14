@@ -247,8 +247,10 @@ public class LlamaIntentService : MonoBehaviour
     {
         string t = raw.Trim();
         t = Regex.Replace(t, @"^(GRIZ|Griz)\s*:\s*", "");
+        t = Regex.Replace(t, @"\*[^*]{0,80}\*", " "); // *leans back, twirling mustache* — no.
         t = t.Trim('"', '“', '”', ' ');
         t = Regex.Replace(t, @"\s*\n+\s*", " ");
+        t = Regex.Replace(t, @"\s{2,}", " ").Trim();
         if (Regex.IsMatch(t, "language model|as an ai|assistant|system prompt", RegexOptions.IgnoreCase))
             return null;
         if (t.Length > 320) // hard cap: cut at the last sentence end before the limit

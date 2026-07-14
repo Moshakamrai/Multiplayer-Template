@@ -286,7 +286,15 @@ public class GrizTestConsole : MonoBehaviour
         sb.AppendLine($"- your mood: {MoodWord(Brain.Patience)}; respect for player {Brain.Respect:0}/100; fear {Brain.Fear:0}/100");
         if (reply.dealClosed) sb.AppendLine("- THE DEAL JUST CLOSED at the current price. Grumpy celebration.");
         if (reply.kickedOut) sb.AppendLine("- You are KICKING THE PLAYER OUT right now. This is your final line.");
-        sb.AppendLine($"- scripted reply (convey the SAME information and exact numbers, but say it YOUR way, better): \"{reply.line}\"");
+        if (reply.intent == GrizBrain.Intent.Unknown)
+            // Off-topic/unclassified: anchoring to a scripted line makes him ignore what was
+            // actually said (tested: "how much for the chicken?" got a flat sword restatement).
+            // Let him react to the actual utterance instead — that's the cattle-seller moment.
+            sb.AppendLine("- The player said something OFF-TOPIC or unexpected. React to what they " +
+                          "ACTUALLY said, in character — confusion, mockery, or annoyance at the " +
+                          "strangeness is welcome. Do not just restate your wares.");
+        else
+            sb.AppendLine($"- scripted reply (convey the SAME information and exact numbers, but say it YOUR way, better): \"{reply.line}\"");
         if (Brain.secrets != null)
             foreach (var s in Brain.secrets)
             {

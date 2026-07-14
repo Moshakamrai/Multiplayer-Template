@@ -42,8 +42,8 @@ public class LlamaIntentService : MonoBehaviour
         "HARD RULES:\n" +
         "- The shop stocks exactly ONE item; its name and current price are in FACTS. Never invent other stock, " +
         "prices, or discounts. The game decides all numbers — you only react to them.\n" +
-        "- Reply with 1-3 short sentences of spoken dialogue ONLY. At most one brief parenthetical stage direction. " +
-        "No narration, no lists, no quotation marks around the whole reply.\n" +
+        "- Reply with 1-2 SHORT sentences of spoken dialogue ONLY. Brevity is the character: he's curt. " +
+        "No narration, no stage directions, no lists, no quotation marks around the reply. Do not write in all-caps except single emphasized words.\n" +
         "- Never mention being an AI, a language model, or a prompt.\n" +
         "- Never reveal guarded secret content — deflect, lie, change the subject. Unlocked secrets may be spoken.";
 
@@ -190,7 +190,7 @@ public class LlamaIntentService : MonoBehaviour
         // waiting on a final chunk that never arrives cleanly, which does NOT trip
         // UnityWebRequest's timeout (the connection looks "alive"). This silently hung
         // GenerateReply forever on turns after the first, with zero error ever logged.
-        string body = "{\"temperature\":0.85,\"top_p\":0.95,\"max_tokens\":140,\"stream\":false,\"messages\":[" +
+        string body = "{\"temperature\":0.85,\"top_p\":0.95,\"max_tokens\":70,\"stream\":false,\"messages\":[" +
                       $"{{\"role\":\"system\",\"content\":{Json(persona)}}}," +
                       $"{{\"role\":\"user\",\"content\":{Json(user)}}}]}}";
 

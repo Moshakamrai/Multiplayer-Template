@@ -140,8 +140,21 @@ public class GrizBrain : MonoBehaviour
 
     public bool CounterPending => _counterPending;
 
-    public static bool TryParseIntent(string s, out Intent intent) =>
-        Enum.TryParse(s, true, out intent);
+    public static bool TryParseIntent(string s, out Intent intent)
+    {
+        s = (s ?? "").Trim().ToLowerInvariant();
+        // the model occasionally uses near-miss labels — normalize the common ones
+        switch (s)
+        {
+            case "threat": case "threats": case "threatening": s = "threaten"; break;
+            case "ask": case "question": case "info": s = "askinfo"; break;
+            case "compliment": case "flattery": s = "flatter"; break;
+            case "trade": s = "barter"; break;
+            case "purchase": s = "buy"; break;
+            case "hello": case "greeting": s = "greet"; break;
+        }
+        return Enum.TryParse(s, true, out intent);
+    }
 
     static string Normalize(string t) => (t ?? "").ToLowerInvariant().Trim();
 

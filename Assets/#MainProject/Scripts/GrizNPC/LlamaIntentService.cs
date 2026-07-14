@@ -261,8 +261,32 @@ public class LlamaIntentService : MonoBehaviour
         return t;
     }
 
-    static string Json(string s) =>
-        "\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n") + "\"";
+    // Full JSON string escaping. The old version missed \r — BuildFacts uses AppendLine(),
+    // which emits \r\n on Windows, so every GenerateReply request contained a raw CR and
+    // llama-server 500'd it instantly ("control character U+000D must be escaped").
+    // That single unescaped character is why generation never fired in-game.
+    static string Json(string s)
+    {
+        var sb = new StringBuilder(s.Length + 16);
+        sb.Append('"');
+        foreach (char c in s)
+        {
+            switch (c)
+            {
+                case '\\': sb.Append("\\\\"); break;
+                case '"': sb.Append("\\\""); break;
+                case '\n': sb.Append("\\n"); break;
+                case '\r': sb.Append("\\r"); break;
+                case '\t': sb.Append("\\t"); break;
+                default:
+                    if (c < ' ') sb.Append("\\u").Append(((int)c).ToString("x4"));
+                    else sb.Append(c);
+                    break;
+            }
+        }
+        sb.Append('"');
+        return sb.ToString();
+    }
 
     void OnDestroy() { Kill(); }
     void OnApplicationQuit() { Kill(); }

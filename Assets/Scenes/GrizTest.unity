@@ -895,6 +895,7 @@ MonoBehaviour:
   swordWords:
   - rust-cutter
   - sword
+  lookAtCamera: 1
 --- !u!1 &756267037
 GameObject:
   m_ObjectHideFlags: 0
@@ -1255,7 +1256,7 @@ AudioSource:
   OutputAudioMixerGroup: {fileID: 0}
   m_audioClip: {fileID: 8300000, guid: f208b1f6f67dfe14ca0121d05f9b73d9, type: 3}
   m_PlayOnAwake: 1
-  m_Volume: 0.393
+  m_Volume: 0.234
   m_Pitch: 1
   Loop: 0
   Mute: 0
@@ -1391,7 +1392,7 @@ MonoBehaviour:
   AnimLink: {fileID: 0}
   cinematicMode: 0
   showDebugState: 1
-  idleBlabberSeconds: 12
+  idleBlabberSeconds: 0
   silenceToSendSeconds: 1
   speakingVolume: 0.06
 --- !u!114 &1810039522

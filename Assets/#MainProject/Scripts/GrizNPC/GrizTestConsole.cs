@@ -30,8 +30,8 @@ public class GrizTestConsole : MonoBehaviour
     [Tooltip("Show the hidden state panel (price/patience/respect/fear).")]
     public bool showDebugState = true;
 
-    [Tooltip("Seconds of TRUE silence (no talking, no pending reply) before Griz starts rambling unprompted.")]
-    public float idleBlabberSeconds = 20f;
+    [Tooltip("Seconds of TRUE silence before Griz rambles unprompted. 0 or less = DISABLED (default — it kept interrupting real conversations).")]
+    public float idleBlabberSeconds = 0f;
     float _lastExchangeTime;
 
     [Tooltip("Your sentence only ENDS after this much real mic silence — keep talking and it all stays one message. Griz replies immediately once it sends.")]
@@ -146,7 +146,8 @@ public class GrizTestConsole : MonoBehaviour
 
         // Go quiet too long and he fills the silence himself — never while a reply is
         // still being generated, and never mid-sentence (composing or a pending message).
-        if (Brain != null && !Brain.DealClosed && !Brain.KickedOut && _pendingRequests == 0 &&
+        if (idleBlabberSeconds > 0f &&
+            Brain != null && !Brain.DealClosed && !Brain.KickedOut && _pendingRequests == 0 &&
             string.IsNullOrEmpty(_pendingText) && string.IsNullOrEmpty(_partial) &&
             Time.time - _lastExchangeTime > idleBlabberSeconds)
         {

@@ -67,7 +67,12 @@ public class CompanionConsole : MonoBehaviour
             go.transform.SetParent(Brain.transform, false);
             Piper = go.AddComponent<PiperVoice>();
         }
-        if (AnimLink == null) AnimLink = FindObjectOfType<GrizAnimatorLink>();
+        // Scoped to THIS NPC's own hierarchy first — a scene-wide FindObjectOfType would
+        // grab whichever GrizAnimatorLink exists first in a MULTI-NPC scene (e.g. Griz's
+        // instead of Sana's), silently animating/lip-syncing the wrong character.
+        if (AnimLink == null && Brain != null) AnimLink = Brain.GetComponentInChildren<GrizAnimatorLink>();
+        if (AnimLink == null && Brain != null) AnimLink = Brain.GetComponentInParent<GrizAnimatorLink>();
+        if (AnimLink == null) AnimLink = FindObjectOfType<GrizAnimatorLink>(); // last resort, single-NPC scenes
         // Reuse a Llama service already in the scene (e.g. Griz's) if one exists — one
         // llama-server can serve both NPCs sequentially, no need to run two model processes.
         if (Llm == null) Llm = FindObjectOfType<LlamaIntentService>();
@@ -89,32 +94,62 @@ public class CompanionConsole : MonoBehaviour
             AnimLink.piper = Piper;
             AnimLink.gibberish = Voice;
             AnimLink.useAnimatorStates = false; // open-domain NPC: no shop states/sword logic
+            AnimLink.PushPiperToLipSync(); // multi-NPC safe — see GrizAnimatorLink
         }
         if (Vosk != null)
         {
             Vosk.OnTranscriptionResult += OnFinalResult;
-            Vosk.OnPartialResult += p =>
-            {
-                _partial = ExtractText(p);
-                if (!string.IsNullOrEmpty(_partial))
-                {
-                    _lastVoiceActivity = Time.time;
-                    if (!_utteranceOpen)
-                    {
-                        _utteranceOpen = true;
-                        if (Whisper != null) Whisper.MarkUtteranceStart();
-                    }
-                }
-            };
+            Vosk.OnPartialResult += OnPartial; // named (not a lambda) so it can be unsubscribed
             StartCoroutine(KickMicrophone());
         }
         string name = Brain != null ? Brain.npcName : "the NPC";
         Say(NpcTag(), $"(looks up, genuinely curious) Oh — hey. I'm {name}. What's on your mind?");
     }
 
+    void OnPartial(string p)
+    {
+        if (!Active) return;
+        _partial = ExtractText(p);
+        if (!string.IsNullOrEmpty(_partial))
+        {
+            _lastVoiceActivity = Time.time;
+            if (!_utteranceOpen)
+            {
+                _utteranceOpen = true;
+                if (Whisper != null) Whisper.MarkUtteranceStart();
+            }
+        }
+    }
+
+    // ── Multi-NPC support (NpcSwitcher) — see GrizTestConsole.Pause/Resume for the reasoning. ──
+    public bool Active { get; private set; } = true;
+
+    public void Pause()
+    {
+        if (!Active) return;
+        Active = false;
+        if (Voice != null) Voice.Stop();
+        if (Piper != null) Piper.Stop();
+        if (Vosk != null) Vosk.StopRecordingManual();
+        _pendingText = "";
+        _partial = "";
+    }
+
+    public void Resume()
+    {
+        if (Active) return;
+        Active = true;
+        if (Vosk != null) Vosk.StartRecordingManual();
+        _lastVoiceActivity = Time.time;
+    }
+
     void OnDestroy()
     {
-        if (Vosk != null) Vosk.OnTranscriptionResult -= OnFinalResult;
+        if (Vosk != null)
+        {
+            Vosk.OnTranscriptionResult -= OnFinalResult;
+            Vosk.OnPartialResult -= OnPartial;
+        }
     }
 
     string NpcTag() => (Brain != null ? Brain.npcName : "NPC").ToUpperInvariant();
@@ -132,6 +167,7 @@ public class CompanionConsole : MonoBehaviour
 
     void Update()
     {
+        if (!Active) return; // paused via NpcSwitcher
         var vp = Vosk != null ? Vosk.VoiceProcessor : null;
         if (vp != null && vp.IsRecording)
         {
@@ -146,6 +182,7 @@ public class CompanionConsole : MonoBehaviour
 
     void OnFinalResult(string json)
     {
+        if (!Active) return; // paused via NpcSwitcher
         string text = ExtractText(json);
         _partial = "";
         if (string.IsNullOrWhiteSpace(text)) { _peakVolume = 0f; return; }
@@ -319,6 +356,7 @@ public class CompanionConsole : MonoBehaviour
 
     void OnGUI()
     {
+        if (!Active) return; // paused via NpcSwitcher — the switcher draws its own tab bar
         var e = Event.current;
         if (e.type == EventType.KeyDown && e.keyCode == KeyCode.F1)
         {

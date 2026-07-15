@@ -70,13 +70,23 @@ public class GrizTestConsole : MonoBehaviour
             go.transform.SetParent(Brain.transform, false);
             Piper = go.AddComponent<PiperVoice>();
         }
-        if (AnimLink == null) AnimLink = FindObjectOfType<GrizAnimatorLink>();
+        // Scoped to THIS NPC's own hierarchy first — a scene-wide FindObjectOfType would
+        // grab whichever GrizAnimatorLink exists first in a MULTI-NPC scene (e.g. Sana's
+        // instead of Griz's), silently animating/lip-syncing the wrong character.
+        if (AnimLink == null && Brain != null) AnimLink = Brain.GetComponentInChildren<GrizAnimatorLink>();
+        if (AnimLink == null && Brain != null) AnimLink = Brain.GetComponentInParent<GrizAnimatorLink>();
+        if (AnimLink == null) AnimLink = FindObjectOfType<GrizAnimatorLink>(); // last resort, single-NPC scenes
+        // Reuse a service already in the scene (e.g. a second NPC's) instead of always
+        // spinning up a duplicate llama-server/whisper-server — one process can serve
+        // multiple NPCs sequentially. See CompanionConsole, which does the same search.
+        if (Llm == null) Llm = FindObjectOfType<LlamaIntentService>();
         if (Llm == null && Brain != null)
         {
             var go = new GameObject("LlamaIntent");
             go.transform.SetParent(Brain.transform, false);
             Llm = go.AddComponent<LlamaIntentService>();
         }
+        if (Whisper == null) Whisper = FindObjectOfType<WhisperTranscriber>();
         if (Whisper == null && Brain != null)
         {
             var go = new GameObject("Whisper");
@@ -87,34 +97,68 @@ public class GrizTestConsole : MonoBehaviour
         {
             // PiperVoice is created at runtime ABOVE — AnimLink's own Start may have run
             // first and missed it, leaving it blind to the audio (anim then fires on its
-            // 3s fallback = visible lag). Wire the references explicitly.
+            // 3s fallback = visible lag). Wire the references explicitly, and push the
+            // final Piper reference into its MouthLipSync too (multi-NPC safe — see
+            // GrizAnimatorLink.PushPiperToLipSync).
             AnimLink.piper = Piper;
             AnimLink.gibberish = Voice;
+            AnimLink.PushPiperToLipSync();
         }
         if (Vosk != null)
         {
             Vosk.OnTranscriptionResult += OnFinalResult;
-            Vosk.OnPartialResult += p =>
-            {
-                _partial = ExtractText(p);
-                if (!string.IsNullOrEmpty(_partial))
-                {
-                    _lastVoiceActivity = Time.time;
-                    if (!_utteranceOpen)
-                    {
-                        _utteranceOpen = true;
-                        if (Whisper != null) Whisper.MarkUtteranceStart();
-                    }
-                }
-            };
+            Vosk.OnPartialResult += OnPartial; // named (not a lambda) so it can be unsubscribed
             StartCoroutine(KickMicrophone());
         }
         Say("GRIZ", $"(A hulking figure looks up from a napkin covered in names.) Hm? Customer. SPEAK.");
     }
 
+    void OnPartial(string p)
+    {
+        if (!Active) return; // paused via NpcSwitcher — ignore stray mic events
+        _partial = ExtractText(p);
+        if (!string.IsNullOrEmpty(_partial))
+        {
+            _lastVoiceActivity = Time.time;
+            if (!_utteranceOpen)
+            {
+                _utteranceOpen = true;
+                if (Whisper != null) Whisper.MarkUtteranceStart();
+            }
+        }
+    }
+
+    // ── Multi-NPC support (NpcSwitcher): Active gates Update/OnGUI/mic-event handling so a
+    // paused console goes fully quiet (no mic drain, no ghost replies) without losing its
+    // conversation state — switch back and Griz remembers exactly where you left off. ──
+    public bool Active { get; private set; } = true;
+
+    public void Pause()
+    {
+        if (!Active) return;
+        Active = false;
+        if (Voice != null) Voice.Stop();
+        if (Piper != null) Piper.Stop();
+        if (Vosk != null) Vosk.StopRecordingManual();
+        _pendingText = "";
+        _partial = "";
+    }
+
+    public void Resume()
+    {
+        if (Active) return;
+        Active = true;
+        if (Vosk != null) Vosk.StartRecordingManual();
+        _lastVoiceActivity = Time.time; // don't let paused-time count as "silence" toward a send
+    }
+
     void OnDestroy()
     {
-        if (Vosk != null) Vosk.OnTranscriptionResult -= OnFinalResult;
+        if (Vosk != null)
+        {
+            Vosk.OnTranscriptionResult -= OnFinalResult;
+            Vosk.OnPartialResult -= OnPartial;
+        }
     }
 
     IEnumerator KickMicrophone()
@@ -131,6 +175,7 @@ public class GrizTestConsole : MonoBehaviour
 
     void Update()
     {
+        if (!Active) return; // paused via NpcSwitcher — no ticking, no idle mutter, no sends
         if (Brain != null) Brain.Tick(Time.deltaTime); // patience cools off over time
 
         var vp = Vosk != null ? Vosk.VoiceProcessor : null;
@@ -164,6 +209,7 @@ public class GrizTestConsole : MonoBehaviour
 
     void OnFinalResult(string json)
     {
+        if (!Active) return; // paused via NpcSwitcher — ignore stray mic events
         string text = ExtractText(json);
         _partial = "";
         if (string.IsNullOrWhiteSpace(text)) { _peakVolume = 0f; return; }
@@ -359,6 +405,7 @@ public class GrizTestConsole : MonoBehaviour
 
     void OnGUI()
     {
+        if (!Active) return; // paused via NpcSwitcher — the switcher draws its own tab bar
         // F1 toggles cinematic mode (Event-based — works with either input backend)
         var e = Event.current;
         if (e.type == EventType.KeyDown && e.keyCode == KeyCode.F1)

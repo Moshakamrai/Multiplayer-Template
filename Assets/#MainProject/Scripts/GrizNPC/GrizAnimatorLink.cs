@@ -67,11 +67,22 @@ public class GrizAnimatorLink : MonoBehaviour
         }
 
         if (autoLipSync && GetComponent<MouthLipSync>() == null)
-        {
-            var lip = gameObject.AddComponent<MouthLipSync>();
-            lip.piperVoice = piper;
-            // MouthLipSync.Start() runs its own blendshape search; nothing else to wire here.
-        }
+            gameObject.AddComponent<MouthLipSync>();
+        // Don't hand MouthLipSync our own 'piper' field here — in a multi-NPC scene the
+        // console that owns THIS character's PiperVoice may not have assigned it to us
+        // yet (Start()-order between GameObjects is not guaranteed). PushPiperToLipSync()
+        // is called again by the owning console once it definitely has the right
+        // reference, which is the only wiring point that's actually reliable.
+        PushPiperToLipSync();
+    }
+
+    /// <summary>Explicitly hands OUR PiperVoice to OUR MouthLipSync — call this after
+    /// setting 'piper', especially in multi-NPC scenes where FindObjectOfType inside
+    /// MouthLipSync could otherwise grab a DIFFERENT character's voice.</summary>
+    public void PushPiperToLipSync()
+    {
+        var lip = GetComponent<MouthLipSync>();
+        if (lip != null && piper != null) lip.piperVoice = piper;
     }
 
     bool Speaking =>

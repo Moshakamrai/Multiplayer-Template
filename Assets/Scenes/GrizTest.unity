@@ -879,7 +879,7 @@ Animator:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 330577674}
-  m_Enabled: 1
+  m_Enabled: 0
   m_Avatar: {fileID: 0}
   m_Controller: {fileID: 9100000, guid: 9c9b38727bb85b548bf8d8ef28d5e9e6, type: 2}
   m_CullingMode: 0
@@ -899,7 +899,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 330577674}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: adf878fc6f18d904da226e9115af07e2, type: 3}
   m_Name: 
@@ -940,7 +940,7 @@ PrefabInstance:
       objectReference: {fileID: 2100000, guid: d2c696ab8806313478603813bc72e9fd, type: 2}
     - target: {fileID: -8679921383154817045, guid: 9609b07cddf3b7242978e608549d4a5e, type: 3}
       propertyPath: m_LocalPosition.x
-      value: 0.201
+      value: -0.27
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 9609b07cddf3b7242978e608549d4a5e, type: 3}
       propertyPath: m_LocalPosition.y
@@ -1609,8 +1609,8 @@ Transform:
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
-  - {fileID: 330577673}
   - {fileID: 534895836}
+  - {fileID: 330577673}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1660057539 &9223372036854775807

@@ -67,12 +67,19 @@ public class CompanionConsole : MonoBehaviour
             go.transform.SetParent(Brain.transform, false);
             Piper = go.AddComponent<PiperVoice>();
         }
-        // Scoped to THIS NPC's own hierarchy first — a scene-wide FindObjectOfType would
-        // grab whichever GrizAnimatorLink exists first in a MULTI-NPC scene (e.g. Griz's
-        // instead of Sana's), silently animating/lip-syncing the wrong character.
-        if (AnimLink == null && Brain != null) AnimLink = Brain.GetComponentInChildren<GrizAnimatorLink>();
-        if (AnimLink == null && Brain != null) AnimLink = Brain.GetComponentInParent<GrizAnimatorLink>();
-        if (AnimLink == null) AnimLink = FindObjectOfType<GrizAnimatorLink>(); // last resort, single-NPC scenes
+        // If an NpcSwitcher owns a SHARED model, it's the sole owner of that
+        // GrizAnimatorLink's wiring — don't fight it. Otherwise scope the lookup to THIS
+        // NPC's own hierarchy first: a scene-wide FindObjectOfType would grab whichever
+        // GrizAnimatorLink exists first in a MULTI-NPC scene (e.g. Griz's instead of
+        // Sana's), silently animating/lip-syncing the wrong character.
+        var switcher = FindObjectOfType<NpcSwitcher>();
+        bool sharedModelOwnedBySwitcher = switcher != null && switcher.sharedModel != null;
+        if (!sharedModelOwnedBySwitcher)
+        {
+            if (AnimLink == null && Brain != null) AnimLink = Brain.GetComponentInChildren<GrizAnimatorLink>();
+            if (AnimLink == null && Brain != null) AnimLink = Brain.GetComponentInParent<GrizAnimatorLink>();
+            if (AnimLink == null) AnimLink = FindObjectOfType<GrizAnimatorLink>(); // last resort, single-NPC scenes
+        }
         // Reuse a Llama service already in the scene (e.g. Griz's) if one exists — one
         // llama-server can serve both NPCs sequentially, no need to run two model processes.
         if (Llm == null) Llm = FindObjectOfType<LlamaIntentService>();

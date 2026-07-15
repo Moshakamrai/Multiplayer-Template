@@ -28,6 +28,9 @@ public class NpcSwitcher : MonoBehaviour
         public void Pause() { grizConsole?.Pause(); companionConsole?.Pause(); }
         public void Resume() { grizConsole?.Resume(); companionConsole?.Resume(); }
         public bool Valid => grizConsole != null || companionConsole != null;
+
+        public PiperVoice Piper => grizConsole != null ? grizConsole.Piper : companionConsole?.Piper;
+        public GrizVoice Gibberish => grizConsole != null ? grizConsole.Voice : companionConsole?.Voice;
     }
 
     public List<NpcEntry> npcs = new List<NpcEntry>();
@@ -35,6 +38,14 @@ public class NpcSwitcher : MonoBehaviour
     public int startIndex = 0;
     [Tooltip("Key that cycles to the next NPC.")]
     public KeyCode cycleKey = KeyCode.Tab;
+
+    [Header("Shared model (optional)")]
+    [Tooltip("If every NPC shares ONE physical character model (e.g. all wired through the " +
+             "same Gunan_animated head), assign its GrizAnimatorLink here. On every switch, " +
+             "the switcher re-points it at the NEWLY active NPC's Piper/gibberish voice — so " +
+             "the one model always talks/lip-syncs for whoever is currently active, regardless " +
+             "of where that model sits in the hierarchy relative to each NPC's Brain.")]
+    public GrizAnimatorLink sharedModel;
 
     int _current = -1;
 
@@ -59,6 +70,16 @@ public class NpcSwitcher : MonoBehaviour
         if (_current >= 0 && _current < npcs.Count) npcs[_current].Pause();
         _current = index;
         npcs[_current].Resume();
+
+        if (sharedModel != null)
+        {
+            // Re-point the ONE shared model at whichever NPC is now active — this is what
+            // makes "always Gunan_animated" work regardless of hierarchy: we don't rely on
+            // GrizAnimatorLink finding the right PiperVoice on its own, we just tell it.
+            sharedModel.piper = npcs[_current].Piper;
+            sharedModel.gibberish = npcs[_current].Gibberish;
+            sharedModel.PushPiperToLipSync();
+        }
     }
 
     void OnGUI()

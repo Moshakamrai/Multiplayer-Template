@@ -8,6 +8,7 @@
     "com.unity.nuget.newtonsoft-json": "3.2.1",
     "com.unity.postprocessing": "3.4.0",
     "com.unity.render-pipelines.universal": "14.0.12",
+    "com.unity.timeline": "1.7.7",
     "com.unity.toolchain.win-x86_64-linux-x86_64": "2.0.11",
     "com.unity.ui": "2.0.0",
     "com.unity.ui.builder": "2.0.0",

@@ -191,19 +191,28 @@ public class LlamaIntentService : MonoBehaviour
         }
     }
 
-    /// <summary>Generate Griz's actual line. done(text, success) — on failure the caller keeps the authored line.</summary>
-    public IEnumerator GenerateReply(string conversation, string facts, Action<string, bool> done)
+    /// <summary>Generate an NPC's actual line. done(text, success) — on failure the caller keeps
+    /// a fallback line. systemPromptOverride/closingInstruction/npcName let a SECOND NPC (a
+    /// different persona entirely) share this same server/service without touching Griz's
+    /// path — null/empty means "behave exactly as before" (Griz's persona + wording).</summary>
+    public IEnumerator GenerateReply(string conversation, string facts, Action<string, bool> done,
+        string systemPromptOverride = null, string npcName = "GRIZ", string closingInstruction = null,
+        int maxTokens = 70, float temperature = 0.85f)
     {
         if (!IsReady) { done(null, false); yield break; }
 
-        string user = "CONVERSATION SO FAR:\n" + conversation + "\n\n" + facts +
-                      "\nWrite GRIZ's next reply now (dialogue only):";
+        string system = string.IsNullOrEmpty(systemPromptOverride) ? persona : systemPromptOverride;
+        string closing = string.IsNullOrEmpty(closingInstruction)
+            ? $"\nWrite {npcName}'s next reply now (dialogue only):"
+            : "\n" + closingInstruction;
+        string user = "CONVERSATION SO FAR:\n" + conversation + "\n\n" + facts + closing;
         // stream explicitly disabled — a streamed response with DownloadHandlerBuffer can sit
         // waiting on a final chunk that never arrives cleanly, which does NOT trip
         // UnityWebRequest's timeout (the connection looks "alive"). This silently hung
         // GenerateReply forever on turns after the first, with zero error ever logged.
-        string body = "{\"temperature\":0.85,\"top_p\":0.95,\"max_tokens\":70,\"stream\":false,\"messages\":[" +
-                      $"{{\"role\":\"system\",\"content\":{Json(persona)}}}," +
+        string body = $"{{\"temperature\":{temperature.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)}," +
+                      $"\"top_p\":0.95,\"max_tokens\":{maxTokens},\"stream\":false,\"messages\":[" +
+                      $"{{\"role\":\"system\",\"content\":{Json(system)}}}," +
                       $"{{\"role\":\"user\",\"content\":{Json(user)}}}]}}";
 
         using (var req = new UnityWebRequest(_url + "v1/chat/completions", "POST"))
@@ -244,7 +253,7 @@ public class LlamaIntentService : MonoBehaviour
                 done(null, false); yield break;
             }
 
-            string line = CleanGenerated(Regex.Unescape(m.Groups[1].Value));
+            string line = CleanGenerated(Regex.Unescape(m.Groups[1].Value), npcName);
             if (string.IsNullOrWhiteSpace(line))
             {
                 Debug.LogWarning($"[Llama] GenerateReply: cleaned line was empty — raw: {m.Groups[1].Value}");
@@ -255,10 +264,12 @@ public class LlamaIntentService : MonoBehaviour
     }
 
     // Guardrails: strip wrappers/prefixes, flatten newlines, cap length, reject character breaks.
-    static string CleanGenerated(string raw)
+    // npcName generalizes the "NAME:" self-prefix strip beyond just Griz.
+    static string CleanGenerated(string raw, string npcName = "GRIZ")
     {
         string t = raw.Trim();
-        t = Regex.Replace(t, @"^(GRIZ|Griz)\s*:\s*", "");
+        string escapedName = Regex.Escape(npcName ?? "GRIZ");
+        t = Regex.Replace(t, $@"^({escapedName})\s*:\s*", "", RegexOptions.IgnoreCase);
         t = Regex.Replace(t, @"\*[^*]{0,80}\*", " "); // *leans back, twirling mustache* — no.
         t = t.Trim('"', '“', '”', ' ');
         t = Regex.Replace(t, @"\s*\n+\s*", " ");

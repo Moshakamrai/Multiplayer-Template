@@ -133,10 +133,14 @@ public class MouthLipSync : MonoBehaviour
         {
             if (explicitSource != null) return explicitSource;
             // PiperVoice is often created at RUNTIME on a different GameObject (e.g. by
-            // GrizTestConsole, as a child of the object holding GrizBrain) — GetComponent/
-            // GetComponentInParent in Start() can miss it entirely, or Start()-ordering
-            // between sibling components can leave piperVoice null even when it exists.
-            // Re-resolve globally until we actually have one; cheap, only runs until found.
+            // GrizTestConsole/CompanionConsole, as a child of the object holding the brain)
+            // — GetComponent/GetComponentInParent in Start() can miss it entirely, or
+            // Start()-ordering between sibling components can leave piperVoice null even
+            // when it exists. Re-resolve globally until we actually have one.
+            // NOTE: FindObjectOfType grabs the FIRST PiperVoice in the scene — fine for the
+            // current one-NPC-per-scene test setup (GrizTest, CompanionTest), but if you
+            // ever put two talking NPCs in the SAME scene, assign 'piperVoice' explicitly
+            // per-character instead of relying on this auto-find.
             if (piperVoice == null) piperVoice = FindObjectOfType<PiperVoice>();
             return piperVoice != null ? piperVoice.Source : null;
         }

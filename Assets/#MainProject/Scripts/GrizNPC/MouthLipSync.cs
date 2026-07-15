@@ -28,8 +28,10 @@ public class MouthLipSync : MonoBehaviour
     public SkinnedMeshRenderer face;
     [Tooltip("Index of the mouth-open blendshape on 'face'. -1 = search by name instead.")]
     public int blendShapeIndex = -1;
-    [Tooltip("Blendshape name to search for if index is -1 (e.g. \"Jaw_Open\", \"mouthOpen\", \"Viseme_AA\").")]
-    public string blendShapeNameContains = "mouth";
+    [Tooltip("Blendshape name to search for if index is -1 (e.g. \"JawOpen\", \"mouthOpen\", \"Viseme_AA\"). " +
+             "ARKit-style rigs usually name it JawOpen, not Mouth___ — check the logged blendshape list " +
+             "at Start if the mouth doesn't move.")]
+    public string blendShapeNameContains = "jawopen";
     [Tooltip("Log every blendshape name found on 'face' at Start — turn on once to see what your model actually has.")]
     public bool logBlendShapeNames = true;
 
@@ -95,15 +97,19 @@ public class MouthLipSync : MonoBehaviour
 
         if (blendShapeIndex < 0 && face != null && face.sharedMesh != null && !string.IsNullOrEmpty(blendShapeNameContains))
         {
+            // strip any prefix like "ExpressionBlendshapes." before matching, and search
+            // jaw-open first (best mouth-open proxy), falling back to the raw search term.
             string want = blendShapeNameContains.ToLowerInvariant();
+            int fallback = -1;
             for (int i = 0; i < face.sharedMesh.blendShapeCount; i++)
             {
-                if (face.sharedMesh.GetBlendShapeName(i).ToLowerInvariant().Contains(want))
-                {
-                    blendShapeIndex = i;
-                    break;
-                }
+                string raw = face.sharedMesh.GetBlendShapeName(i);
+                string leaf = raw.Contains(".") ? raw.Substring(raw.LastIndexOf('.') + 1) : raw;
+                string lower = leaf.ToLowerInvariant();
+                if (lower == "jawopen" || lower.Replace("_", "") == "jawopen") { blendShapeIndex = i; break; }
+                if (fallback < 0 && lower.Contains(want)) fallback = i;
             }
+            if (blendShapeIndex < 0) blendShapeIndex = fallback;
         }
 
         if (jawBone != null)

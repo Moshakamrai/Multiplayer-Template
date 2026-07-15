@@ -23,11 +23,15 @@ public class MouthLipSync : MonoBehaviour
     public AudioSource explicitSource;
 
     [Header("Blendshape drive (skip if using the jaw bone instead)")]
+    [Tooltip("The renderer with the mouth blendshape. If empty, auto-search prefers a renderer whose " +
+             "GameObject name contains 'head' or 'face' (e.g. Head_Mesh) over others (Eyes, EyeL_Mesh...).")]
     public SkinnedMeshRenderer face;
     [Tooltip("Index of the mouth-open blendshape on 'face'. -1 = search by name instead.")]
     public int blendShapeIndex = -1;
     [Tooltip("Blendshape name to search for if index is -1 (e.g. \"Jaw_Open\", \"mouthOpen\", \"Viseme_AA\").")]
     public string blendShapeNameContains = "mouth";
+    [Tooltip("Log every blendshape name found on 'face' at Start — turn on once to see what your model actually has.")]
+    public bool logBlendShapeNames = true;
 
     [Header("Jaw bone drive (skip if using the blendshape instead)")]
     public Transform jawBone;
@@ -54,7 +58,40 @@ public class MouthLipSync : MonoBehaviour
     {
         if (piperVoice == null) piperVoice = GetComponent<PiperVoice>();
         if (piperVoice == null) piperVoice = GetComponentInParent<PiperVoice>();
-        if (face == null) face = GetComponentInChildren<SkinnedMeshRenderer>();
+
+        if (face == null)
+        {
+            // Prefer a renderer whose object name suggests it's the face/head, since a
+            // model can have several SkinnedMeshRenderers (Eyes, EyeL_Mesh, Head_Mesh...)
+            // and GetComponentInChildren just grabs whichever comes first in hierarchy order.
+            SkinnedMeshRenderer firstFound = null;
+            foreach (var smr in GetComponentsInChildren<SkinnedMeshRenderer>(true))
+            {
+                if (firstFound == null) firstFound = smr;
+                string n = smr.gameObject.name.ToLowerInvariant();
+                if (n.Contains("head") || n.Contains("face"))
+                {
+                    face = smr;
+                    break;
+                }
+            }
+            if (face == null) face = firstFound;
+        }
+
+        if (face != null && face.sharedMesh != null && logBlendShapeNames)
+        {
+            int count = face.sharedMesh.blendShapeCount;
+            if (count == 0)
+            {
+                Debug.Log($"[MouthLipSync] '{face.gameObject.name}' has NO blendshapes at all.", this);
+            }
+            else
+            {
+                var names = new string[count];
+                for (int i = 0; i < count; i++) names[i] = $"[{i}] {face.sharedMesh.GetBlendShapeName(i)}";
+                Debug.Log($"[MouthLipSync] '{face.gameObject.name}' blendshapes ({count}):\n" + string.Join("\n", names), this);
+            }
+        }
 
         if (blendShapeIndex < 0 && face != null && face.sharedMesh != null && !string.IsNullOrEmpty(blendShapeNameContains))
         {

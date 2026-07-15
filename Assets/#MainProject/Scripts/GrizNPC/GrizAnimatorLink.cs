@@ -13,6 +13,11 @@ public class GrizAnimatorLink : MonoBehaviour
     public PiperVoice piper;
     public GrizVoice gibberish;
 
+    [Header("Animation & sword (disable for a head-only / no-Animator-Controller model)")]
+    [Tooltip("OFF = skip all CrossFade/sword logic entirely (this component becomes lipsync+headlook only). " +
+             "Turn back on once this character has a real Animator Controller assigned.")]
+    public bool useAnimatorStates = true;
+
     [Header("State names as they appear in the Animator Controller")]
     public string idleState = "Idle";
     public string[] talkingStates = { "Talking", "Talking 2", "Talking 3", "Talking 4" };
@@ -78,7 +83,7 @@ public class GrizAnimatorLink : MonoBehaviour
     /// <summary>Called by the console/hub whenever Griz starts a line.</summary>
     public void PlayForLine(string line, GrizBrain.Intent intent, GrizBrain brain)
     {
-        if (animator == null) return;
+        if (!useAnimatorStates || animator == null) return;
 
         // Draw the sword ONLY when actually asked about the merchandise (inventory /
         // item-lore questions) — not just any line that name-drops it (e.g. the greeting).
@@ -137,7 +142,7 @@ public class GrizAnimatorLink : MonoBehaviour
 
         // line finished (or was interrupted) → settle back to idle (sword idle once drawn)
         string rest = _swordOut && !string.IsNullOrEmpty(swordIdleState) ? swordIdleState : idleState;
-        if (_wasSpeaking && !speaking && _pendingState == null && animator != null && !string.IsNullOrEmpty(rest))
+        if (useAnimatorStates && _wasSpeaking && !speaking && _pendingState == null && animator != null && !string.IsNullOrEmpty(rest))
             animator.CrossFadeInFixedTime(rest, crossFadeSeconds * 2f);
         _wasSpeaking = speaking;
     }

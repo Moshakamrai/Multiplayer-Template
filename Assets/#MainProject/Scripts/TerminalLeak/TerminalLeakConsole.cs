@@ -11,8 +11,22 @@ using UnityEngine;
 // SOLO HOTSEAT: one machine, two roles. You SPEAK as Intel (describe the secret word in
 // disguised clues — the mic is your clue channel) and you TYPE as Operator (commit guesses).
 // The SentinelAI plays against you for real: it reads the same radio log (corrupted by the
-// current vault layer's wiretap quality) and races you to the word. This exists to answer
-// the make-or-break question — is Qwen a FUN opponent? — before any networking is written.
+// current vault layer's wiretap quality) and races you to the word.
+//
+// STRICT TURN CYCLE (the mic is DEAD outside your line's turn):
+//   INTEL TRANSMISSION (speak, burns 1 token — every second on the radio feeds the trace)
+//     → OPERATOR INQUIRY (type a guess [burns 1 token if wrong] or PASS)
+//       → SENTINEL INQUIRY (free — it's the house)
+//         → back to INTEL
+//
+// THE EXPOSURE ECONOMY (what makes it strategic instead of a quiz):
+// - The Sentinel does NOT know the card's theme tag until the final layer — playtesting
+//   showed tag + one clue collapses the search space ("OBJECT/WEIGHT" + "ship" = ANCHOR).
+// - It cannot guess until it has actually heard minCluesBeforeGuess transmissions.
+// - A WRONG Sentinel guess EXPOSES it: wiretap offline for exposureTransmissions full
+//   cycles. Those are CLEAN WINDOWS — clues spoken then never reach it. So the human
+//   strategy space includes deliberately baiting a confident wrong guess, then rushing
+//   the real clue through the deaf window. Its wrong guesses also leak what it's thinking.
 //
 // Reuses the proven NPC pipeline wholesale: Vosk partials open an utterance, Whisper
 // refines it on 1s of silence, llama-server thinks, Piper speaks. Every human line is
@@ -34,10 +48,19 @@ public class TerminalLeakConsole : MonoBehaviour
     [Header("Run structure")]
     [Tooltip("Cards to clear to extract the Core Data Key. Layer index also drives Sentinel hearing quality.")]
     public int vaultLayers = 3;
-    public int tokensPerCard = 10;
+    [Tooltip("Radio budget per card: each Intel transmission burns 1, each WRONG Operator guess burns 1. 0 = traced.")]
+    public int tokensPerCard = 12;
     public float overrideSeconds = 45f;
 
-    enum Phase { Boot, IntelClue, SentinelThinking, Breach, Override, RunLost, RunWon }
+    [Header("Sentinel balance")]
+    [Tooltip("Transmissions the Sentinel must actually HEAR before it is allowed to commit a guess.")]
+    public int minCluesBeforeGuess = 2;
+    [Tooltip("Full cycles its wiretap stays offline after a wrong guess — the humans' clean window.")]
+    public int exposureTransmissions = 2;
+    [Tooltip("On the final vault layer the wiretap fully locks on and it learns the theme tag too.")]
+    public bool tagKnownOnFinalLayer = true;
+
+    enum Phase { Boot, TurnIntel, TurnOperator, TurnSentinel, Breach, Override, RunLost, RunWon }
     Phase _phase = Phase.Boot;
 
     // deck
@@ -48,9 +71,11 @@ public class TerminalLeakConsole : MonoBehaviour
     int _layer;      // 0-based vault layer = cards cleared
     int _tokens;
 
-    // radio log — the SHARED reality: what players see is exactly what the Sentinel taps
-    readonly List<string> _feed = new List<string>();   // rendered terminal feed (rich text)
-    readonly List<string> _radio = new List<string>();  // clean transcript fed to the Sentinel
+    // radio: what the PLAYERS said vs what the SENTINEL actually heard (clean windows differ)
+    readonly List<string> _feed = new List<string>();          // rendered terminal feed (rich text)
+    readonly List<string> _radioSentinel = new List<string>(); // the wiretap's view, fed to the LLM
+    int _cluesHeard;     // Intel transmissions the Sentinel actually intercepted this card
+    int _sentinelDeaf;   // remaining clean-window cycles after a wrong guess exposed it
 
     // mic state
     bool _utteranceOpen;
@@ -164,6 +189,8 @@ public class TerminalLeakConsole : MonoBehaviour
         Sentinel.ResetVoiceFont();
         Sys($"DEEP GRID uplink established. Vault layers: {vaultLayers}. The Sentinel is listening.");
         Sys("SOLO TEST — you are BOTH roles: SPEAK clues as Intel, TYPE guesses as Operator.");
+        Sys("Turn cycle: your transmission → operator inquiry → Sentinel inquiry. Every transmission " +
+            "and wrong guess burns a token. A wrong SENTINEL guess exposes it — clean radio while it recalibrates.");
         NextCard();
     }
 
@@ -173,12 +200,16 @@ public class TerminalLeakConsole : MonoBehaviour
         if (_deck.Count == 0) LoadDeck();
         _card = _deck[0];
         _deck.RemoveAt(0);
-        _radio.Clear();
+        _radioSentinel.Clear();
+        _cluesHeard = 0;
+        _sentinelDeaf = 0;
         _tokens = tokensPerCard;
-        _phase = Phase.IntelClue;
-        Sys($"LAYER {_layer + 1}/{vaultLayers} — wiretap corruption: {Sentinel.corruptionByLayer[Mathf.Clamp(_layer, 0, Sentinel.corruptionByLayer.Length - 1)]:P0}");
+        _phase = Phase.TurnIntel;
+        bool finalLayer = _layer == vaultLayers - 1;
+        Sys($"LAYER {_layer + 1}/{vaultLayers} — wiretap corruption: {Sentinel.corruptionByLayer[Mathf.Clamp(_layer, 0, Sentinel.corruptionByLayer.Length - 1)]:P0}" +
+            (finalLayer && tagKnownOnFinalLayer ? "  ▲ FULL LOCK-ON: it knows the theme tag here" : ""));
         Feed($"<color={PURPLE}>CLASSIFIED CARD →  Word: <b>{_card.word}</b>  |  Tag: {_card.tag}</color>  <color=#666>(Intel eyes only — in 2P this hides from the Operator)</color>");
-        Sys("Describe it in disguised clues. The Operator types the word to crack the layer.");
+        Sys("YOUR LINE — speak a disguised clue.");
     }
 
     void CardSolved()
@@ -202,11 +233,11 @@ public class TerminalLeakConsole : MonoBehaviour
         Sys("Press R to re-board the vault.");
     }
 
-    // ── Intel (voice) path ──────────────────────────────────────────────────────
+    // ── Intel (voice) turn ──────────────────────────────────────────────────────
 
     void OnPartial(string p)
     {
-        if (_phase != Phase.IntelClue) return;
+        if (_phase != Phase.TurnIntel) return; // strict turns: the mic is dead off-turn
         _partial = ExtractText(p);
         if (!string.IsNullOrEmpty(_partial))
         {
@@ -221,7 +252,7 @@ public class TerminalLeakConsole : MonoBehaviour
 
     void OnFinalResult(string json)
     {
-        if (_phase != Phase.IntelClue) { _peakVolume = 0f; return; }
+        if (_phase != Phase.TurnIntel) { _peakVolume = 0f; return; }
         string text = ExtractText(json);
         _partial = "";
         if (string.IsNullOrWhiteSpace(text)) { _peakVolume = 0f; return; }
@@ -273,82 +304,112 @@ public class TerminalLeakConsole : MonoBehaviour
 
     void TransmitClue(string clue)
     {
-        if (_phase != Phase.IntelClue) return;
+        if (_phase != Phase.TurnIntel) return;
         clue = clue.Trim();
         if (clue.Length == 0) return;
 
-        // Saying the clean password out loud IS the instant-loss the fiction promises.
+        Feed($"<color={CYAN}>INTEL ▷</color> {clue}");
+        if (PlayerMask != null && PlayerMask.Available) PlayerMask.Speak(clue); // the voice mask
+
+        // Saying the clean password out loud IS the instant-loss the fiction promises —
+        // and no clean window saves you: a committed password trips the vault lock itself.
         if (ContainsWord(clue, _card.word))
         {
-            Feed($"<color={CYAN}>INTEL ▷</color> {clue}");
             Feed($"<color={RED}>SENTINEL ▷ You said it in the clear. How considerate.</color>");
             Sentinel.Speak("You said it in the clear. How considerate.");
             Breach(_card.word);
             return;
         }
 
-        _radio.Add($"PLAYER-1 (Intel): {clue}");
-        Feed($"<color={CYAN}>INTEL ▷</color> {clue}");
-        if (PlayerMask != null && PlayerMask.Available) PlayerMask.Speak(clue); // the voice mask
-        StartCoroutine(SentinelTurn());
+        if (BurnToken("that transmission")) return; // radio time feeds the trace
+
+        if (_sentinelDeaf > 0)
+        {
+            Feed($"<color={GREEN}>▼ CLEAN WINDOW — the wiretap is still recalibrating; it never heard that.</color>");
+        }
+        else
+        {
+            _radioSentinel.Add($"PLAYER-1 (Intel): {clue}");
+            _cluesHeard++;
+        }
+        _phase = Phase.TurnOperator;
+        Sys("OPERATOR INQUIRY — type a guess (wrong = 1 token) or PASS the line.");
     }
 
-    // ── Operator (typed) path ───────────────────────────────────────────────────
+    // ── Operator (typed) turn ───────────────────────────────────────────────────
 
     void OperatorGuess(string guess)
     {
-        if (_phase != Phase.IntelClue) return;
+        if (_phase != Phase.TurnOperator) return;
         guess = guess.Trim();
         if (guess.Length == 0) return;
 
-        _radio.Add($"PLAYER-2 (Operator) GUESSED: {guess}");
         Feed($"<color={GREEN}>OPERATOR ▷</color> guess: <b>{guess.ToUpperInvariant()}</b>");
         if (string.Equals(guess, _card.word, StringComparison.OrdinalIgnoreCase)) { CardSolved(); return; }
 
-        if (BurnToken("wrong guess")) return;
-        // Anti-degenerate rule: a wrong human guess hands the Sentinel a FREE intercept
-        // turn. Clues too private for the AI are usually too vague for your partner — now
-        // vague clues actively feed the enemy instead of safely stalling.
-        Feed($"<color={RED}>▲ intercept window — the Sentinel heard that miss</color>");
-        StartCoroutine(SentinelTurn(free: true));
+        if (_sentinelDeaf <= 0) _radioSentinel.Add($"PLAYER-2 (Operator) GUESSED: {guess} (incorrect)");
+        if (BurnToken("that wrong guess")) return;
+        StartCoroutine(SentinelTurn());
+    }
+
+    void OperatorPass()
+    {
+        if (_phase != Phase.TurnOperator) return;
+        Feed($"<color={GREEN}>OPERATOR ▷</color> <color=#666>…holds the line.</color>");
+        StartCoroutine(SentinelTurn());
     }
 
     // ── Sentinel turn ───────────────────────────────────────────────────────────
 
-    IEnumerator SentinelTurn(bool free = false)
+    IEnumerator SentinelTurn()
     {
-        if (_phase != Phase.IntelClue) yield break;
-        if (!free && BurnToken("the Sentinel's inquiry")) yield break;
-        _phase = Phase.SentinelThinking;
+        _phase = Phase.TurnSentinel;
+
+        // Exposed after a wrong guess: it skips its inquiry entirely — this cycle was clean.
+        if (_sentinelDeaf > 0)
+        {
+            _sentinelDeaf--;
+            Feed($"<color={RED}>SENTINEL ▷</color> <color=#666>…static. Recalibrating. ({_sentinelDeaf} clean cycle{(_sentinelDeaf == 1 ? "" : "s")} left)</color>");
+            _phase = Phase.TurnIntel;
+            Sys("YOUR LINE — the wire is clean. Use it.");
+            yield break;
+        }
+
+        bool finalLayer = _layer == vaultLayers - 1;
+        bool mayGuess = _cluesHeard >= minCluesBeforeGuess;
+        string tag = finalLayer && tagKnownOnFinalLayer ? _card.tag : null;
 
         bool guessed = false; string text = null;
-        yield return Sentinel.TakeTurn(string.Join("\n", _radio), _card.tag, _layer,
+        yield return Sentinel.TakeTurn(string.Join("\n", _radioSentinel), tag, _layer, mayGuess,
             (g, t) => { guessed = g; text = t; });
-        if (_phase != Phase.SentinelThinking) yield break; // run was reset mid-think
+        if (_phase != Phase.TurnSentinel) yield break; // run was reset mid-think
 
         if (guessed)
         {
             Feed($"<color={RED}>SENTINEL ▷ Committing deduction: <b>{text}</b></color>");
             if (string.Equals(text, _card.word, StringComparison.OrdinalIgnoreCase)) { Breach(text); yield break; }
-            _radio.Add($"SENTINEL GUESSED: {text} (incorrect)");
-            string taunt = "Incorrect? Interesting. That narrows things considerably.";
-            Feed($"<color={RED}>SENTINEL ▷</color> {taunt}");
-            Sentinel.Speak($"{text}. No? Interesting. That narrows things considerably.");
+
+            // WRONG — it's exposed. Its wiretap goes dark and its miss leaks its reasoning.
+            _sentinelDeaf = exposureTransmissions;
+            _radioSentinel.Add($"SENTINEL GUESSED: {text} (incorrect — wiretap knocked offline)");
+            Feed($"<color={GREEN}>▼ WRONG. SENTINEL EXPOSED — wiretap offline for {exposureTransmissions} cycles. Rush the real clue NOW.</color>");
+            Sentinel.Speak($"{text}. …No. Recalibrating. This changes nothing.");
         }
         else
         {
-            _radio.Add($"SENTINEL: {text}");
+            _radioSentinel.Add($"SENTINEL: {text}");
             Feed($"<color={RED}>SENTINEL ▷</color> {text}");
             Sentinel.Speak(text);
         }
-        _phase = Phase.IntelClue;
+        _phase = Phase.TurnIntel;
+        Sys("YOUR LINE — speak a disguised clue.");
     }
 
     bool BurnToken(string what)
     {
         _tokens--;
         if (_tokens > 0) return false;
-        Feed($"<color={RED}>INQUIRY TOKENS EXHAUSTED — {what} tripped the lockout.</color>");
+        Feed($"<color={RED}>RADIO BUDGET EXHAUSTED — {what} completed the trace.</color>");
         Breach(null);
         return true;
     }
@@ -360,7 +421,7 @@ public class TerminalLeakConsole : MonoBehaviour
         _phase = Phase.Breach;
         string flip = crackedWord != null
             ? Sentinel.VillainFlipLine(crackedWord)
-            : "Lockout achieved. You talk too much and say too little. Purging atmosphere.";
+            : "Trace complete. You talk too much and say too little. Purging atmosphere.";
         if (crackedWord == null && Sentinel.Voice != null) Sentinel.Voice.pitch = Sentinel.overlordPitch;
         Feed($"<color={RED}>██ SYSTEM BREACH ██  SENTINEL ▷ {flip}</color>");
         Sentinel.Speak(flip);
@@ -536,10 +597,14 @@ public class TerminalLeakConsole : MonoBehaviour
         string ears = Whisper != null && Whisper.IsReady ? $"<color={GREEN}>whisper</color>" : "<color=#facc15>whisper booting…</color>";
         string brain = Llm != null && Llm.IsReady ? $"<color={GREEN}>sentinel online</color>" : "<color=#facc15>sentinel booting…</color>";
         string voice = PlayerMask != null && PlayerMask.Available ? $"<color={GREEN}>masks online</color>" : "<color=#f87171>no piper</color>";
+        string turn =
+            _phase == Phase.TurnIntel ? $"<color={CYAN}>◤ INTEL — SPEAK</color>" :
+            _phase == Phase.TurnOperator ? $"<color={GREEN}>◤ OPERATOR — TYPE / PASS</color>" :
+            _phase == Phase.TurnSentinel ? $"<color={RED}>◤ SENTINEL — parsing intercept…</color>" : "";
         GUILayout.Label($"<color={PURPLE}><b>▚ TERMINAL LEAK</b></color>  <color={CYAN}>│ deep-grid uplink │</color>  " +
                         $"layer <b>{Mathf.Min(_layer + 1, vaultLayers)}/{vaultLayers}</b>  " +
-                        $"tokens <b>{new string('█', Mathf.Max(0, _tokens))}{new string('░', Mathf.Max(0, tokensPerCard - _tokens))}</b>  " +
-                        $"{ears} · {brain} · {voice}", rich);
+                        $"radio <b>{new string('█', Mathf.Max(0, _tokens))}{new string('░', Mathf.Max(0, tokensPerCard - _tokens))}</b>  " +
+                        $"{turn}   {ears} · {brain} · {voice}", rich);
 
         // feed
         _scroll = GUILayout.BeginScrollView(_scroll, GUILayout.ExpandHeight(true));
@@ -551,18 +616,20 @@ public class TerminalLeakConsole : MonoBehaviour
 
         if (_phase == Phase.Override) DrawOverride(k, f, rich);
 
-        // operator input row
-        if (_phase == Phase.IntelClue || _phase == Phase.SentinelThinking)
+        // operator input row — only live on the Operator's turn (strict turn discipline)
+        if (_phase == Phase.TurnOperator)
         {
             GUILayout.BeginHorizontal();
             GUILayout.Label($"<color={GREEN}>OPERATOR GUESS ▷</color>", rich, GUILayout.ExpandWidth(false));
             GUI.SetNextControlName("guess");
             _typed = GUILayout.TextField(_typed, new GUIStyle(GUI.skin.textField) { fontSize = f }, GUILayout.ExpandWidth(true));
-            bool submit = GUILayout.Button("COMMIT", new GUIStyle(GUI.skin.button) { fontSize = f }, GUILayout.Width(120 * k)) ||
+            bool submit = GUILayout.Button("COMMIT", new GUIStyle(GUI.skin.button) { fontSize = f }, GUILayout.Width(110 * k)) ||
                           (Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.Return &&
                            GUI.GetNameOfFocusedControl() == "guess");
+            bool pass = GUILayout.Button("PASS ▷", new GUIStyle(GUI.skin.button) { fontSize = f }, GUILayout.Width(90 * k));
             GUILayout.EndHorizontal();
             if (submit && !string.IsNullOrWhiteSpace(_typed)) { OperatorGuess(_typed); _typed = ""; }
+            else if (pass) { _typed = ""; OperatorPass(); }
         }
         GUILayout.EndArea();
     }

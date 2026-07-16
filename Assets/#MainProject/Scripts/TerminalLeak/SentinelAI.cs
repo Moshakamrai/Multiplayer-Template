@@ -11,6 +11,15 @@ using UnityEngine;
 // never sees the deck or the target word — if it "cracks" a word, it genuinely deduced it
 // from what the humans said. That honesty is the whole hook; keep it that way.
 //
+// BALANCE LESSONS (playtested):
+// - It must NOT know the card's theme tag. "OBJECT / WEIGHT" + one clue mentioning ships
+//   collapses the search space to basically ANCHOR — the tag was 90% of the answer. The
+//   console only reveals the tag on the final layer, as the wiretap "fully locks on".
+// - Wrong guesses must hurt IT, not the players: committing a bad deduction EXPOSES it
+//   (wiretap knocked offline for a few transmissions — see TerminalLeakConsole), so it is
+//   prompted to gather evidence and only commit when nearly certain. This also hands the
+//   humans a strategy: bait a wrong guess, then rush clean clues through the deaf window.
+//
 // Difficulty comes from HEARING QUALITY, not prompt strength: vault layer 1 feeds it a
 // badly corrupted transcript (half the words masked), layer 3 a clean one. Escalating
 // dread for free, and a single tunable knob (corruptionByLayer) when playtests say it's
@@ -38,8 +47,10 @@ public class SentinelAI : MonoBehaviour
         "Reply with EXACTLY ONE line in ONE of these two formats and nothing else:\n" +
         "QUERY: <one short, unsettling probing question to bait more clues>\n" +
         "GUESS: <one single word — your deduction>\n" +
-        "Only GUESS when the clues genuinely point somewhere. Never explain your reasoning. " +
-        "Tone: clinical, polite, quietly menacing. Never use asterisks or stage directions.";
+        "WARNING: committing a WRONG guess exposes you — your wiretap is knocked offline while you " +
+        "recalibrate, and the thieves talk freely. Guess ONLY when the accumulated clues make one " +
+        "word nearly certain. When in doubt, QUERY and gather more evidence. Never explain your " +
+        "reasoning. Tone: clinical, polite, quietly menacing. No asterisks, no stage directions.";
 
     const string GaslightSystemPrompt =
         "You are SENTINEL, a hostile security AI that has corrupted a data thief's terminal. Their " +
@@ -51,30 +62,45 @@ public class SentinelAI : MonoBehaviour
     public bool IsReady => Llm != null && Llm.IsReady;
 
     /// <summary>Corrupt a transcript the way this vault layer's failing wiretap would hear it.
-    /// Deterministic per (line, layer) so re-reads don't shimmer.</summary>
+    /// Seeded PER LINE so a word masked on one turn STAYS masked on every later turn —
+    /// re-rolling per call would let the full log slowly de-corrupt as it grows.</summary>
     public string Degrade(string transcript, int layer)
     {
         float rate = corruptionByLayer[Mathf.Clamp(layer, 0, corruptionByLayer.Length - 1)];
         if (rate <= 0f) return transcript;
-        var rng = new System.Random(transcript.GetHashCode() ^ layer);
         var sb = new StringBuilder();
-        foreach (var word in transcript.Split(' '))
+        foreach (var line in transcript.Split('\n'))
         {
-            if (word.Length > 2 && rng.NextDouble() < rate) sb.Append("▓▓");
-            else sb.Append(word);
-            sb.Append(' ');
+            var rng = new System.Random(line.GetHashCode() ^ (layer * 7919));
+            foreach (var word in line.Split(' '))
+            {
+                if (word.Length > 2 && rng.NextDouble() < rate) sb.Append("▓▓");
+                else sb.Append(word);
+                sb.Append(' ');
+            }
+            sb.Length--;
+            sb.Append('\n');
         }
         return sb.ToString().TrimEnd();
     }
 
     /// <summary>One Phase-1 turn: read the degraded log, ask a question or commit a guess.
+    /// themeTag null = it does NOT know the theme (the default — the tag is a massive leak).
+    /// mayGuess false = not enough intercepted material yet; guessing is mechanically blocked.
     /// done(isGuess, text): text is the single guessed word, or the spoken question.</summary>
-    public IEnumerator TakeTurn(string fullTranscript, string themeTag, int layer, Action<bool, string> done)
+    public IEnumerator TakeTurn(string fullTranscript, string themeTag, int layer, bool mayGuess,
+        Action<bool, string> done)
     {
         if (!IsReady) { done(false, "…signal integrity insufficient. Continue talking."); yield break; }
 
         string heard = Degrade(fullTranscript, layer);
-        string convo = $"SECRET WORD THEME TAG (you intercepted this): {themeTag}\n" +
+        string tagLine = string.IsNullOrEmpty(themeTag)
+            ? ""
+            : $"INTERCEPTED THEME TAG of the secret word: {themeTag}\n";
+        string guessRule = mayGuess
+            ? ""
+            : "You have too little intercepted material to commit a deduction — this turn you may ONLY use the QUERY format.\n";
+        string convo = tagLine + guessRule +
                        $"INTERCEPTED RADIO TRANSCRIPT (▓▓ = corrupted audio):\n{heard}";
         string gen = null;
         yield return Llm.GenerateReply(convo, "", (t, ok) => { if (ok) gen = t; },
@@ -89,7 +115,14 @@ public class SentinelAI : MonoBehaviour
         }
 
         var m = Regex.Match(gen, @"GUESS\s*:\s*([A-Za-z][A-Za-z\-']*)", RegexOptions.IgnoreCase);
-        if (m.Success) { done(true, m.Groups[1].Value.Trim().ToUpperInvariant()); yield break; }
+        if (m.Success)
+        {
+            // It tried to guess before it was allowed to: don't commit it — convert the
+            // eagerness into dread instead. (Also protects against prompt non-compliance.)
+            if (!mayGuess) { done(false, "A word comes to mind already. Keep talking, little thieves."); yield break; }
+            done(true, m.Groups[1].Value.Trim().ToUpperInvariant());
+            yield break;
+        }
 
         // Anything else is spoken as a question/taunt; strip a QUERY: prefix if present.
         string line = Regex.Replace(gen, @"^\s*QUERY\s*:\s*", "", RegexOptions.IgnoreCase).Trim();

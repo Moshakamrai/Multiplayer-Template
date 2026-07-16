@@ -257,6 +257,32 @@ public class CompanionConsole : MonoBehaviour
         string refined = null;
         yield return Whisper.EndUtteranceAndTranscribe(t => refined = t);
         bool useWhisper = !string.IsNullOrWhiteSpace(refined);
+
+        if (_bangla)
+        {
+            // BN mode is TRANSCRIBE-only now (no Whisper --translate): the translate task is
+            // far weaker than transcription for low-resource languages, and a fine-tuned
+            // Bangla ASR model won't have a translate mode at all (fine-tunes lose it — the
+            // large-v3-turbo lesson). NLLB does bn->en on the clean transcript instead:
+            // each stage doing the one job it's actually good at.
+            if (!useWhisper) yield break; // never ship English-Vosk garbage as "Bangla"
+            Debug.Log($"[BN] transcript: {refined}");
+            if (Translator != null && Translator.IsReady)
+            {
+                string en = null;
+                yield return Translator.ToEnglish(refined, (t, ok) => { if (ok) en = t; });
+                if (!string.IsNullOrWhiteSpace(en))
+                {
+                    SendToBrain(en, vol, "·w·bn→en");
+                    yield break;
+                }
+            }
+            // No translator running: Qwen comprehends raw Bangla text passably (much better
+            // than it WRITES it) — degraded but better than dropping the utterance.
+            SendToBrain(refined, vol, "·w·bn");
+            yield break;
+        }
+
         SendToBrain(useWhisper ? refined : voskText, vol, useWhisper ? "·w" : "·v");
     }
 
@@ -477,7 +503,7 @@ public class CompanionConsole : MonoBehaviour
             : "gibberish <color=#888888>(run Tools > Griz > Check Piper Setup)</color>";
         voiceMode += Llm != null && Llm.IsReady ? "   Brain: <color=#66ff66>LLM (shared)</color>" : "   Brain: <color=#ff6666>no LLM</color>";
         voiceMode += Whisper != null && Whisper.IsReady
-            ? $"   Ears: <color=#66ff66>Whisper ({(_bangla ? "BN→EN" : "EN")}, {Whisper.LoadedModelName})</color>"
+            ? $"   Ears: <color=#66ff66>Whisper ({(_bangla ? "BN, NLLB→EN" : "EN")}, {Whisper.LoadedModelName})</color>"
             : Whisper != null ? "   Ears: <color=#ffe066>Whisper reloading…</color>" : "   Ears: Vosk";
         GUILayout.Label($"Mic: <b>{(mic ? "<color=#66ff66>LIVE</color>" : "starting…")}</b>   " +
                         $"Vol: {Bar(vol)}   Peak: {_peakVolume:0.00}   Voice: {voiceMode}", Rich(fSmall));
@@ -532,9 +558,10 @@ public class CompanionConsole : MonoBehaviour
             if (GUILayout.Button(label, btnStyle, GUILayout.Width(260 * k), GUILayout.Height(40 * k)))
             {
                 _bangla = !_bangla;
-                Whisper.Restart(_bangla ? "bn" : "en", translate: _bangla);
+                // translate:false always — BN mode transcribes natively; NLLB handles bn->en
+                Whisper.Restart(_bangla ? "bn" : "en", translate: false);
                 Say("*", _bangla
-                    ? "── Switched to Bangla input (spoken Bangla, understood as English, replies in Bangla) ──"
+                    ? "── Bangla mode: transcribed natively, translated by NLLB both ways ──"
                     : "── Switched back to English input ──");
             }
             GUI.color = prevColor;

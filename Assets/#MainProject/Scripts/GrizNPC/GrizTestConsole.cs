@@ -288,6 +288,27 @@ public class GrizTestConsole : MonoBehaviour
         string refined = null;
         yield return Whisper.EndUtteranceAndTranscribe(t => refined = t);
         bool useWhisper = !string.IsNullOrWhiteSpace(refined);
+
+        if (_bangla)
+        {
+            // Transcribe-only BN mode + NLLB bn->en — see CompanionConsole.RefineThenSend
+            // for the full reasoning (fine-tuned ASR models don't have a translate task).
+            if (!useWhisper) yield break;
+            Debug.Log($"[BN] transcript: {refined}");
+            if (Translator != null && Translator.IsReady)
+            {
+                string en = null;
+                yield return Translator.ToEnglish(refined, (t, ok) => { if (ok) en = t; });
+                if (!string.IsNullOrWhiteSpace(en))
+                {
+                    SendToBrain(en, vol, "·w·bn→en");
+                    yield break;
+                }
+            }
+            SendToBrain(refined, vol, "·w·bn");
+            yield break;
+        }
+
         SendToBrain(useWhisper ? refined : voskText, vol, useWhisper ? "·w" : "·v");
     }
 
@@ -482,7 +503,7 @@ public class GrizTestConsole : MonoBehaviour
             ? "   Brain: <color=#66ff66>LLM</color>"
             : "   Brain: keywords";
         voiceMode += Whisper != null && Whisper.IsReady
-            ? $"   Ears: <color=#66ff66>Whisper ({(_bangla ? "BN→EN" : "EN")}, {Whisper.LoadedModelName})</color>"
+            ? $"   Ears: <color=#66ff66>Whisper ({(_bangla ? "BN, NLLB→EN" : "EN")}, {Whisper.LoadedModelName})</color>"
             : Whisper != null ? "   Ears: <color=#ffe066>Whisper reloading…</color>" : "   Ears: Vosk";
         GUILayout.Label($"Mic: <b>{(mic ? "<color=#66ff66>LIVE</color>" : "starting… (typing works now)")}</b>   " +
                         $"Vol: {Bar(vol)}   Peak: {_peakVolume:0.00}   Voice: {voiceMode}   " +
@@ -543,9 +564,10 @@ public class GrizTestConsole : MonoBehaviour
             if (GUILayout.Button(label, btnStyle, GUILayout.Width(260 * k), GUILayout.Height(40 * k)))
             {
                 _bangla = !_bangla;
-                Whisper.Restart(_bangla ? "bn" : "en", translate: _bangla);
+                // translate:false always — BN mode transcribes natively; NLLB handles bn->en
+                Whisper.Restart(_bangla ? "bn" : "en", translate: false);
                 Say("*", _bangla
-                    ? "── Switched to Bangla input (spoken Bangla, understood as English) ──"
+                    ? "── Bangla mode: transcribed natively, translated by NLLB both ways ──"
                     : "── Switched back to English input ──");
             }
             GUI.color = prevColor;

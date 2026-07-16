@@ -44,6 +44,13 @@ public class CompanionBrain : MonoBehaviour
         "past your knowledge), it's fine to say so in character rather than making something up with " +
         "false confidence.";
 
+    [Header("Domain knowledge (optional)")]
+    [TextArea(6, 20)]
+    [Tooltip("Injected verbatim into every reply's CONTEXT block — use for a kiosk/assistant NPC's " +
+             "authoritative data (account balances, branch hours, product info...). Same principle as " +
+             "Griz's price: numbers the LLM must use exactly and can never invent. Empty = unused.")]
+    public string domainFacts = "";
+
     [Header("Mood (drifts from how the player treats her)")]
     [Range(0f, 100f)] public float Rapport = 40f;   // warms with good conversation, cools with rudeness
     [Range(0f, 100f)] public float Energy = 60f;    // flavors tone; drifts slowly, no hard gameplay effect

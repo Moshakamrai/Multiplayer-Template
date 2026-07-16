@@ -588,6 +588,7 @@ public class GrizTestConsole : MonoBehaviour
                 _bangla = !_bangla;
                 // translate:false always — BN mode transcribes natively; NLLB handles bn->en
                 Whisper.Restart(_bangla ? "bn" : "en", translate: false);
+                if (Piper != null) Piper.UseLanguage(_bangla ? "bn" : "en"); // swap TTS voice too
                 Say("*", _bangla
                     ? "── Bangla mode: transcribed natively, translated by NLLB both ways ──"
                     : "── Switched back to English input ──");

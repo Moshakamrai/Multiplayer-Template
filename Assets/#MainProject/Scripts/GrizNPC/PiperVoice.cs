@@ -21,6 +21,25 @@ public class PiperVoice : MonoBehaviour
 {
     [Tooltip("Part of a voice model filename to prefer when several .onnx files are in StreamingAssets/piper (e.g. \"alan\"). Empty = first one found.")]
     public string preferredModel = "";
+
+    [Header("Per-language voices (filename substring, like WhisperTranscriber's model selection)")]
+    [Tooltip("Voice to use in ENGLISH mode. IMPORTANT: with both voices installed, 'first .onnx " +
+             "found' would pick bn_BD (sorts before en_GB alphabetically) — this default fixes that.")]
+    public string englishModelContains = "en_";
+    [Tooltip("Voice to use in BANGLA mode (the trained bn_BD voice).")]
+    public string banglaModelContains = "bn_";
+
+    /// <summary>Switch the voice by language code ("bn" → banglaModelContains, anything else →
+    /// englishModelContains) and re-resolve the model file. Cached lines are keyed by model
+    /// filename, so switching back and forth never plays the wrong voice's cache.</summary>
+    public void UseLanguage(string langCode)
+    {
+        preferredModel = langCode == "bn" ? banglaModelContains : englishModelContains;
+        _checked = false;
+        _modelPath = null;
+        Locate();
+        Debug.Log($"[Piper] voice for lang={langCode}: {(string.IsNullOrEmpty(_modelPath) ? "NOT FOUND" : Path.GetFileName(_modelPath))}");
+    }
     [Tooltip("Playback pitch — lower = deeper and grimmer, near 1 = lighter/wry. Comic dwarf: ~0.8. Sarcastic: ~0.95. Old man: ~0.88.")]
     [Range(0.5f, 1.5f)] public float pitch = 0.88f;
     [Tooltip("Piper speaking speed: <1 = faster, >1 = slower. Slower + lower reads OLDER and less machine-like.")]
@@ -58,6 +77,9 @@ public class PiperVoice : MonoBehaviour
         _source = gameObject.AddComponent<AudioSource>();
         _source.playOnAwake = false;
         _source.spatialBlend = 0f; // set 1 for a world-space NPC
+        // Default to the English voice explicitly — "first .onnx found" would silently pick
+        // the Bangla voice (bn_ sorts before en_) once both are installed.
+        if (string.IsNullOrEmpty(preferredModel)) preferredModel = englishModelContains;
         Locate();
     }
 

@@ -27,6 +27,9 @@ public class CompanionConsole : MonoBehaviour
     int _pendingRequests;
     readonly List<string> _history = new List<string>();
 
+    [Tooltip("Boot directly into Bangla mode (kiosk demo): Whisper -l bn, Bangla TTS voice, NLLB both ways.")]
+    public bool startInBangla = false;
+
     [Tooltip("F1 toggles between the full debug console and cinematic mode (corner dialog box only).")]
     public bool cinematicMode = false;
     string _lastNpcLine = "";
@@ -115,6 +118,19 @@ public class CompanionConsole : MonoBehaviour
             AnimLink.gibberish = Voice;
             AnimLink.useAnimatorStates = false; // open-domain NPC: no shop states/sword logic
             AnimLink.PushPiperToLipSync(); // multi-NPC safe — see GrizAnimatorLink
+        }
+        if (startInBangla && !_bangla)
+        {
+            _bangla = true;
+            // If our Whisper was just created this frame, its Start()/Launch() hasn't run yet —
+            // setting the field is enough. If it's a shared instance that already launched
+            // (LoadedModelName set), it needs a real restart to switch language/model.
+            if (Whisper != null)
+            {
+                if (string.IsNullOrEmpty(Whisper.LoadedModelName)) { Whisper.language = "bn"; Whisper.translateToEnglish = false; }
+                else Whisper.Restart("bn", translate: false);
+            }
+            if (Piper != null) Piper.UseLanguage("bn");
         }
         if (Vosk != null)
         {
@@ -399,6 +415,12 @@ public class CompanionConsole : MonoBehaviour
         var sb = new StringBuilder();
         if (Brain == null) return "";
         sb.AppendLine("CONTEXT:");
+        if (!string.IsNullOrWhiteSpace(Brain.domainFacts))
+        {
+            sb.AppendLine("- AUTHORITATIVE DATA (use these numbers/facts EXACTLY, never invent others):");
+            foreach (var line in Brain.domainFacts.Split('\n'))
+                sb.AppendLine("  " + line.TrimEnd());
+        }
         sb.AppendLine($"- your current mood: {Brain.MoodWord()} (rapport {Brain.Rapport:0}/100)");
         if (Brain.RememberedFacts.Count > 0)
         {
@@ -574,6 +596,7 @@ public class CompanionConsole : MonoBehaviour
                 _bangla = !_bangla;
                 // translate:false always — BN mode transcribes natively; NLLB handles bn->en
                 Whisper.Restart(_bangla ? "bn" : "en", translate: false);
+                if (Piper != null) Piper.UseLanguage(_bangla ? "bn" : "en"); // swap TTS voice too
                 Say("*", _bangla
                     ? "── Bangla mode: transcribed natively, translated by NLLB both ways ──"
                     : "── Switched back to English input ──");

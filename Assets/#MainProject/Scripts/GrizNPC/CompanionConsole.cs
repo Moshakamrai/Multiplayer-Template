@@ -130,8 +130,12 @@ public class CompanionConsole : MonoBehaviour
                 if (string.IsNullOrEmpty(Whisper.LoadedModelName)) { Whisper.language = "bn"; Whisper.translateToEnglish = false; }
                 else Whisper.Restart("bn", translate: false);
             }
-            if (Piper != null) Piper.UseLanguage("bn");
         }
+        // Force the voice to match the starting language, even when starting in English:
+        // a stale preferredModel serialized in the scene (or the old "first .onnx found"
+        // pick, which is bn_BD once both voices are installed) would otherwise make an
+        // ENGLISH NPC speak through the Bangla voice.
+        if (Piper != null) Piper.UseLanguage(_bangla ? "bn" : "en");
         if (Vosk != null)
         {
             Vosk.OnTranscriptionResult += OnFinalResult;

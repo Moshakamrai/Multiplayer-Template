@@ -124,6 +124,11 @@ public class GrizTestConsole : MonoBehaviour
             AnimLink.gibberish = Voice;
             AnimLink.PushPiperToLipSync();
         }
+        // Force the voice to match the starting language (Griz always boots in English).
+        // Without this, a stale preferredModel serialized in the scene — or the old
+        // "first .onnx found" pick, which is bn_BD once both voices are installed —
+        // would make the ENGLISH NPC speak through the Bangla voice.
+        if (Piper != null) Piper.UseLanguage(_bangla ? "bn" : "en");
         if (Vosk != null)
         {
             Vosk.OnTranscriptionResult += OnFinalResult;

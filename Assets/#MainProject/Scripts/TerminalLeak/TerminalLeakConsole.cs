@@ -93,6 +93,12 @@ public class TerminalLeakConsole : MonoBehaviour
     int _layer;      // 0-based vault layer = cards cleared
     int _tokens;
 
+    // The Operator's CANDIDATE LIST: the real word hidden among decoys from the deck.
+    // This is the deliberate human advantage — the Operator picks from 8, the Sentinel
+    // deduces from the entire language. Never show this list to the AI.
+    List<string> _allWords = new List<string>();
+    string[] _choices;
+
     // radio: what the PLAYERS said vs what the SENTINEL actually heard (clean windows differ)
     readonly List<string> _feed = new List<string>();          // rendered terminal feed (rich text)
     readonly List<string> _radioSentinel = new List<string>(); // the wiretap's view, fed to the LLM
@@ -235,6 +241,7 @@ public class TerminalLeakConsole : MonoBehaviour
                 new Card { word = "FIRE",   tag = "ELEMENT / HAZARD" },
                 new Card { word = "MIRROR", tag = "OBJECT / GLASS" },
                 new Card { word = "GHOST",  tag = "CREATURE / MYTH" } };
+        if (_allWords.Count == 0) _allWords = _deck.Select(c => c.word).ToList(); // decoy pool
         _deck = _deck.OrderBy(_ => UnityEngine.Random.value).ToList();
     }
 
@@ -306,6 +313,12 @@ public class TerminalLeakConsole : MonoBehaviour
         Sentinel.corruptionBonus = _veilNext;
         _veilNext = 0f;
         if (_tapTraceRecharge) { _tapTraceUsed = false; _tapTraceRecharge = false; }
+        // Operator candidates: the target buried among 7 deck decoys, freshly shuffled
+        _choices = _allWords
+            .Where(w => !w.Equals(_card.word, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(_ => UnityEngine.Random.value).Take(7)
+            .Concat(new[] { _card.word })
+            .OrderBy(_ => UnityEngine.Random.value).ToArray();
         _phase = Phase.TurnIntel;
         bool finalLayer = _layer == vaultLayers - 1;
         Sys($"LAYER {_layer + 1}/{vaultLayers} — wiretap corruption: {Sentinel.corruptionByLayer[Mathf.Clamp(_layer, 0, Sentinel.corruptionByLayer.Length - 1)]:P0}" +
@@ -880,6 +893,8 @@ public class TerminalLeakConsole : MonoBehaviour
         GUILayout.EndScrollView();
 
         if (_phase == Phase.Override) DrawOverride(k, f, rich);
+        if (_phase == Phase.TurnIntel || _phase == Phase.TurnOperator || _phase == Phase.TurnSentinel)
+            DrawCandidates(k, f, rich);
         if (_phase == Phase.TurnIntel || _phase == Phase.TurnOperator) DrawGadgets(k, f);
         if (_phase == Phase.Salvage)
         {
@@ -911,6 +926,34 @@ public class TerminalLeakConsole : MonoBehaviour
             else if (pass) { _typed = ""; OperatorPass(); }
         }
         GUILayout.EndArea();
+    }
+
+    // The Operator's decrypted candidate fragment: 8 words, one is the password. In 2P
+    // this panel lives on the Operator's screen only — the Sentinel NEVER sees it.
+    void DrawCandidates(float k, int f, GUIStyle rich)
+    {
+        if (_choices == null || _choices.Length == 0) return;
+        GUILayout.Label($"<color={CYAN}>DECRYPTED FRAGMENT — the password is one of these. The Sentinel has no such list.</color>", rich);
+        var btn = new GUIStyle(GUI.skin.button) { fontSize = Mathf.RoundToInt(f * 0.9f) };
+        bool clickable = _phase == Phase.TurnOperator;
+        float w = (Screen.width - 80 * k) / 4f;
+        for (int row = 0; row < _choices.Length; row += 4)
+        {
+            GUILayout.BeginHorizontal();
+            for (int i = row; i < Mathf.Min(row + 4, _choices.Length); i++)
+            {
+                GUI.enabled = clickable;
+                if (GUILayout.Button(_choices[i], btn, GUILayout.Width(w)))
+                {
+                    GUI.enabled = true;
+                    OperatorGuess(_choices[i]);
+                    GUILayout.EndHorizontal();
+                    return; // phase just changed — stop drawing this panel
+                }
+                GUI.enabled = true;
+            }
+            GUILayout.EndHorizontal();
+        }
     }
 
     void DrawGadgets(float k, int f)

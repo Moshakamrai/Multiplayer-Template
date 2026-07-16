@@ -289,13 +289,20 @@ public class CompanionConsole : MonoBehaviour
         // is low-resource in its training data. NLLB (a model built specifically for
         // translation) does the EN->BN step afterward and is dramatically better at it.
         // English reasoning + English wit in, dedicated-translator Bangla out.
+        // temperature dropped 0.9 -> 0.6: at 0.9 a 7B model drifts into incoherent "creative"
+        // metaphors (observed: "when the world throws lemons at your face, at least you can
+        // praise the frozen wind" — nonsense, then RE-USED nearly verbatim next turn because
+        // each weird line becomes the next turn's own context). 0.6 keeps her voice but stops
+        // the random-metaphor drift. This is a real-content bug, not a translation/Bangla one —
+        // it shows up in English mode too, just less scrutinized there.
         yield return Llm.GenerateReply(string.Join("\n", _history), facts, (t, ok) => { if (ok) gen = t; },
             systemPromptOverride: Brain != null ? Brain.persona : null,
             npcName: npcName,
-            closingInstruction: "Reply with dialogue only, in ENGLISH, then on a NEW final line write exactly " +
-                                 "\"SENTIMENT: x\" where x is one of warm, cold, funny, rude, neutral " +
-                                 "describing the TONE THE PLAYER used toward you just now.",
-            maxTokens: 110, temperature: 0.9f);
+            closingInstruction: "Reply with dialogue only, in ENGLISH, reacting SPECIFICALLY to what the " +
+                                 "player just said (no vague metaphors, no generic deflection), then on a NEW " +
+                                 "final line write exactly \"SENTIMENT: x\" where x is one of warm, cold, " +
+                                 "funny, rude, neutral describing the TONE THE PLAYER used toward you just now.",
+            maxTokens: 110, temperature: 0.6f);
 
         _pendingRequests--;
         if (string.IsNullOrWhiteSpace(gen))
@@ -305,6 +312,29 @@ public class CompanionConsole : MonoBehaviour
         }
 
         string sentiment = ExtractSentiment(gen, out string dialogueOnly);
+
+        // Repetition guard: a near-identical reply to her own last line means the model got
+        // stuck restating itself (observed: same "lemons/frozen wind" line twice in a row,
+        // reordered). One retry at a lower temperature (more conservative, less likely to
+        // free-associate the SAME weird image again) beats silently shipping the repeat.
+        if (IsNearDuplicate(dialogueOnly, _lastNpcLine))
+        {
+            Debug.LogWarning("[Sana] generated reply nearly duplicates her last line — retrying once.");
+            string retry = null;
+            yield return Llm.GenerateReply(string.Join("\n", _history), facts, (t, ok) => { if (ok) retry = t; },
+                systemPromptOverride: Brain != null ? Brain.persona : null,
+                npcName: npcName,
+                closingInstruction: "Your previous attempt just repeated yourself. Say something DIFFERENT — " +
+                                     "reply with dialogue only, in ENGLISH, then on a NEW final line write exactly " +
+                                     "\"SENTIMENT: x\" (warm, cold, funny, rude, or neutral).",
+                maxTokens: 110, temperature: 0.5f);
+            if (!string.IsNullOrWhiteSpace(retry))
+            {
+                gen = retry;
+                sentiment = ExtractSentiment(gen, out dialogueOnly);
+            }
+        }
+
         if (Brain != null) Brain.ApplySentiment(sentiment);
         MaybeRemember(playerText);
 
@@ -352,6 +382,23 @@ public class CompanionConsole : MonoBehaviour
         if (Brain == null) return;
         if (MemoryTrigger.IsMatch(playerText))
             Brain.Remember(playerText.Length > 140 ? playerText.Substring(0, 140) : playerText);
+    }
+
+    // Cheap word-overlap check — catches "same sentence, reordered/reworded" without needing
+    // an LLM call to judge it. Not exact-match only: the observed failure was near-identical
+    // content with clauses swapped, which exact string equality wouldn't catch.
+    static bool IsNearDuplicate(string a, string b)
+    {
+        if (string.IsNullOrWhiteSpace(a) || string.IsNullOrWhiteSpace(b)) return false;
+        var wordsA = new HashSet<string>(Regex.Split(a.ToLowerInvariant(), @"\W+"));
+        var wordsB = new HashSet<string>(Regex.Split(b.ToLowerInvariant(), @"\W+"));
+        wordsA.RemoveWhere(string.IsNullOrEmpty);
+        wordsB.RemoveWhere(string.IsNullOrEmpty);
+        if (wordsA.Count < 4 || wordsB.Count < 4) return false; // too short to judge reliably
+        int shared = 0;
+        foreach (var w in wordsA) if (wordsB.Contains(w)) shared++;
+        float overlap = shared / (float)Mathf.Min(wordsA.Count, wordsB.Count);
+        return overlap > 0.6f;
     }
 
     static string ExtractSentiment(string raw, out string dialogueOnly)

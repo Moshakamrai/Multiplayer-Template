@@ -92,3 +92,8 @@ crashlytics-build.properties
 /nllb-tools/*.log
 /nllb-tools/test_output.txt
 /nllb-tools/translate_test.json
+
+# Bangla ASR conversion workspace (HF model download ~3GB, openai/whisper clone,
+# converted ggml, test wavs). The deliverable ggml lives in StreamingAssets/whisper/
+# (itself gitignored); the process is documented in Assets/#MainProject/DOC/BANGLA_ASR_PROJECT.md
+/bangla-asr-tools/

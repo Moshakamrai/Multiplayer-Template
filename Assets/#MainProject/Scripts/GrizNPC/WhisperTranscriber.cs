@@ -29,12 +29,13 @@ public class WhisperTranscriber : MonoBehaviour
     [Tooltip("Model file to prefer in ENGLISH mode (e.g. \"small\"). Empty = first .bin found. " +
              "English is easy for Whisper — the small model is fine and fast.")]
     public string englishModelContains = "small";
-    [Tooltip("Model file to prefer in BANGLA mode. MUST be a translate-capable model when " +
-             "translateToEnglish is on: \"medium\" or plain \"large-v3\" work; **large-v3-TURBO does " +
-             "NOT** — turbo was distilled on transcription only and silently outputs garbled " +
-             "source-language text instead of English when asked to translate (verified in the wild). " +
-             "If no matching file exists, falls back to whatever's there and logs what loaded.")]
-    public string banglaModelContains = "medium";
+    [Tooltip("Model file to prefer in BANGLA mode. Default matches the Bengali.AI fine-tuned " +
+             "model (ggml-bangla-bengaliai-medium.bin) — A/B tested 2026-07-16: it transcribed a " +
+             "test sentence PERFECTLY in 1.1s where stock medium wrote the words in DEVANAGARI " +
+             "(Hindi script!) in 15.7s, which is what was poisoning NLLB downstream. Stock Whisper " +
+             "is not viable for Bangla; fine-tunes are transcribe-only (translateToEnglish must " +
+             "stay off in BN mode — NLLB owns bn→en).")]
+    public string banglaModelContains = "bangla";
     [Tooltip("Seconds of audio kept from before the detected utterance start (catches clipped first words).")]
     public float preRollSeconds = 0.5f;
     public float requestTimeout = 10f;

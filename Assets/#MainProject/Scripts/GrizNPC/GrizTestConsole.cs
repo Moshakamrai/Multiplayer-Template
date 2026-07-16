@@ -371,17 +371,20 @@ public class GrizTestConsole : MonoBehaviour
 
             if (_bangla && !string.IsNullOrWhiteSpace(reply.line) && Translator != null && Translator.IsReady)
             {
+                string english = reply.line;
                 string bn = null;
-                yield return Translator.ToBangla(reply.line, (t, ok) => { if (ok) bn = t; });
+                yield return Translator.ToBangla(english, (t, ok) => { if (ok) bn = t; });
                 if (!string.IsNullOrWhiteSpace(bn))
                 {
                     reply.line = bn;
                     source += "·nllb";
+                    _pendingRequests--;
+                    FinishReply(reply, source);
+                    // diagnostic: the English NLLB translated — see CompanionConsole for reasoning
+                    Say("*", $"(en: {english})");
+                    yield break;
                 }
-                else
-                {
-                    Debug.LogWarning("[NLLB] translation failed for this reply — speaking English instead of guessing at Bangla.");
-                }
+                Debug.LogWarning("[NLLB] translation failed for this reply — speaking English instead of guessing at Bangla.");
             }
         }
         _pendingRequests--;

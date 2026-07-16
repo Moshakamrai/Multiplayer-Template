@@ -321,10 +321,18 @@ public class CompanionConsole : MonoBehaviour
         // each weird line becomes the next turn's own context). 0.6 keeps her voice but stops
         // the random-metaphor drift. This is a real-content bug, not a translation/Bangla one —
         // it shows up in English mode too, just less scrutinized there.
+        // BN mode: the reply gets machine-translated — English idioms/puns/cultural wordplay
+        // turn into stiff nonsense through MT, so ask for translation-survivable writing.
+        string bnStyle = _bangla
+            ? "Your reply will be MACHINE-TRANSLATED into Bangla for the player: keep sentences " +
+              "SHORT and concrete, no English idioms, no puns, no wordplay — plain vivid speech " +
+              "that survives translation. "
+            : "";
         yield return Llm.GenerateReply(string.Join("\n", _history), facts, (t, ok) => { if (ok) gen = t; },
             systemPromptOverride: Brain != null ? Brain.persona : null,
             npcName: npcName,
-            closingInstruction: "Reply with dialogue only, in ENGLISH, reacting SPECIFICALLY to what the " +
+            closingInstruction: bnStyle +
+                                 "Reply with dialogue only, in ENGLISH, reacting SPECIFICALLY to what the " +
                                  "player just said (no vague metaphors, no generic deflection), then on a NEW " +
                                  "final line write exactly \"SENTIMENT: x\" where x is one of warm, cold, " +
                                  "funny, rude, neutral describing the TONE THE PLAYER used toward you just now.",
@@ -371,6 +379,11 @@ public class CompanionConsole : MonoBehaviour
             if (!string.IsNullOrWhiteSpace(bn))
             {
                 FinishReply(bn, $"gen·{sentiment}·nllb");
+                // DIAGNOSTIC (readable, since IMGUI renders English fine but mangles Bengali):
+                // the English that NLLB translated. If this line is good but the Bangla reads
+                // badly, blame NLLB's register/flattening; if this line is already dumb, blame
+                // Qwen's generation — two different problems, two different fixes.
+                Say("*", $"(en: {dialogueOnly})");
                 yield break;
             }
             // NLLB failed for this line — better to speak the (grammatically correct)

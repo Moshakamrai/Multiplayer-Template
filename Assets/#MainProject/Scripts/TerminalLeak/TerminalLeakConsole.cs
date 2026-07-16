@@ -63,6 +63,13 @@ public class TerminalLeakConsole : MonoBehaviour
     enum Phase { Boot, TurnIntel, TurnOperator, TurnSentinel, Breach, Override, RunLost, RunWon }
     Phase _phase = Phase.Boot;
 
+    // ── crew gadgets — spendable tools layered on the token economy ──
+    // JAMMER (1/card):    arm it, and your next transmission is guaranteed clean — spend it on THE clue.
+    // TAP-TRACE (1/run):  force the Sentinel to dump its current top suspects. Honest, and terrifying.
+    // DECOY (1/card):     type a fake clue only the Sentinel hears — your partner never sees it as real.
+    bool _jammerArmed, _jammerUsed, _decoyUsed, _tapTraceUsed, _tapTraceRunning;
+    string _decoyTyped = "";
+
     // deck
     [Serializable] class Card { public string word; public string tag; }
     [Serializable] class Deck { public List<Card> cards; }
@@ -186,6 +193,8 @@ public class TerminalLeakConsole : MonoBehaviour
     {
         _layer = 0;
         _feed.Clear();
+        _tapTraceUsed = false;
+        Sentinel.ClearMemory(); // its notes on your crew belong to a run, not the install
         Sentinel.ResetVoiceFont();
         Sys($"DEEP GRID uplink established. Vault layers: {vaultLayers}. The Sentinel is listening.");
         Sys("SOLO TEST — you are BOTH roles: SPEAK clues as Intel, TYPE guesses as Operator.");
@@ -203,6 +212,10 @@ public class TerminalLeakConsole : MonoBehaviour
         _radioSentinel.Clear();
         _cluesHeard = 0;
         _sentinelDeaf = 0;
+        _jammerArmed = false;
+        _jammerUsed = false;
+        _decoyUsed = false;
+        _decoyTyped = "";
         _tokens = tokensPerCard;
         _phase = Phase.TurnIntel;
         bool finalLayer = _layer == vaultLayers - 1;
@@ -215,6 +228,13 @@ public class TerminalLeakConsole : MonoBehaviour
     void CardSolved()
     {
         Feed($"<color={GREEN}>██ LAYER {_layer + 1} CRACKED — node advanced ██</color>");
+        // Escalating memory: it studies the transcript it heard and takes a note on your
+        // crew's clue style. Runs in the background — capture the log before NextCard clears it.
+        if (_radioSentinel.Count > 0)
+        {
+            Feed($"<color={RED}>SENTINEL ▷</color> <color=#666>…archiving your voice patterns.</color>");
+            StartCoroutine(Sentinel.MemorizeCrewStyle(string.Join("\n", _radioSentinel)));
+        }
         _layer++;
         NextCard();
     }
@@ -323,7 +343,12 @@ public class TerminalLeakConsole : MonoBehaviour
 
         if (BurnToken("that transmission")) return; // radio time feeds the trace
 
-        if (_sentinelDeaf > 0)
+        if (_jammerArmed)
+        {
+            _jammerArmed = false;
+            Feed($"<color={GREEN}>▼ JAMMED — that transmission never left the encrypted band. It heard nothing.</color>");
+        }
+        else if (_sentinelDeaf > 0)
         {
             Feed($"<color={GREEN}>▼ CLEAN WINDOW — the wiretap is still recalibrating; it never heard that.</color>");
         }
@@ -357,6 +382,37 @@ public class TerminalLeakConsole : MonoBehaviour
         if (_phase != Phase.TurnOperator) return;
         Feed($"<color={GREEN}>OPERATOR ▷</color> <color=#666>…holds the line.</color>");
         StartCoroutine(SentinelTurn());
+    }
+
+    // ── crew gadgets ────────────────────────────────────────────────────────────
+
+    void SendDecoy(string fake)
+    {
+        if (_phase != Phase.TurnIntel || _decoyUsed) return;
+        fake = fake.Trim();
+        if (fake.Length == 0) return;
+        _decoyUsed = true;
+        _decoyTyped = "";
+        // Costs your transmission turn AND a token — misdirection isn't free radio time.
+        Feed($"<color={PURPLE}>DECOY ▷</color> <color=#666>{fake}   (only the wiretap hears this)</color>");
+        if (BurnToken("that decoy broadcast")) return;
+        _radioSentinel.Add($"PLAYER-1 (Intel): {fake}");
+        _cluesHeard++;
+        _phase = Phase.TurnOperator;
+        Sys("OPERATOR INQUIRY — type a guess (wrong = 1 token) or PASS the line.");
+    }
+
+    IEnumerator TapTrace()
+    {
+        _tapTraceUsed = true;
+        _tapTraceRunning = true;
+        Sys("TAP-TRACE probe injected — forcing a diagnostic dump…");
+        bool finalLayer = _layer == vaultLayers - 1;
+        string tag = finalLayer && tagKnownOnFinalLayer ? _card.tag : null;
+        string dump = null;
+        yield return Sentinel.RevealSuspects(string.Join("\n", _radioSentinel), tag, _layer, t => dump = t);
+        _tapTraceRunning = false;
+        Feed($"<color={PURPLE}>▒ TAP-TRACE ▷ {dump}</color>");
     }
 
     // ── Sentinel turn ───────────────────────────────────────────────────────────
@@ -615,6 +671,7 @@ public class TerminalLeakConsole : MonoBehaviour
         GUILayout.EndScrollView();
 
         if (_phase == Phase.Override) DrawOverride(k, f, rich);
+        if (_phase == Phase.TurnIntel || _phase == Phase.TurnOperator) DrawGadgets(k, f);
 
         // operator input row — only live on the Operator's turn (strict turn discipline)
         if (_phase == Phase.TurnOperator)
@@ -632,6 +689,33 @@ public class TerminalLeakConsole : MonoBehaviour
             else if (pass) { _typed = ""; OperatorPass(); }
         }
         GUILayout.EndArea();
+    }
+
+    void DrawGadgets(float k, int f)
+    {
+        var btn = new GUIStyle(GUI.skin.button) { fontSize = Mathf.RoundToInt(f * 0.85f) };
+        GUILayout.BeginHorizontal();
+        if (_phase == Phase.TurnIntel)
+        {
+            GUI.enabled = !_jammerUsed;
+            if (GUILayout.Button(_jammerArmed ? "▶ JAMMER ARMED — next clue is clean" : "JAMMER (1/card)", btn, GUILayout.Width(250 * k)))
+            {
+                _jammerUsed = true;
+                _jammerArmed = true;
+                Sys("JAMMER armed — your NEXT transmission never reaches the wiretap. Spend it on THE clue.");
+            }
+            // A decoy needs a listener — pointless while the wiretap is jammed or knocked offline.
+            GUI.enabled = !_decoyUsed && _sentinelDeaf == 0 && !_jammerArmed;
+            _decoyTyped = GUILayout.TextField(_decoyTyped, new GUIStyle(GUI.skin.textField) { fontSize = btn.fontSize }, GUILayout.ExpandWidth(true));
+            if (GUILayout.Button("DECOY ▷ (1/card, 1 token)", btn, GUILayout.Width(210 * k)) && !string.IsNullOrWhiteSpace(_decoyTyped))
+                SendDecoy(_decoyTyped);
+            GUI.enabled = true;
+        }
+        GUI.enabled = !_tapTraceUsed && !_tapTraceRunning;
+        if (GUILayout.Button(_tapTraceRunning ? "TAP-TRACE running…" : "TAP-TRACE (1/run)", btn, GUILayout.Width(180 * k)))
+            StartCoroutine(TapTrace());
+        GUI.enabled = true;
+        GUILayout.EndHorizontal();
     }
 
     void DrawOverride(float k, int f, GUIStyle rich)

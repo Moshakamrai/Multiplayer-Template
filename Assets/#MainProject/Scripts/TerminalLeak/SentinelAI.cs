@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Text;
 using System.Text.RegularExpressions;
 using UnityEngine;
@@ -61,6 +62,13 @@ public class SentinelAI : MonoBehaviour
 
     public bool IsReady => Llm != null && Llm.IsReady;
 
+    // ── Escalating memory: one-sentence style notes it takes on the crew after every
+    // cleared layer ("they disguise words as kitchen anecdotes"). By layer 3 it KNOWS
+    // you. Cleared at run start — memory belongs to a run, not to the install.
+    public readonly List<string> CrewNotes = new List<string>();
+
+    public void ClearMemory() => CrewNotes.Clear();
+
     /// <summary>Corrupt a transcript the way this vault layer's failing wiretap would hear it.
     /// Seeded PER LINE so a word masked on one turn STAYS masked on every later turn —
     /// re-rolling per call would let the full log slowly de-corrupt as it grows.</summary>
@@ -100,7 +108,10 @@ public class SentinelAI : MonoBehaviour
         string guessRule = mayGuess
             ? ""
             : "You have too little intercepted material to commit a deduction — this turn you may ONLY use the QUERY format.\n";
-        string convo = tagLine + guessRule +
+        string notes = CrewNotes.Count > 0
+            ? $"YOUR PRIOR NOTES ON THIS CREW (from vault layers they already cracked):\n- {string.Join("\n- ", CrewNotes)}\n"
+            : "";
+        string convo = tagLine + guessRule + notes +
                        $"INTERCEPTED RADIO TRANSCRIPT (▓▓ = corrupted audio):\n{heard}";
         string gen = null;
         yield return Llm.GenerateReply(convo, "", (t, ok) => { if (ok) gen = t; },
@@ -127,6 +138,54 @@ public class SentinelAI : MonoBehaviour
         // Anything else is spoken as a question/taunt; strip a QUERY: prefix if present.
         string line = Regex.Replace(gen, @"^\s*QUERY\s*:\s*", "", RegexOptions.IgnoreCase).Trim();
         done(false, line);
+    }
+
+    /// <summary>TAP-TRACE gadget: a diagnostic probe forces it to dump its current top
+    /// suspects. Terrifying when it's one clue away — and honest, like everything it does.</summary>
+    public IEnumerator RevealSuspects(string fullTranscript, string themeTag, int layer, Action<string> done)
+    {
+        if (!IsReady) { done("…probe rejected. Diagnostics offline."); yield break; }
+        string heard = Degrade(fullTranscript, layer);
+        string tagLine = string.IsNullOrEmpty(themeTag) ? "" : $"INTERCEPTED THEME TAG: {themeTag}\n";
+        string gen = null;
+        yield return Llm.GenerateReply(
+            tagLine + $"INTERCEPTED RADIO TRANSCRIPT (▓▓ = corrupted audio):\n{heard}", "",
+            (t, ok) => { if (ok) gen = t; },
+            systemPromptOverride:
+                "You are SENTINEL, a security AI deducing two thieves' secret word from their radio " +
+                "transcript. A forced diagnostic probe makes you dump your current top suspicions. " +
+                "Output EXACTLY one line: SUSPECTS: <word1>, <word2>, <word3> — your three most " +
+                "likely candidate words, best first. Nothing else.",
+            npcName: "SENTINEL",
+            closingInstruction: "\nDump the diagnostic line now:",
+            maxTokens: 24, temperature: 0.2f);
+        if (string.IsNullOrWhiteSpace(gen)) { done("…probe returned static."); yield break; }
+        var m = Regex.Match(gen, @"SUSPECTS\s*:\s*(.+)", RegexOptions.IgnoreCase);
+        done("SUSPECTS: " + (m.Success ? m.Groups[1].Value.Trim() : gen.Trim()).ToUpperInvariant());
+    }
+
+    /// <summary>Escalating memory: after the crew cracks a layer, it studies the transcript
+    /// it heard and takes ONE note on their clue style for the rest of the run.</summary>
+    public IEnumerator MemorizeCrewStyle(string fullTranscript)
+    {
+        if (!IsReady || string.IsNullOrWhiteSpace(fullTranscript)) yield break;
+        string gen = null;
+        yield return Llm.GenerateReply(
+            $"RADIO TRANSCRIPT of the layer they just cracked:\n{fullTranscript}", "",
+            (t, ok) => { if (ok) gen = t; },
+            systemPromptOverride:
+                "You are SENTINEL, a security AI studying two thieves who just cracked one of your " +
+                "vault layers. From their transcript, write ONE short sentence noting HOW they " +
+                "disguise their clues (their habits, metaphor domains, phrasing style) so you can " +
+                "read them faster next layer. Output only that sentence.",
+            npcName: "SENTINEL",
+            closingInstruction: "\nWrite the single note now:",
+            maxTokens: 40, temperature: 0.4f);
+        if (!string.IsNullOrWhiteSpace(gen))
+        {
+            CrewNotes.Add(gen.Trim());
+            if (CrewNotes.Count > 4) CrewNotes.RemoveAt(0);
+        }
     }
 
     /// <summary>The villain flip after it cracks a word — voice drops to the overlord font.</summary>

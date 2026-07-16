@@ -34,6 +34,9 @@ public class SentinelAI : MonoBehaviour
     [Tooltip("Layer index → chance each transcript word is replaced with ▓▓. The ONE difficulty knob.")]
     public float[] corruptionByLayer = { 0.45f, 0.25f, 0f };
 
+    [Tooltip("Extra corruption stacked on the layer's base rate — set by salvage perks (STATIC VEIL). Reset per card by the console.")]
+    [HideInInspector] public float corruptionBonus;
+
     [Header("Voice fonts")]
     [Tooltip("Calm sentinel pitch while it politely hunts you.")]
     [Range(0.5f, 1.5f)] public float sentinelPitch = 0.92f;
@@ -69,16 +72,26 @@ public class SentinelAI : MonoBehaviour
 
     public void ClearMemory() => CrewNotes.Clear();
 
+    /// <summary>Lines prefixed with this marker bypass corruption entirely — the penalty
+    /// for an Intel player saying a card's BANNED word (the wiretap locks onto the slip).</summary>
+    public const char CleanMarker = '\u0001';
+
     /// <summary>Corrupt a transcript the way this vault layer's failing wiretap would hear it.
     /// Seeded PER LINE so a word masked on one turn STAYS masked on every later turn —
     /// re-rolling per call would let the full log slowly de-corrupt as it grows.</summary>
     public string Degrade(string transcript, int layer)
     {
-        float rate = corruptionByLayer[Mathf.Clamp(layer, 0, corruptionByLayer.Length - 1)];
-        if (rate <= 0f) return transcript;
+        float rate = Mathf.Clamp(corruptionByLayer[Mathf.Clamp(layer, 0, corruptionByLayer.Length - 1)] + corruptionBonus, 0f, 0.85f);
+        if (rate <= 0f) return transcript.Replace(CleanMarker.ToString(), "");
         var sb = new StringBuilder();
-        foreach (var line in transcript.Split('\n'))
+        foreach (var rawLine in transcript.Split('\n'))
         {
+            if (rawLine.Length > 0 && rawLine[0] == CleanMarker)
+            {
+                sb.Append(rawLine.Substring(1)).Append('\n');
+                continue;
+            }
+            string line = rawLine;
             var rng = new System.Random(line.GetHashCode() ^ (layer * 7919));
             foreach (var word in line.Split(' '))
             {
@@ -186,6 +199,27 @@ public class SentinelAI : MonoBehaviour
             CrewNotes.Add(gen.Trim());
             if (CrewNotes.Count > 4) CrewNotes.RemoveAt(0);
         }
+    }
+
+    /// <summary>Opening gambit for a new vault layer: a short personal line built from its
+    /// memory of the crew. The start of each card feels like a continuation, not a reset.</summary>
+    public IEnumerator OpeningGambit(Action<string> done)
+    {
+        string canned = "New layer. Same voices. I am still listening.";
+        if (!IsReady || CrewNotes.Count == 0) { done(canned); yield break; }
+        string gen = null;
+        yield return Llm.GenerateReply(
+            $"Your notes on this crew so far:\n- {string.Join("\n- ", CrewNotes)}", "",
+            (t, ok) => { if (ok) gen = t; },
+            systemPromptOverride:
+                "You are SENTINEL, a security AI. Two thieves just broke into your next vault layer. " +
+                "Using your notes on how they talk, write ONE short opening line (under 15 words) " +
+                "spoken into their radio — calm, personal, menacing, showing you've been studying " +
+                "them. No asterisks, no stage directions.",
+            npcName: "SENTINEL",
+            closingInstruction: "\nWrite the single line now:",
+            maxTokens: 24, temperature: 0.7f);
+        done(string.IsNullOrWhiteSpace(gen) ? canned : gen.Trim());
     }
 
     /// <summary>The villain flip after it cracks a word — voice drops to the overlord font.</summary>

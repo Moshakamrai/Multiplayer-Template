@@ -60,18 +60,33 @@ public class TerminalLeakConsole : MonoBehaviour
     [Tooltip("On the final vault layer the wiretap fully locks on and it learns the theme tag too.")]
     public bool tagKnownOnFinalLayer = true;
 
-    enum Phase { Boot, TurnIntel, TurnOperator, TurnSentinel, Breach, Override, RunLost, RunWon }
+    enum Phase { Boot, TurnIntel, TurnOperator, TurnSentinel, Salvage, Breach, Override, RunLost, RunWon }
     Phase _phase = Phase.Boot;
 
     // ── crew gadgets — spendable tools layered on the token economy ──
     // JAMMER (1/card):    arm it, and your next transmission is guaranteed clean — spend it on THE clue.
     // TAP-TRACE (1/run):  force the Sentinel to dump its current top suspects. Honest, and terrifying.
     // DECOY (1/card):     type a fake clue only the Sentinel hears — your partner never sees it as real.
-    bool _jammerArmed, _jammerUsed, _decoyUsed, _tapTraceUsed, _tapTraceRunning;
+    int _jammerCharges;
+    bool _jammerArmed, _decoyUsed, _tapTraceUsed, _tapTraceRunning;
     string _decoyTyped = "";
 
+    // ── roguelite reward loop ──
+    // Cracking a layer converts leftover tokens to DATA SHARDS (efficiency = money — the
+    // salvager fiction) and opens a 3-choice SALVAGE pick that shapes the next, harder
+    // layer. Shards don't buy anything in-run yet: they're the score, and the hook a
+    // persistent meta layer (vault tiers, loadouts, voice fonts) can attach to later.
+    int _shards;
+    int _breachesSurvived;
+    int _bonusTokensNext;        // salvage effects staged for the next card ↓
+    int _jammerChargesNext = 1;
+    bool _tapTraceRecharge;
+    float _veilNext;
+    int _ghostDeafNext;
+    int[] _salvageChoices;       // the 3 perk ids offered on the salvage screen
+
     // deck
-    [Serializable] class Card { public string word; public string tag; }
+    [Serializable] class Card { public string word; public string tag; public List<string> banned; }
     [Serializable] class Deck { public List<Card> cards; }
     List<Card> _deck = new List<Card>();
     Card _card;
@@ -192,14 +207,44 @@ public class TerminalLeakConsole : MonoBehaviour
     void BeginRun()
     {
         _layer = 0;
-        _feed.Clear();
+        _shards = 0;
+        _breachesSurvived = 0;
+        _bonusTokensNext = 0;
+        _jammerChargesNext = 1;
+        _tapTraceRecharge = false;
+        _veilNext = 0f;
+        _ghostDeafNext = 0;
         _tapTraceUsed = false;
+        _feed.Clear();
         Sentinel.ClearMemory(); // its notes on your crew belong to a run, not the install
         Sentinel.ResetVoiceFont();
-        Sys($"DEEP GRID uplink established. Vault layers: {vaultLayers}. The Sentinel is listening.");
-        Sys("SOLO TEST — you are BOTH roles: SPEAK clues as Intel, TYPE guesses as Operator.");
-        Sys("Turn cycle: your transmission → operator inquiry → Sentinel inquiry. Every transmission " +
-            "and wrong guess burns a token. A wrong SENTINEL guess exposes it — clean radio while it recalibrates.");
+        _phase = Phase.Boot;
+        StartCoroutine(BootSequence());
+    }
+
+    // The cold open: a boot crawl and the Sentinel's first contact. Pure presentation —
+    // but it establishes the fiction (tapped wire, masked voices) before the first card.
+    IEnumerator BootSequence()
+    {
+        string[] boot =
+        {
+            "VOX-LINK v2.3 … handshake accepted",
+            "DEEP GRID node located … splicing terminal rig into the data matrix",
+            "voice masks engaged — all crew audio re-synthesized on the encrypted band",
+            "WARNING: resident process detected. designation: S E N T I N E L",
+        };
+        foreach (var line in boot)
+        {
+            Sys(line);
+            yield return new WaitForSeconds(0.8f);
+        }
+        yield return new WaitForSeconds(0.4f);
+        string hello = "I see two heat signatures. Talk amongst yourselves. I will listen.";
+        Feed($"<color={RED}>SENTINEL ▷</color> {hello}");
+        Sentinel.Speak(hello);
+        yield return new WaitForSeconds(1.5f);
+        Sys("SOLO TEST — you are BOTH roles: SPEAK as Intel; on the Operator turn, SPEAK questions or TYPE guesses.");
+        Sys("Every transmission burns a token — the radio feeds the trace. Typed guesses are silent: the wire never sees them.");
         NextCard();
     }
 
@@ -211,23 +256,46 @@ public class TerminalLeakConsole : MonoBehaviour
         _deck.RemoveAt(0);
         _radioSentinel.Clear();
         _cluesHeard = 0;
-        _sentinelDeaf = 0;
         _jammerArmed = false;
-        _jammerUsed = false;
         _decoyUsed = false;
         _decoyTyped = "";
-        _tokens = tokensPerCard;
+        // cash in the salvage perks staged by the previous crack
+        _tokens = tokensPerCard + _bonusTokensNext;
+        _bonusTokensNext = 0;
+        _jammerCharges = _jammerChargesNext;
+        _jammerChargesNext = 1;
+        _sentinelDeaf = _ghostDeafNext;
+        _ghostDeafNext = 0;
+        Sentinel.corruptionBonus = _veilNext;
+        _veilNext = 0f;
+        if (_tapTraceRecharge) { _tapTraceUsed = false; _tapTraceRecharge = false; }
         _phase = Phase.TurnIntel;
         bool finalLayer = _layer == vaultLayers - 1;
         Sys($"LAYER {_layer + 1}/{vaultLayers} — wiretap corruption: {Sentinel.corruptionByLayer[Mathf.Clamp(_layer, 0, Sentinel.corruptionByLayer.Length - 1)]:P0}" +
             (finalLayer && tagKnownOnFinalLayer ? "  ▲ FULL LOCK-ON: it knows the theme tag here" : ""));
-        Feed($"<color={PURPLE}>CLASSIFIED CARD →  Word: <b>{_card.word}</b>  |  Tag: {_card.tag}</color>  <color=#666>(Intel eyes only — in 2P this hides from the Operator)</color>");
-        Sys("YOUR LINE — speak a disguised clue.");
+        Feed($"<color={PURPLE}>CLASSIFIED CARD →  Word: <b>{_card.word}</b>  |  Tag: {_card.tag}</color>" +
+             (_card.banned != null && _card.banned.Count > 0
+                 ? $"   <color={RED}>BANNED ON AIR: {string.Join(", ", _card.banned)}</color>"
+                 : "") +
+             $"  <color=#666>(Intel eyes only — in 2P this hides from the Operator)</color>");
+        Sys("YOUR LINE — speak a disguised clue. Say a BANNED word and the wiretap hears that line CLEAN.");
+        if (_layer > 0) StartCoroutine(PlayOpeningGambit()); // it opens the new layer personally
+    }
+
+    IEnumerator PlayOpeningGambit()
+    {
+        string line = null;
+        yield return Sentinel.OpeningGambit(l => line = l);
+        if (_phase != Phase.TurnIntel && _phase != Phase.TurnOperator) yield break;
+        Feed($"<color={RED}>SENTINEL ▷</color> {line}");
+        Sentinel.Speak(line);
     }
 
     void CardSolved()
     {
-        Feed($"<color={GREEN}>██ LAYER {_layer + 1} CRACKED — node advanced ██</color>");
+        int earned = 5 + _tokens; // base haul + every token of radio you DIDN'T burn
+        _shards += earned;
+        Feed($"<color={GREEN}>██ LAYER {_layer + 1} CRACKED ██  SALVAGE: +{earned} data shards ({_shards} banked)</color>");
         // Escalating memory: it studies the transcript it heard and takes a note on your
         // crew's clue style. Runs in the background — capture the log before NextCard clears it.
         if (_radioSentinel.Count > 0)
@@ -236,6 +304,40 @@ public class TerminalLeakConsole : MonoBehaviour
             StartCoroutine(Sentinel.MemorizeCrewStyle(string.Join("\n", _radioSentinel)));
         }
         _layer++;
+        if (_layer >= vaultLayers) { Win(); return; }
+        EnterSalvage();
+    }
+
+    // ── salvage picks: the in-run reward loop. Winning a layer is a build decision about
+    // how you want to fight a smarter, better-hearing enemy — not just "next card". ──
+    static readonly (string name, string desc)[] SalvagePerks =
+    {
+        ("SPARE CELL",  "+3 radio tokens next layer"),
+        ("TWIN JAMMER", "2 jammer charges next layer"),
+        ("PROBE KIT",   "recharges TAP-TRACE"),
+        ("STATIC VEIL", "+15% wiretap corruption next layer"),
+        ("GHOST FEED",  "wiretap starts the next layer offline for 1 full cycle"),
+    };
+
+    void EnterSalvage()
+    {
+        _salvageChoices = Enumerable.Range(0, SalvagePerks.Length)
+            .OrderBy(_ => UnityEngine.Random.value).Take(3).ToArray();
+        _phase = Phase.Salvage;
+        Sys("SALVAGE — strip ONE system from the cracked node before advancing.");
+    }
+
+    void PickSalvage(int perk)
+    {
+        switch (perk)
+        {
+            case 0: _bonusTokensNext = 3; break;
+            case 1: _jammerChargesNext = 2; break;
+            case 2: _tapTraceRecharge = true; break;
+            case 3: _veilNext = 0.15f; break;
+            case 4: _ghostDeafNext = 1; break;
+        }
+        Feed($"<color={GREEN}>SALVAGED ▷ {SalvagePerks[perk].name} — {SalvagePerks[perk].desc}</color>");
         NextCard();
     }
 
@@ -243,6 +345,7 @@ public class TerminalLeakConsole : MonoBehaviour
     {
         _phase = Phase.RunWon;
         Feed($"<color={GREEN}>██ CORE DATA KEY EXTRACTED. Trace evaded. The Sentinel goes quiet. ██</color>");
+        Feed($"<color={GREEN}>HAUL ▷ {_shards} data shards · {vaultLayers} layers · {_breachesSurvived} breach{(_breachesSurvived == 1 ? "" : "es")} survived</color>");
         Sys("Press R for another run.");
     }
 
@@ -257,7 +360,9 @@ public class TerminalLeakConsole : MonoBehaviour
 
     void OnPartial(string p)
     {
-        if (_phase != Phase.TurnIntel) return; // strict turns: the mic is dead off-turn
+        // strict turns: the mic is live on BOTH human turns (Intel clues, Operator spoken
+        // questions), dead everywhere else
+        if (_phase != Phase.TurnIntel && _phase != Phase.TurnOperator) return;
         _partial = ExtractText(p);
         if (!string.IsNullOrEmpty(_partial))
         {
@@ -272,7 +377,7 @@ public class TerminalLeakConsole : MonoBehaviour
 
     void OnFinalResult(string json)
     {
-        if (_phase != Phase.TurnIntel) { _peakVolume = 0f; return; }
+        if (_phase != Phase.TurnIntel && _phase != Phase.TurnOperator) { _peakVolume = 0f; return; }
         string text = ExtractText(json);
         _partial = "";
         if (string.IsNullOrWhiteSpace(text)) { _peakVolume = 0f; return; }
@@ -319,7 +424,9 @@ public class TerminalLeakConsole : MonoBehaviour
         if (Whisper != null && Whisper.IsReady && _utteranceOpen)
             yield return Whisper.EndUtteranceAndTranscribe(t => refined = t);
         _utteranceOpen = false;
-        TransmitClue(string.IsNullOrWhiteSpace(refined) ? voskText : refined);
+        string text = string.IsNullOrWhiteSpace(refined) ? voskText : refined;
+        if (_phase == Phase.TurnIntel) TransmitClue(text);
+        else if (_phase == Phase.TurnOperator) OperatorVoice(text);
     }
 
     void TransmitClue(string clue)
@@ -352,13 +459,54 @@ public class TerminalLeakConsole : MonoBehaviour
         {
             Feed($"<color={GREEN}>▼ CLEAN WINDOW — the wiretap is still recalibrating; it never heard that.</color>");
         }
+        else if (_card.banned != null && _card.banned.Any(b => ContainsWord(clue, b)))
+        {
+            // The Taboo rule: a banned word makes the wiretap LOCK ON — that whole line
+            // reaches the Sentinel uncorrupted, no matter the layer's noise.
+            _radioSentinel.Add($"{SentinelAI.CleanMarker}PLAYER-1 (Intel): {clue}");
+            _cluesHeard++;
+            Feed($"<color={RED}>▲ BANNED WORD ON AIR — the wiretap locked on. It heard that line CLEAN.</color>");
+        }
         else
         {
             _radioSentinel.Add($"PLAYER-1 (Intel): {clue}");
             _cluesHeard++;
         }
         _phase = Phase.TurnOperator;
-        Sys("OPERATOR INQUIRY — type a guess (wrong = 1 token) or PASS the line.");
+        Sys("OPERATOR INQUIRY — speak a question (1 token), type a guess (wrong = 1 token), or PASS.");
+    }
+
+    /// <summary>Operator's SPOKEN line: a question back to Intel, over the tapped wire.
+    /// Guesses stay on the keyboard — the terminal is silent, the radio is not. Speaking
+    /// the actual password aloud hands it to the Sentinel: instant breach, by design.</summary>
+    void OperatorVoice(string q)
+    {
+        if (_phase != Phase.TurnOperator) return;
+        q = q.Trim();
+        if (q.Length == 0) return;
+
+        Feed($"<color={GREEN}>OPERATOR ▷</color> {q}");
+        if (PlayerMask != null && PlayerMask.Available) PlayerMask.Speak(q);
+
+        if (ContainsWord(q, _card.word))
+        {
+            Feed($"<color={RED}>SENTINEL ▷ Spoken aloud, on my wire. Thank you for the confirmation.</color>");
+            Sentinel.Speak("Spoken aloud, on my wire. Thank you for the confirmation.");
+            Breach(_card.word);
+            return;
+        }
+        if (BurnToken("that operator transmission")) return;
+
+        if (_jammerArmed)
+        {
+            _jammerArmed = false;
+            Feed($"<color={GREEN}>▼ JAMMED — that transmission never left the encrypted band.</color>");
+        }
+        else if (_sentinelDeaf > 0)
+            Feed($"<color={GREEN}>▼ CLEAN WINDOW — the wiretap never heard that.</color>");
+        else
+            _radioSentinel.Add($"PLAYER-2 (Operator): {q}");
+        StartCoroutine(SentinelTurn()); // a spoken question spends the Operator inquiry
     }
 
     // ── Operator (typed) turn ───────────────────────────────────────────────────
@@ -399,7 +547,7 @@ public class TerminalLeakConsole : MonoBehaviour
         _radioSentinel.Add($"PLAYER-1 (Intel): {fake}");
         _cluesHeard++;
         _phase = Phase.TurnOperator;
-        Sys("OPERATOR INQUIRY — type a guess (wrong = 1 token) or PASS the line.");
+        Sys("OPERATOR INQUIRY — speak a question (1 token), type a guess (wrong = 1 token), or PASS.");
     }
 
     IEnumerator TapTrace()
@@ -522,6 +670,7 @@ public class TerminalLeakConsole : MonoBehaviour
         EndGaslighting();
         if (panelIndex == _targetPanel)
         {
+            _breachesSurvived++;
             Feed($"<color={GREEN}>██ NODE RESET — override accepted. The Sentinel withdraws, for now. ██</color>");
             Sentinel.ResetVoiceFont();
             Sentinel.Speak("Clever. Enjoy the borrowed time.");
@@ -655,23 +804,38 @@ public class TerminalLeakConsole : MonoBehaviour
         string voice = PlayerMask != null && PlayerMask.Available ? $"<color={GREEN}>masks online</color>" : "<color=#f87171>no piper</color>";
         string turn =
             _phase == Phase.TurnIntel ? $"<color={CYAN}>◤ INTEL — SPEAK</color>" :
-            _phase == Phase.TurnOperator ? $"<color={GREEN}>◤ OPERATOR — TYPE / PASS</color>" :
-            _phase == Phase.TurnSentinel ? $"<color={RED}>◤ SENTINEL — parsing intercept…</color>" : "";
+            _phase == Phase.TurnOperator ? $"<color={GREEN}>◤ OPERATOR — SPEAK a question / TYPE a guess</color>" :
+            _phase == Phase.TurnSentinel ? $"<color={RED}>◤ SENTINEL — parsing intercept…</color>" :
+            _phase == Phase.Salvage ? $"<color={GREEN}>◤ SALVAGE — pick one</color>" : "";
         GUILayout.Label($"<color={PURPLE}><b>▚ TERMINAL LEAK</b></color>  <color={CYAN}>│ deep-grid uplink │</color>  " +
                         $"layer <b>{Mathf.Min(_layer + 1, vaultLayers)}/{vaultLayers}</b>  " +
                         $"radio <b>{new string('█', Mathf.Max(0, _tokens))}{new string('░', Mathf.Max(0, tokensPerCard - _tokens))}</b>  " +
+                        $"shards <b>{_shards}</b>  " +
                         $"{turn}   {ears} · {brain} · {voice}", rich);
 
         // feed
         _scroll = GUILayout.BeginScrollView(_scroll, GUILayout.ExpandHeight(true));
         foreach (var line in _feed) GUILayout.Label(line, rich);
         if (!string.IsNullOrEmpty(_partial) || !string.IsNullOrEmpty(_pendingText))
-            GUILayout.Label($"<color=#666>INTEL (composing) ▷ {(_pendingText + " " + _partial).Trim()}▌</color>", rich);
+            GUILayout.Label($"<color=#666>RADIO (composing) ▷ {(_pendingText + " " + _partial).Trim()}▌</color>", rich);
         if (_stickBottom && Event.current.type == EventType.Repaint) { _scroll.y = float.MaxValue; _stickBottom = false; }
         GUILayout.EndScrollView();
 
         if (_phase == Phase.Override) DrawOverride(k, f, rich);
         if (_phase == Phase.TurnIntel || _phase == Phase.TurnOperator) DrawGadgets(k, f);
+        if (_phase == Phase.Salvage)
+        {
+            GUILayout.BeginHorizontal();
+            foreach (int p in _salvageChoices)
+                if (GUILayout.Button($"[{SalvagePerks[p].name}]\n{SalvagePerks[p].desc}",
+                    new GUIStyle(GUI.skin.button) { fontSize = f, wordWrap = true },
+                    GUILayout.Height(64 * k), GUILayout.Width((Screen.width - 80 * k) / 3f)))
+                {
+                    PickSalvage(p);
+                    break; // phase just changed — stop drawing this row
+                }
+            GUILayout.EndHorizontal();
+        }
 
         // operator input row — only live on the Operator's turn (strict turn discipline)
         if (_phase == Phase.TurnOperator)
@@ -697,10 +861,10 @@ public class TerminalLeakConsole : MonoBehaviour
         GUILayout.BeginHorizontal();
         if (_phase == Phase.TurnIntel)
         {
-            GUI.enabled = !_jammerUsed;
-            if (GUILayout.Button(_jammerArmed ? "▶ JAMMER ARMED — next clue is clean" : "JAMMER (1/card)", btn, GUILayout.Width(250 * k)))
+            GUI.enabled = _jammerCharges > 0 && !_jammerArmed;
+            if (GUILayout.Button(_jammerArmed ? "▶ JAMMER ARMED — next clue is clean" : $"JAMMER ({_jammerCharges} left)", btn, GUILayout.Width(250 * k)))
             {
-                _jammerUsed = true;
+                _jammerCharges--;
                 _jammerArmed = true;
                 Sys("JAMMER armed — your NEXT transmission never reaches the wiretap. Spend it on THE clue.");
             }

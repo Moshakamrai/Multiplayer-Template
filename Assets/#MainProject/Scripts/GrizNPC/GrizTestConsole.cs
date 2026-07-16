@@ -39,6 +39,10 @@ public class GrizTestConsole : MonoBehaviour
     public float silenceToSendSeconds = 1f;
     [Tooltip("Mic volume above this counts as still-speaking (keeps the sentence open).")]
     public float speakingVolume = 0.06f;
+    [Tooltip("Voice utterances whose PEAK volume never exceeded this are dropped instead of sent — " +
+             "breath/noise blips shipped to Whisper produce classic hallucinations (\"it\", \"the\", " +
+             "multilingual token soup, especially on the large model).")]
+    public float minSendPeak = 0.05f;
     string _pendingText = "";
     float _pendingVolume;
     float _lastVoiceActivity;
@@ -256,6 +260,10 @@ public class GrizTestConsole : MonoBehaviour
         _pendingVolume = 0f;
         if (string.IsNullOrWhiteSpace(text)) { _utteranceOpen = false; return; }
 
+        // Near-silent "utterance": breath/noise blips shipped to Whisper hallucinate
+        // garbage ("it", "the", token soup). Drop. (skipWhisper = typed input, exempt.)
+        if (!skipWhisper && vol < minSendPeak) { _utteranceOpen = false; return; }
+
         if (!skipWhisper && Whisper != null && Whisper.IsReady && _utteranceOpen)
             StartCoroutine(RefineThenSend(text, vol));
         else
@@ -457,7 +465,7 @@ public class GrizTestConsole : MonoBehaviour
             ? "   Brain: <color=#66ff66>LLM</color>"
             : "   Brain: keywords";
         voiceMode += Whisper != null && Whisper.IsReady
-            ? $"   Ears: <color=#66ff66>Whisper ({(_bangla ? "BN→EN" : "EN")})</color>"
+            ? $"   Ears: <color=#66ff66>Whisper ({(_bangla ? "BN→EN" : "EN")}, {Whisper.LoadedModelName})</color>"
             : Whisper != null ? "   Ears: <color=#ffe066>Whisper reloading…</color>" : "   Ears: Vosk";
         GUILayout.Label($"Mic: <b>{(mic ? "<color=#66ff66>LIVE</color>" : "starting… (typing works now)")}</b>   " +
                         $"Vol: {Bar(vol)}   Peak: {_peakVolume:0.00}   Voice: {voiceMode}   " +

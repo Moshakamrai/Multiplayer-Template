@@ -40,6 +40,10 @@ public class CompanionConsole : MonoBehaviour
     public float silenceToSendSeconds = 1f;
     [Tooltip("Mic volume above this counts as still-speaking (keeps the sentence open).")]
     public float speakingVolume = 0.06f;
+    [Tooltip("Voice utterances whose PEAK volume never exceeded this are dropped instead of sent — " +
+             "breath/noise blips shipped to Whisper produce classic hallucinations (\"it\", \"the\", " +
+             "multilingual token soup, especially on the large model).")]
+    public float minSendPeak = 0.05f;
     string _pendingText = "";
     float _pendingVolume;
     float _lastVoiceActivity;
@@ -225,6 +229,11 @@ public class CompanionConsole : MonoBehaviour
         _pendingVolume = 0f;
         if (string.IsNullOrWhiteSpace(text)) { _utteranceOpen = false; return; }
 
+        // Near-silent "utterance": Vosk partials fire on breath/background noise (especially
+        // in BN mode where English Vosk mishears everything), and shipping that near-empty
+        // audio to Whisper hallucinates garbage. Drop it. (skipWhisper = typed input, exempt.)
+        if (!skipWhisper && vol < minSendPeak) { _utteranceOpen = false; return; }
+
         if (!skipWhisper && Whisper != null && Whisper.IsReady && _utteranceOpen)
             StartCoroutine(RefineThenSend(text, vol));
         else
@@ -402,7 +411,7 @@ public class CompanionConsole : MonoBehaviour
             : "gibberish <color=#888888>(run Tools > Griz > Check Piper Setup)</color>";
         voiceMode += Llm != null && Llm.IsReady ? "   Brain: <color=#66ff66>LLM (shared)</color>" : "   Brain: <color=#ff6666>no LLM</color>";
         voiceMode += Whisper != null && Whisper.IsReady
-            ? $"   Ears: <color=#66ff66>Whisper ({(_bangla ? "BN→EN" : "EN")})</color>"
+            ? $"   Ears: <color=#66ff66>Whisper ({(_bangla ? "BN→EN" : "EN")}, {Whisper.LoadedModelName})</color>"
             : Whisper != null ? "   Ears: <color=#ffe066>Whisper reloading…</color>" : "   Ears: Vosk";
         GUILayout.Label($"Mic: <b>{(mic ? "<color=#66ff66>LIVE</color>" : "starting…")}</b>   " +
                         $"Vol: {Bar(vol)}   Peak: {_peakVolume:0.00}   Voice: {voiceMode}", Rich(fSmall));

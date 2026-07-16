@@ -39,6 +39,8 @@ public class WhisperTranscriber : MonoBehaviour
     public float requestTimeout = 10f;
 
     public bool IsReady { get; private set; }
+    /// <summary>Filename of the model actually loaded (shown in the console status bar).</summary>
+    public string LoadedModelName { get; private set; } = "";
 
     const int SampleRate = 16000;
 
@@ -107,6 +109,7 @@ public class WhisperTranscriber : MonoBehaviour
             Debug.Log("[Whisper] not installed — Vosk transcripts used as-is. Tools > Griz > Check Whisper Setup.");
             return;
         }
+        LoadedModelName = Path.GetFileName(model).Replace("ggml-", "").Replace(".bin", "");
         Debug.Log($"[Whisper] loading '{Path.GetFileName(model)}' for lang={language}" +
                   (prefer.Length > 0 && !Path.GetFileName(model).ToLowerInvariant().Contains(prefer.ToLowerInvariant())
                       ? $" (WARNING: no file matching '{prefer}' found — using fallback; Bangla quality will suffer if this is the small model)"
@@ -190,7 +193,10 @@ public class WhisperTranscriber : MonoBehaviour
         int start = Mathf.Max(_utteranceStart, _ringStartSample);
         int count = _totalSamples - start;
         _utteranceStart = -1;
-        if (count < SampleRate / 4) { done(null); yield break; } // under 0.25s — nothing real
+        // Under 0.5s of audio is never a real sentence — and short/near-empty clips are
+        // exactly what makes large Whisper models hallucinate ("it", "the", multilingual
+        // token soup). Raised from 0.25s after seeing that in the wild.
+        if (count < SampleRate / 2) { done(null); yield break; }
 
         var samples = new short[count];
         _ring.CopyTo(start - _ringStartSample, samples, 0, count);

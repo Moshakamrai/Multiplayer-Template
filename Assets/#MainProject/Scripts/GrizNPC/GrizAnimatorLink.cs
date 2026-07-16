@@ -43,6 +43,8 @@ public class GrizAnimatorLink : MonoBehaviour
     [Header("Lipsync")]
     [Tooltip("Auto-add amplitude-driven mouth movement (MouthLipSync) if the face mesh has a mouth/jaw blendshape.")]
     public bool autoLipSync = true;
+    [Tooltip("Auto-add FacialExpressions (blinking, eye darts, brow emphasis, sentiment-driven mood faces) — needs ARKit-style blendshapes.")]
+    public bool autoFacialExpressions = true;
 
     bool _swordOut;
     bool _wasSpeaking;
@@ -68,6 +70,8 @@ public class GrizAnimatorLink : MonoBehaviour
 
         if (autoLipSync && GetComponent<MouthLipSync>() == null)
             gameObject.AddComponent<MouthLipSync>();
+        if (autoFacialExpressions && GetComponent<FacialExpressions>() == null)
+            gameObject.AddComponent<FacialExpressions>();
         // Don't hand MouthLipSync our own 'piper' field here — in a multi-NPC scene the
         // console that owns THIS character's PiperVoice may not have assigned it to us
         // yet (Start()-order between GameObjects is not guaranteed). PushPiperToLipSync()
@@ -79,10 +83,20 @@ public class GrizAnimatorLink : MonoBehaviour
     /// <summary>Explicitly hands OUR PiperVoice to OUR MouthLipSync — call this after
     /// setting 'piper', especially in multi-NPC scenes where FindObjectOfType inside
     /// MouthLipSync could otherwise grab a DIFFERENT character's voice.</summary>
+    /// <summary>Forward a sentiment/mood tag (warm/cold/funny/rude/neutral) to this
+    /// character's FacialExpressions — called by the consoles per reply.</summary>
+    public void SetMood(string mood)
+    {
+        var expr = GetComponent<FacialExpressions>();
+        if (expr != null) expr.SetMood(mood);
+    }
+
     public void PushPiperToLipSync()
     {
         var lip = GetComponent<MouthLipSync>();
         if (lip != null && piper != null) lip.piperVoice = piper;
+        var expr = GetComponent<FacialExpressions>();
+        if (expr != null && piper != null) expr.piperVoice = piper;
     }
 
     bool Speaking =>

@@ -370,6 +370,7 @@ public class CompanionConsole : MonoBehaviour
         }
 
         if (Brain != null) Brain.ApplySentiment(sentiment);
+        if (AnimLink != null) AnimLink.SetMood(sentiment); // face reacts to the exchange's tone
         MaybeRemember(playerText);
 
         if (_bangla && Translator != null && Translator.IsReady)

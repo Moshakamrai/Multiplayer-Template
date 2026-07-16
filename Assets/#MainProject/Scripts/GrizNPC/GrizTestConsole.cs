@@ -352,6 +352,9 @@ public class GrizTestConsole : MonoBehaviour
     IEnumerator MaybeGenerateThenFinish(GrizBrain.Reply reply, string source)
     {
         Debug.Log($"[Griz] MaybeGenerateThenFinish entered — Llm={(Llm != null)} IsReady={(Llm != null && Llm.IsReady)}");
+        // Griz has no sentiment tag (that's Sana's flow) — derive his facial mood from the
+        // player's classified intent + game state instead.
+        if (AnimLink != null) AnimLink.SetMood(MoodFromIntent(reply));
         if (Llm != null && Llm.IsReady)
         {
             string gen = null;
@@ -389,6 +392,22 @@ public class GrizTestConsole : MonoBehaviour
         }
         _pendingRequests--;
         FinishReply(reply, source);
+    }
+
+    static string MoodFromIntent(GrizBrain.Reply reply)
+    {
+        if (reply.kickedOut) return "rude";
+        switch (reply.intent)
+        {
+            case GrizBrain.Intent.Flatter:
+            case GrizBrain.Intent.Buy:
+            case GrizBrain.Intent.Accept: return "warm";
+            case GrizBrain.Intent.Insult:
+            case GrizBrain.Intent.Threaten: return "rude";
+            case GrizBrain.Intent.Haggle:
+            case GrizBrain.Intent.Offer: return "cold";
+            default: return "neutral";
+        }
     }
 
     string BuildFacts(GrizBrain.Reply reply)

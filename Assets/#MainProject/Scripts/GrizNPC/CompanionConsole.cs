@@ -20,6 +20,7 @@ public class CompanionConsole : MonoBehaviour
     public GrizAnimatorLink AnimLink;
     public LlamaIntentService Llm;  // SHARED service — same llama-server as Griz, different persona per call
     public WhisperTranscriber Whisper;
+    public NllbTranslator Translator; // Bangla REPLY output only — Qwen always writes English
 
     bool _utteranceOpen;
     bool _bangla; // EN/BN toggle button state — Whisper does the actual language switch
@@ -100,6 +101,13 @@ public class CompanionConsole : MonoBehaviour
             var go = new GameObject("Whisper");
             go.transform.SetParent(Brain.transform, false);
             Whisper = go.AddComponent<WhisperTranscriber>();
+        }
+        if (Translator == null) Translator = FindObjectOfType<NllbTranslator>(); // shared, like Llm/Whisper
+        if (Translator == null && Brain != null)
+        {
+            var go = new GameObject("NllbTranslator");
+            go.transform.SetParent(Brain.transform, false);
+            Translator = go.AddComponent<NllbTranslator>();
         }
         if (AnimLink != null)
         {
@@ -276,19 +284,17 @@ public class CompanionConsole : MonoBehaviour
         string npcName = Brain != null ? Brain.npcName : "NPC";
         string facts = BuildFacts();
         string gen = null;
-        // BN mode: player's side already arrives as English (Whisper's bn->en translate), but
-        // her spoken REPLY needs actual Bangla script so PiperVoice's Bangla voice has
-        // something to say — English reasoning in, Bangla dialogue out.
-        string languageLine = _bangla
-            ? "Write your dialogue in BANGLA SCRIPT (Bengali) — keep your personality, but the " +
-              "words must be Bangla, not English or transliterated. "
-            : "";
+        // ALWAYS generate in English, even in BN mode — Qwen's Bangla grammar is genuinely
+        // broken (confirmed in testing: garbled conjuncts, wrong verb forms), because Bangla
+        // is low-resource in its training data. NLLB (a model built specifically for
+        // translation) does the EN->BN step afterward and is dramatically better at it.
+        // English reasoning + English wit in, dedicated-translator Bangla out.
         yield return Llm.GenerateReply(string.Join("\n", _history), facts, (t, ok) => { if (ok) gen = t; },
             systemPromptOverride: Brain != null ? Brain.persona : null,
             npcName: npcName,
-            closingInstruction: $"{languageLine}Reply with dialogue only, then on a NEW final line write exactly " +
-                                 $"\"SENTIMENT: x\" where x is one of warm, cold, funny, rude, neutral " +
-                                 $"describing the TONE THE PLAYER used toward you just now.",
+            closingInstruction: "Reply with dialogue only, in ENGLISH, then on a NEW final line write exactly " +
+                                 "\"SENTIMENT: x\" where x is one of warm, cold, funny, rude, neutral " +
+                                 "describing the TONE THE PLAYER used toward you just now.",
             maxTokens: 110, temperature: 0.9f);
 
         _pendingRequests--;
@@ -302,6 +308,19 @@ public class CompanionConsole : MonoBehaviour
         if (Brain != null) Brain.ApplySentiment(sentiment);
         MaybeRemember(playerText);
 
+        if (_bangla && Translator != null && Translator.IsReady)
+        {
+            string bn = null;
+            yield return Translator.ToBangla(dialogueOnly, (t, ok) => { if (ok) bn = t; });
+            if (!string.IsNullOrWhiteSpace(bn))
+            {
+                FinishReply(bn, $"gen·{sentiment}·nllb");
+                yield break;
+            }
+            // NLLB failed for this line — better to speak the (grammatically correct)
+            // English than silently say nothing, or worse, fall back to Qwen's broken Bangla.
+            Debug.LogWarning("[NLLB] translation failed for this reply — speaking English instead of guessing at Bangla.");
+        }
         FinishReply(dialogueOnly, $"gen·{sentiment}");
     }
 

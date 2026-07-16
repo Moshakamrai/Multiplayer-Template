@@ -83,3 +83,12 @@ crashlytics-build.properties
 /[Aa]ssets/[Ss]treamingAssets/llama/
 /[Aa]ssets/[Ss]treamingAssets/whisper/
 /[Aa]ssets/[Ss]treamingAssets/piper/
+
+# NLLB translation project (Python/ctranslate2, outside Unity's asset pipeline on
+# purpose — same reasoning as the Bangla TTS training project). Keep only the README
+# and server script in git; the converted model (~620MB) and any HF cache are local
+# setup artifacts, not source.
+/nllb-tools/nllb-600m-ct2/
+/nllb-tools/*.log
+/nllb-tools/test_output.txt
+/nllb-tools/translate_test.json

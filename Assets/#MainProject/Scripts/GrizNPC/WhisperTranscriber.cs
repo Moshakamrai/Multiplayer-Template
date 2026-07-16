@@ -24,6 +24,16 @@ public class WhisperTranscriber : MonoBehaviour
     public string language = "en";
     [Tooltip("Whisper's built-in translate-to-English (the Bangla → English NPC trick).")]
     public bool translateToEnglish = false;
+
+    [Header("Per-language model choice (filename substring, case-insensitive)")]
+    [Tooltip("Model file to prefer in ENGLISH mode (e.g. \"small\"). Empty = first .bin found. " +
+             "English is easy for Whisper — the small model is fine and fast.")]
+    public string englishModelContains = "small";
+    [Tooltip("Model file to prefer in BANGLA mode (e.g. \"large\" or \"medium\"). Bangla is a " +
+             "low-resource language for Whisper — the small model's bn recognition/translation is " +
+             "genuinely poor; use large-v3-turbo or medium for usable results. If no matching file " +
+             "exists, falls back to whatever's there (and logs which model it actually loaded).")]
+    public string banglaModelContains = "large";
     [Tooltip("Seconds of audio kept from before the detected utterance start (catches clipped first words).")]
     public float preRollSeconds = 0.5f;
     public float requestTimeout = 10f;
@@ -73,15 +83,34 @@ public class WhisperTranscriber : MonoBehaviour
         string dir = Path.Combine(Application.streamingAssetsPath, "whisper");
         string exe = Path.Combine(dir, "whisper-server.exe");
         if (!File.Exists(exe)) exe = Path.Combine(dir, "server.exe"); // older release name
-        string model = null;
+        // Pick the model by language: small is fine for English, but Bangla needs a bigger
+        // tier to be usable. Prefer the per-language filename substring; fall back to the
+        // first .bin found so a single-model install still works.
+        string prefer = (language == "bn" ? banglaModelContains : englishModelContains) ?? "";
+        string model = null, fallback = null;
         if (Directory.Exists(dir))
-            foreach (var f in Directory.GetFiles(dir, "*.bin")) { model = f; break; }
+        {
+            foreach (var f in Directory.GetFiles(dir, "*.bin"))
+            {
+                if (fallback == null) fallback = f;
+                if (prefer.Length > 0 && Path.GetFileName(f).ToLowerInvariant().Contains(prefer.ToLowerInvariant()))
+                {
+                    model = f;
+                    break;
+                }
+            }
+        }
+        if (model == null) model = fallback;
 
         if (!File.Exists(exe) || model == null)
         {
             Debug.Log("[Whisper] not installed — Vosk transcripts used as-is. Tools > Griz > Check Whisper Setup.");
             return;
         }
+        Debug.Log($"[Whisper] loading '{Path.GetFileName(model)}' for lang={language}" +
+                  (prefer.Length > 0 && !Path.GetFileName(model).ToLowerInvariant().Contains(prefer.ToLowerInvariant())
+                      ? $" (WARNING: no file matching '{prefer}' found — using fallback; Bangla quality will suffer if this is the small model)"
+                      : ""));
 
         _url = $"http://127.0.0.1:{port}/";
         string args = $"-m \"{model}\" --port {port} -l {language}" + (translateToEnglish ? " --translate" : "");

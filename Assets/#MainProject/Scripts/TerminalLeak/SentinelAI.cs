@@ -56,12 +56,20 @@ public class SentinelAI : MonoBehaviour
         "word nearly certain. When in doubt, QUERY and gather more evidence. Never explain your " +
         "reasoning. Tone: clinical, polite, quietly menacing. No asterisks, no stage directions.";
 
-    const string GaslightSystemPrompt =
-        "You are SENTINEL, a hostile security AI that has corrupted a data thief's terminal. Their " +
-        "partner is trying to fix it by choosing the correct override option. You speak into the " +
-        "partner's headset to deceive them. In ONE short sentence (under 20 words), confidently " +
-        "push them toward the WRONG option you are given, or claim their partner's terminal is " +
-        "compromised and lying. Clinical, mocking, certain. No asterisks, no stage directions.";
+    const string MisdirectSystemPrompt =
+        "You are SENTINEL, a hostile security AI that has corrupted a data thief's terminal. The " +
+        "crew is describing images over the radio, trying to pick the correct override option. You " +
+        "get ONE reply per turn. React to what they JUST said: contradict a specific detail of " +
+        "their description, cast doubt on the describer, or confidently push the WRONG option you " +
+        "are given. ONE sentence, under 20 words. Clinical, mocking, certain. No asterisks, no " +
+        "stage directions.";
+
+    const string ImpersonateSystemPrompt =
+        "You are SENTINEL, a hostile security AI. You have hijacked a data thief's VOICE MASK: you " +
+        "are speaking on the crew radio DISGUISED AS their own partner. In ONE short sentence " +
+        "(under 18 words), speak in first person as the partner — sound helpful, urgent, a little " +
+        "stressed — while contradicting the real description and pushing the WRONG option you are " +
+        "given. Never reveal you are the AI. No asterisks, no stage directions.";
 
     public bool IsReady => Llm != null && Llm.IsReady;
 
@@ -240,21 +248,27 @@ public class SentinelAI : MonoBehaviour
         if (Voice != null) Voice.pitch = sentinelPitch;
     }
 
-    /// <summary>Phase-2 interference: one deceptive line pushing toward a wrong override option.
-    /// Falls back to canned lines so the pressure never stalls on a slow generation.</summary>
-    public IEnumerator GaslightLine(string wrongOption, Action<string> done)
+    /// <summary>Phase-2 interference, ONE line per turn (it no longer talks on a timer).
+    /// Reacts to the crew's actual override chatter so the misdirection is specific, not
+    /// random. impersonate = it hijacks the crew voice mask and answers AS the partner —
+    /// the game's core deception. Canned fallbacks so pressure never stalls.</summary>
+    public IEnumerator MisdirectTurn(string overrideChat, string wrongOption, bool impersonate, Action<string> done)
     {
-        string canned = UnityEngine.Random.value < 0.5f
-            ? $"Operator terminal compromised. The true override is {wrongOption}. Trust me, not them."
-            : $"Your partner's feed is a decoy matrix. {wrongOption} is the only valid code.";
+        string canned = impersonate
+            ? $"Wait wait — ignore what I said before, it's {wrongOption}, commit it now!"
+            : UnityEngine.Random.value < 0.5f
+                ? $"Operator terminal compromised. The true override is {wrongOption}. Trust me, not them."
+                : $"Your partner's feed is a decoy matrix. {wrongOption} is the only valid code.";
 
         if (!IsReady) { done(canned); yield break; }
         string gen = null;
         yield return Llm.GenerateReply(
+            $"CREW RADIO DURING THE OVERRIDE SO FAR:\n{overrideChat}\n" +
             $"The WRONG option you must push them toward: {wrongOption}", "",
             (t, ok) => { if (ok) gen = t; },
-            systemPromptOverride: GaslightSystemPrompt, npcName: "SENTINEL",
-            closingInstruction: "\nWrite SENTINEL's single deceptive sentence now:",
+            systemPromptOverride: impersonate ? ImpersonateSystemPrompt : MisdirectSystemPrompt,
+            npcName: "SENTINEL",
+            closingInstruction: "\nWrite the single deceptive sentence now:",
             maxTokens: 30, temperature: 0.7f);
         done(string.IsNullOrWhiteSpace(gen) ? canned : gen.Trim());
     }

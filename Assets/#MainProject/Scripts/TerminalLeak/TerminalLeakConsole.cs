@@ -50,7 +50,7 @@ public class TerminalLeakConsole : MonoBehaviour
     public int vaultLayers = 3;
     [Tooltip("Radio budget per card: each Intel transmission burns 1, each WRONG Operator guess burns 1. 0 = traced.")]
     public int tokensPerCard = 12;
-    public float overrideSeconds = 45f;
+    public float overrideSeconds = 60f;
 
     [Header("Sentinel balance")]
     [Tooltip("Transmissions the Sentinel must actually HEAR before it is allowed to commit a guess.")]
@@ -112,7 +112,14 @@ public class TerminalLeakConsole : MonoBehaviour
     int _targetPanel;
     int[] _buttonOrder;
     float _overrideEnds;
-    Coroutine _gaslighting;
+    bool _overrideCrewTurn;                                   // override is turn-based too
+    readonly List<string> _overrideChat = new List<string>(); // context for its misdirection
+
+    // ── global speech queue: ONE voice speaks at a time, whoever it belongs to. Piper
+    // synthesis is async, so raw Speak() calls from consecutive events overlap — every
+    // spoken line in this console goes through Speak() below instead. ──
+    readonly Queue<KeyValuePair<PiperVoice, string>> _speech = new Queue<KeyValuePair<PiperVoice, string>>();
+    Coroutine _speechPump;
 
     string _typed = "";
     Vector2 _scroll;
@@ -181,6 +188,35 @@ public class TerminalLeakConsole : MonoBehaviour
         return go;
     }
 
+    void Speak(PiperVoice v, string line)
+    {
+        if (v == null || !v.Available || string.IsNullOrWhiteSpace(line)) return;
+        _speech.Enqueue(new KeyValuePair<PiperVoice, string>(v, line));
+        if (_speechPump == null) _speechPump = StartCoroutine(SpeechPump());
+    }
+
+    IEnumerator SpeechPump()
+    {
+        while (_speech.Count > 0)
+        {
+            var item = _speech.Dequeue();
+            item.Key.Speak(item.Value);
+            float t0 = Time.time;
+            while (!item.Key.IsSpeaking && Time.time - t0 < 25f) yield return null; // synthesis
+            while (item.Key.IsSpeaking) yield return null;
+            yield return new WaitForSeconds(0.2f); // a breath between speakers
+        }
+        _speechPump = null;
+    }
+
+    void ClearSpeech()
+    {
+        _speech.Clear();
+        if (_speechPump != null) { StopCoroutine(_speechPump); _speechPump = null; }
+        if (PlayerMask != null) PlayerMask.Stop();
+        if (Sentinel != null && Sentinel.Voice != null) Sentinel.Voice.Stop();
+    }
+
     void LoadDeck()
     {
         _deck.Clear();
@@ -216,6 +252,7 @@ public class TerminalLeakConsole : MonoBehaviour
         _ghostDeafNext = 0;
         _tapTraceUsed = false;
         _feed.Clear();
+        ClearSpeech(); // a restart shouldn't inherit the last run's queued lines
         Sentinel.ClearMemory(); // its notes on your crew belong to a run, not the install
         Sentinel.ResetVoiceFont();
         _phase = Phase.Boot;
@@ -241,7 +278,7 @@ public class TerminalLeakConsole : MonoBehaviour
         yield return new WaitForSeconds(0.4f);
         string hello = "I see two heat signatures. Talk amongst yourselves. I will listen.";
         Feed($"<color={RED}>SENTINEL ▷</color> {hello}");
-        Sentinel.Speak(hello);
+        Speak(Sentinel.Voice,hello);
         yield return new WaitForSeconds(1.5f);
         Sys("SOLO TEST — you are BOTH roles: SPEAK as Intel; on the Operator turn, SPEAK questions or TYPE guesses.");
         Sys("Every transmission burns a token — the radio feeds the trace. Typed guesses are silent: the wire never sees them.");
@@ -288,7 +325,7 @@ public class TerminalLeakConsole : MonoBehaviour
         yield return Sentinel.OpeningGambit(l => line = l);
         if (_phase != Phase.TurnIntel && _phase != Phase.TurnOperator) yield break;
         Feed($"<color={RED}>SENTINEL ▷</color> {line}");
-        Sentinel.Speak(line);
+        Speak(Sentinel.Voice,line);
     }
 
     void CardSolved()
@@ -360,9 +397,9 @@ public class TerminalLeakConsole : MonoBehaviour
 
     void OnPartial(string p)
     {
-        // strict turns: the mic is live on BOTH human turns (Intel clues, Operator spoken
-        // questions), dead everywhere else
-        if (_phase != Phase.TurnIntel && _phase != Phase.TurnOperator) return;
+        // strict turns: the mic is live on human turns (Intel clues, Operator spoken
+        // questions, the crew's override turn), dead everywhere else
+        if (!MicLive) return;
         _partial = ExtractText(p);
         if (!string.IsNullOrEmpty(_partial))
         {
@@ -375,9 +412,12 @@ public class TerminalLeakConsole : MonoBehaviour
         }
     }
 
+    bool MicLive => _phase == Phase.TurnIntel || _phase == Phase.TurnOperator ||
+                    (_phase == Phase.Override && _overrideCrewTurn);
+
     void OnFinalResult(string json)
     {
-        if (_phase != Phase.TurnIntel && _phase != Phase.TurnOperator) { _peakVolume = 0f; return; }
+        if (!MicLive) { _peakVolume = 0f; return; }
         string text = ExtractText(json);
         _partial = "";
         if (string.IsNullOrWhiteSpace(text)) { _peakVolume = 0f; return; }
@@ -396,7 +436,6 @@ public class TerminalLeakConsole : MonoBehaviour
         }
         if (_phase == Phase.Override && Time.time >= _overrideEnds)
         {
-            EndGaslighting();
             Lose("atmosphere purged — the override came too late");
             return;
         }
@@ -427,6 +466,7 @@ public class TerminalLeakConsole : MonoBehaviour
         string text = string.IsNullOrWhiteSpace(refined) ? voskText : refined;
         if (_phase == Phase.TurnIntel) TransmitClue(text);
         else if (_phase == Phase.TurnOperator) OperatorVoice(text);
+        else if (_phase == Phase.Override) OverrideCrewLine(text);
     }
 
     void TransmitClue(string clue)
@@ -436,14 +476,14 @@ public class TerminalLeakConsole : MonoBehaviour
         if (clue.Length == 0) return;
 
         Feed($"<color={CYAN}>INTEL ▷</color> {clue}");
-        if (PlayerMask != null && PlayerMask.Available) PlayerMask.Speak(clue); // the voice mask
+        Speak(PlayerMask, clue); // the voice mask, queued so nothing talks over it
 
         // Saying the clean password out loud IS the instant-loss the fiction promises —
         // and no clean window saves you: a committed password trips the vault lock itself.
         if (ContainsWord(clue, _card.word))
         {
             Feed($"<color={RED}>SENTINEL ▷ You said it in the clear. How considerate.</color>");
-            Sentinel.Speak("You said it in the clear. How considerate.");
+            Speak(Sentinel.Voice,"You said it in the clear. How considerate.");
             Breach(_card.word);
             return;
         }
@@ -486,12 +526,12 @@ public class TerminalLeakConsole : MonoBehaviour
         if (q.Length == 0) return;
 
         Feed($"<color={GREEN}>OPERATOR ▷</color> {q}");
-        if (PlayerMask != null && PlayerMask.Available) PlayerMask.Speak(q);
+        Speak(PlayerMask, q);
 
         if (ContainsWord(q, _card.word))
         {
             Feed($"<color={RED}>SENTINEL ▷ Spoken aloud, on my wire. Thank you for the confirmation.</color>");
-            Sentinel.Speak("Spoken aloud, on my wire. Thank you for the confirmation.");
+            Speak(Sentinel.Voice,"Spoken aloud, on my wire. Thank you for the confirmation.");
             Breach(_card.word);
             return;
         }
@@ -597,13 +637,13 @@ public class TerminalLeakConsole : MonoBehaviour
             _sentinelDeaf = exposureTransmissions;
             _radioSentinel.Add($"SENTINEL GUESSED: {text} (incorrect — wiretap knocked offline)");
             Feed($"<color={GREEN}>▼ WRONG. SENTINEL EXPOSED — wiretap offline for {exposureTransmissions} cycles. Rush the real clue NOW.</color>");
-            Sentinel.Speak($"{text}. …No. Recalibrating. This changes nothing.");
+            Speak(Sentinel.Voice,$"{text}. …No. Recalibrating. This changes nothing.");
         }
         else
         {
             _radioSentinel.Add($"SENTINEL: {text}");
             Feed($"<color={RED}>SENTINEL ▷</color> {text}");
-            Sentinel.Speak(text);
+            Speak(Sentinel.Voice,text);
         }
         _phase = Phase.TurnIntel;
         Sys("YOUR LINE — speak a disguised clue.");
@@ -628,52 +668,70 @@ public class TerminalLeakConsole : MonoBehaviour
             : "Trace complete. You talk too much and say too little. Purging atmosphere.";
         if (crackedWord == null && Sentinel.Voice != null) Sentinel.Voice.pitch = Sentinel.overlordPitch;
         Feed($"<color={RED}>██ SYSTEM BREACH ██  SENTINEL ▷ {flip}</color>");
-        Sentinel.Speak(flip);
+        Speak(Sentinel.Voice,flip);
         StartOverride();
     }
 
+    // The override is turn-based like everything else — the Sentinel gets exactly ONE
+    // deceptive line per crew transmission instead of talking over everyone on a timer.
+    // Crew turn: speak (describe the marked image / ask about the options) or click a
+    // description to commit. Then the Sentinel replies — sometimes IN YOUR OWN VOICE
+    // MASK, impersonating the partner (the ▒ glitch in the feed is the only tell).
     void StartOverride()
     {
         _panels = BuildPanels(4);
         _targetPanel = UnityEngine.Random.Range(0, _panels.Length);
         _buttonOrder = Enumerable.Range(0, _panels.Length).OrderBy(_ => UnityEngine.Random.value).ToArray();
         _overrideEnds = Time.time + overrideSeconds;
+        _overrideChat.Clear();
+        _overrideCrewTurn = true;
         _phase = Phase.Override;
-        Sys($"VISUAL OVERRIDE — match the marked image to its description within {overrideSeconds:0}s. The Sentinel will lie to you.");
-        _gaslighting = StartCoroutine(GaslightLoop());
+        Sys($"VISUAL OVERRIDE — {overrideSeconds:0}s. Turn-based: SPEAK to describe/ask, CLICK a description to commit. " +
+            "After each crew line the Sentinel answers ONCE — and it can wear YOUR voice.");
     }
 
-    IEnumerator GaslightLoop()
+    void OverrideCrewLine(string text)
     {
-        while (_phase == Phase.Override)
+        if (_phase != Phase.Override || !_overrideCrewTurn) return;
+        Feed($"<color={GREEN}>CREW ▷</color> {text}");
+        Speak(PlayerMask, text);
+        _overrideChat.Add($"CREW: {text}");
+        _overrideCrewTurn = false;
+        StartCoroutine(SentinelOverrideTurn());
+    }
+
+    IEnumerator SentinelOverrideTurn()
+    {
+        int wrong;
+        do { wrong = UnityEngine.Random.Range(0, _panels.Length); } while (wrong == _targetPanel);
+        bool impersonate = UnityEngine.Random.value < 0.4f; // sometimes it wears your mask
+        string line = null;
+        yield return Sentinel.MisdirectTurn(string.Join("\n", _overrideChat), _panels[wrong].desc, impersonate, l => line = l);
+        if (_phase != Phase.Override) yield break;
+        if (impersonate)
         {
-            yield return new WaitForSeconds(UnityEngine.Random.Range(7f, 11f));
-            if (_phase != Phase.Override) yield break;
-            int wrong;
-            do { wrong = UnityEngine.Random.Range(0, _panels.Length); } while (wrong == _targetPanel);
-            string line = null;
-            yield return Sentinel.GaslightLine(_panels[wrong].desc, l => line = l);
-            if (_phase != Phase.Override) yield break;
-            Feed($"<color={RED}>SENTINEL ▷</color> {line}");
-            Sentinel.Speak(line);
+            // Delivered through the CREW's voice font, labeled almost right — ▒ is the tell.
+            Feed($"<color={GREEN}>OPERATOR▒ ▷</color> {line}");
+            Speak(PlayerMask, line);
         }
-    }
-
-    void EndGaslighting()
-    {
-        if (_gaslighting != null) StopCoroutine(_gaslighting);
-        _gaslighting = null;
+        else
+        {
+            Feed($"<color={RED}>SENTINEL ▷</color> {line}");
+            Speak(Sentinel.Voice, line);
+        }
+        _overrideChat.Add($"SENTINEL{(impersonate ? " (disguised as crew)" : "")}: {line}");
+        _overrideCrewTurn = true;
     }
 
     void ClickOverride(int panelIndex)
     {
-        EndGaslighting();
+        if (!_overrideCrewTurn) return; // committing is a crew-turn action too
         if (panelIndex == _targetPanel)
         {
             _breachesSurvived++;
             Feed($"<color={GREEN}>██ NODE RESET — override accepted. The Sentinel withdraws, for now. ██</color>");
             Sentinel.ResetVoiceFont();
-            Sentinel.Speak("Clever. Enjoy the borrowed time.");
+            Speak(Sentinel.Voice,"Clever. Enjoy the borrowed time.");
             NextCard(); // same layer count — the cracked card is burned, a fresh one is drawn
         }
         else Lose($"wrong override — the Sentinel's lie worked ({_panels[panelIndex].desc})");
@@ -885,7 +943,10 @@ public class TerminalLeakConsole : MonoBehaviour
     void DrawOverride(float k, int f, GUIStyle rich)
     {
         float left = Time.time > _overrideEnds ? 0 : _overrideEnds - Time.time;
-        GUILayout.Label($"<color={RED}><b>ASPHYXIATION IN {left:00.0}s</b></color>  — click the description matching the <color={CYAN}>marked</color> image", rich);
+        string oturn = _overrideCrewTurn
+            ? $"<color={GREEN}>CREW TURN — speak or commit a click</color>"
+            : $"<color={RED}>SENTINEL is answering…</color>";
+        GUILayout.Label($"<color={RED}><b>ASPHYXIATION IN {left:00.0}s</b></color>  {oturn}  — match the <color={CYAN}>marked</color> image", rich);
         GUILayout.BeginHorizontal();
         float size = Mathf.Min(150 * k, Screen.width / 5f);
         for (int i = 0; i < _panels.Length; i++)
@@ -903,10 +964,12 @@ public class TerminalLeakConsole : MonoBehaviour
         }
         GUILayout.EndHorizontal();
         GUILayout.BeginHorizontal();
+        GUI.enabled = _overrideCrewTurn;
         foreach (int idx in _buttonOrder)
             if (GUILayout.Button($"[{_panels[idx].desc}]", new GUIStyle(GUI.skin.button) { fontSize = f, wordWrap = true },
                 GUILayout.Width((Screen.width - 64 * k) / _panels.Length)))
                 ClickOverride(idx);
+        GUI.enabled = true;
         GUILayout.EndHorizontal();
     }
 }

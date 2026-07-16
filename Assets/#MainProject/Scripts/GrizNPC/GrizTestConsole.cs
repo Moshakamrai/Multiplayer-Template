@@ -320,8 +320,17 @@ public class GrizTestConsole : MonoBehaviour
             string gen = null;
             string facts = BuildFacts(reply);
             Debug.Log($"[Griz] calling GenerateReply, history lines={_history.Count}, facts len={facts.Length}");
+            // BN mode: the player is speaking Bangla (Whisper already translated their side to
+            // English for the model to reason on) — but Griz's spoken REPLY needs to come out
+            // in Bangla script so PiperVoice's bn_BD voice actually has Bangla to say. English
+            // reasoning in, Bangla dialogue out.
+            string closing = _bangla
+                ? "Write GRIZ's next reply now, in BANGLA SCRIPT (Bengali), dialogue only. " +
+                  "Keep his personality and the exact facts/numbers, but the words must be Bangla, not English or transliterated."
+                : null;
             yield return Llm.GenerateReply(string.Join("\n", _history), facts,
-                (t, ok) => { if (ok) gen = t; });
+                (t, ok) => { if (ok) gen = t; },
+                closingInstruction: closing);
             Debug.Log($"[Griz] GenerateReply callback done — gen={(gen ?? "<null>")}");
             if (!string.IsNullOrWhiteSpace(gen))
             {

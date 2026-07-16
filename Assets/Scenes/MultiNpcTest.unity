@@ -1417,6 +1417,7 @@ MonoBehaviour:
     companionConsole: {fileID: 1997656265}
   startIndex: 0
   cycleKey: 9
+  sharedModel: {fileID: 534895838}
 --- !u!4 &1897666720
 Transform:
   m_ObjectHideFlags: 0

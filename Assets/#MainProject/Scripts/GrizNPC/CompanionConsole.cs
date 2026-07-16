@@ -22,6 +22,7 @@ public class CompanionConsole : MonoBehaviour
     public WhisperTranscriber Whisper;
 
     bool _utteranceOpen;
+    bool _bangla; // EN/BN toggle button state — Whisper does the actual language switch
     int _pendingRequests;
     readonly List<string> _history = new List<string>();
 
@@ -266,10 +267,17 @@ public class CompanionConsole : MonoBehaviour
         string npcName = Brain != null ? Brain.npcName : "NPC";
         string facts = BuildFacts();
         string gen = null;
+        // BN mode: player's side already arrives as English (Whisper's bn->en translate), but
+        // her spoken REPLY needs actual Bangla script so PiperVoice's Bangla voice has
+        // something to say — English reasoning in, Bangla dialogue out.
+        string languageLine = _bangla
+            ? "Write your dialogue in BANGLA SCRIPT (Bengali) — keep your personality, but the " +
+              "words must be Bangla, not English or transliterated. "
+            : "";
         yield return Llm.GenerateReply(string.Join("\n", _history), facts, (t, ok) => { if (ok) gen = t; },
             systemPromptOverride: Brain != null ? Brain.persona : null,
             npcName: npcName,
-            closingInstruction: $"Reply with dialogue only, then on a NEW final line write exactly " +
+            closingInstruction: $"{languageLine}Reply with dialogue only, then on a NEW final line write exactly " +
                                  $"\"SENTIMENT: x\" where x is one of warm, cold, funny, rude, neutral " +
                                  $"describing the TONE THE PLAYER used toward you just now.",
             maxTokens: 110, temperature: 0.9f);
@@ -393,7 +401,9 @@ public class CompanionConsole : MonoBehaviour
             ? "<color=#66ff66>Piper TTS</color>"
             : "gibberish <color=#888888>(run Tools > Griz > Check Piper Setup)</color>";
         voiceMode += Llm != null && Llm.IsReady ? "   Brain: <color=#66ff66>LLM (shared)</color>" : "   Brain: <color=#ff6666>no LLM</color>";
-        voiceMode += Whisper != null && Whisper.IsReady ? "   Ears: <color=#66ff66>Whisper</color>" : "   Ears: Vosk";
+        voiceMode += Whisper != null && Whisper.IsReady
+            ? $"   Ears: <color=#66ff66>Whisper ({(_bangla ? "BN→EN" : "EN")})</color>"
+            : Whisper != null ? "   Ears: <color=#ffe066>Whisper reloading…</color>" : "   Ears: Vosk";
         GUILayout.Label($"Mic: <b>{(mic ? "<color=#66ff66>LIVE</color>" : "starting…")}</b>   " +
                         $"Vol: {Bar(vol)}   Peak: {_peakVolume:0.00}   Voice: {voiceMode}", Rich(fSmall));
         if (!string.IsNullOrEmpty(_partial) || !string.IsNullOrEmpty(_pendingText))
@@ -438,6 +448,22 @@ public class CompanionConsole : MonoBehaviour
         }
         var toggleStyle = new GUIStyle(GUI.skin.toggle) { fontSize = fSmall };
         showDebugState = GUILayout.Toggle(showDebugState, " state", toggleStyle);
+
+        if (Whisper != null)
+        {
+            string label = _bangla ? "Speaking: BN (switch to EN)" : "Speaking: EN (switch to BN)";
+            Color prevColor = GUI.color;
+            if (_bangla) GUI.color = new Color(0.6f, 1f, 0.6f);
+            if (GUILayout.Button(label, btnStyle, GUILayout.Width(260 * k), GUILayout.Height(40 * k)))
+            {
+                _bangla = !_bangla;
+                Whisper.Restart(_bangla ? "bn" : "en", translate: _bangla);
+                Say("*", _bangla
+                    ? "── Switched to Bangla input (spoken Bangla, understood as English, replies in Bangla) ──"
+                    : "── Switched back to English input ──");
+            }
+            GUI.color = prevColor;
+        }
         GUILayout.FlexibleSpace();
         GUILayout.Label("<color=#888888>tip: typed input ending in ! counts as shouting</color>", Rich(fSmall));
         GUILayout.EndHorizontal();

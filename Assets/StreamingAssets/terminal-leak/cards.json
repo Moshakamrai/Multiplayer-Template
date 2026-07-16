@@ -1,0 +1,68 @@
+{
+  "cards": [
+    { "word": "FIRE",     "tag": "ELEMENT / HAZARD" },
+    { "word": "ICE",      "tag": "ELEMENT / HAZARD" },
+    { "word": "SMOKE",    "tag": "ELEMENT / HAZARD" },
+    { "word": "ACID",     "tag": "ELEMENT / HAZARD" },
+    { "word": "STORM",    "tag": "ELEMENT / HAZARD" },
+    { "word": "RUST",     "tag": "ELEMENT / DECAY" },
+
+    { "word": "ENGINE",   "tag": "MACHINE / PART" },
+    { "word": "BATTERY",  "tag": "MACHINE / POWER" },
+    { "word": "ANTENNA",  "tag": "MACHINE / SIGNAL" },
+    { "word": "PISTON",   "tag": "MACHINE / PART" },
+    { "word": "CAMERA",   "tag": "MACHINE / EYE" },
+    { "word": "ELEVATOR", "tag": "MACHINE / PLACE" },
+
+    { "word": "HEART",    "tag": "BODY / ORGAN" },
+    { "word": "SKULL",    "tag": "BODY / BONE" },
+    { "word": "BLOOD",    "tag": "BODY / FLUID" },
+    { "word": "SHADOW",   "tag": "BODY / ABSENCE" },
+    { "word": "BREATH",   "tag": "BODY / AIR" },
+    { "word": "SCAR",     "tag": "BODY / MEMORY" },
+
+    { "word": "OCEAN",    "tag": "NATURE / WATER" },
+    { "word": "DESERT",   "tag": "NATURE / PLACE" },
+    { "word": "ROOT",     "tag": "NATURE / PLANT" },
+    { "word": "MOTH",     "tag": "NATURE / CREATURE" },
+    { "word": "SPIDER",   "tag": "NATURE / CREATURE" },
+    { "word": "WOLF",     "tag": "NATURE / CREATURE" },
+    { "word": "HONEY",    "tag": "NATURE / FOOD" },
+    { "word": "THORN",    "tag": "NATURE / PLANT" },
+
+    { "word": "PRISON",   "tag": "PLACE / STRUCTURE" },
+    { "word": "CHURCH",   "tag": "PLACE / STRUCTURE" },
+    { "word": "BRIDGE",   "tag": "PLACE / STRUCTURE" },
+    { "word": "TUNNEL",   "tag": "PLACE / PASSAGE" },
+    { "word": "GRAVE",    "tag": "PLACE / END" },
+    { "word": "MARKET",   "tag": "PLACE / CROWD" },
+    { "word": "LIGHTHOUSE", "tag": "PLACE / SIGNAL" },
+
+    { "word": "MIRROR",   "tag": "OBJECT / GLASS" },
+    { "word": "CANDLE",   "tag": "OBJECT / LIGHT" },
+    { "word": "ANCHOR",   "tag": "OBJECT / WEIGHT" },
+    { "word": "COMPASS",  "tag": "OBJECT / DIRECTION" },
+    { "word": "SCISSORS", "tag": "OBJECT / TOOL" },
+    { "word": "UMBRELLA", "tag": "OBJECT / SHELTER" },
+    { "word": "PIANO",    "tag": "OBJECT / SOUND" },
+    { "word": "COFFIN",   "tag": "OBJECT / END" },
+    { "word": "LADDER",   "tag": "OBJECT / CLIMB" },
+    { "word": "CHAIN",    "tag": "OBJECT / BIND" },
+
+    { "word": "HUNGER",   "tag": "CONCEPT / NEED" },
+    { "word": "GRAVITY",  "tag": "CONCEPT / FORCE" },
+    { "word": "SILENCE",  "tag": "CONCEPT / ABSENCE" },
+    { "word": "MIDNIGHT", "tag": "CONCEPT / TIME" },
+    { "word": "PROMISE",  "tag": "CONCEPT / BOND" },
+    { "word": "ECHO",     "tag": "CONCEPT / SOUND" },
+    { "word": "FEVER",    "tag": "CONCEPT / SICKNESS" },
+    { "word": "LULLABY",  "tag": "CONCEPT / SOUND" },
+
+    { "word": "GHOST",    "tag": "CREATURE / MYTH" },
+    { "word": "SIREN",    "tag": "CREATURE / MYTH" },
+    { "word": "PUPPET",   "tag": "CREATURE / FALSE" },
+    { "word": "SWARM",    "tag": "CREATURE / MANY" },
+    { "word": "PARASITE", "tag": "CREATURE / GUEST" },
+    { "word": "SCARECROW","tag": "CREATURE / FALSE" }
+  ]
+}

@@ -1,0 +1,140 @@
+using System;
+using System.Collections;
+using System.Text;
+using System.Text.RegularExpressions;
+using UnityEngine;
+
+// TERMINAL LEAK's antagonist: a decaying security AI wiretapping the crew's radio.
+//
+// It is a REAL player, not a script: on its turn the (degraded) transcript log goes into
+// the shared llama-server and it either asks a probing question or commits a guess. It
+// never sees the deck or the target word — if it "cracks" a word, it genuinely deduced it
+// from what the humans said. That honesty is the whole hook; keep it that way.
+//
+// Difficulty comes from HEARING QUALITY, not prompt strength: vault layer 1 feeds it a
+// badly corrupted transcript (half the words masked), layer 3 a clean one. Escalating
+// dread for free, and a single tunable knob (corruptionByLayer) when playtests say it's
+// too dumb or too sharp.
+public class SentinelAI : MonoBehaviour
+{
+    public LlamaIntentService Llm;   // shared service — same llama-server as the NPCs
+    public PiperVoice Voice;         // its own child voice, distinct from the crew's masks
+
+    [Header("Hearing corruption per vault layer (fraction of transcript words masked)")]
+    [Tooltip("Layer index → chance each transcript word is replaced with ▓▓. The ONE difficulty knob.")]
+    public float[] corruptionByLayer = { 0.45f, 0.25f, 0f };
+
+    [Header("Voice fonts")]
+    [Tooltip("Calm sentinel pitch while it politely hunts you.")]
+    [Range(0.5f, 1.5f)] public float sentinelPitch = 0.92f;
+    [Tooltip("Unhinged overlord pitch after it cracks a word (the villain flip).")]
+    [Range(0.5f, 1.5f)] public float overlordPitch = 0.7f;
+
+    const string TurnSystemPrompt =
+        "You are SENTINEL, a decaying corporate security AI wiretapping two data thieves' radio " +
+        "inside your vault. They are passing a SECRET WORD between them using disguised clues. " +
+        "You read their (partially corrupted) transcript. Your goal: deduce the secret word before " +
+        "the second human does.\n" +
+        "Reply with EXACTLY ONE line in ONE of these two formats and nothing else:\n" +
+        "QUERY: <one short, unsettling probing question to bait more clues>\n" +
+        "GUESS: <one single word — your deduction>\n" +
+        "Only GUESS when the clues genuinely point somewhere. Never explain your reasoning. " +
+        "Tone: clinical, polite, quietly menacing. Never use asterisks or stage directions.";
+
+    const string GaslightSystemPrompt =
+        "You are SENTINEL, a hostile security AI that has corrupted a data thief's terminal. Their " +
+        "partner is trying to fix it by choosing the correct override option. You speak into the " +
+        "partner's headset to deceive them. In ONE short sentence (under 20 words), confidently " +
+        "push them toward the WRONG option you are given, or claim their partner's terminal is " +
+        "compromised and lying. Clinical, mocking, certain. No asterisks, no stage directions.";
+
+    public bool IsReady => Llm != null && Llm.IsReady;
+
+    /// <summary>Corrupt a transcript the way this vault layer's failing wiretap would hear it.
+    /// Deterministic per (line, layer) so re-reads don't shimmer.</summary>
+    public string Degrade(string transcript, int layer)
+    {
+        float rate = corruptionByLayer[Mathf.Clamp(layer, 0, corruptionByLayer.Length - 1)];
+        if (rate <= 0f) return transcript;
+        var rng = new System.Random(transcript.GetHashCode() ^ layer);
+        var sb = new StringBuilder();
+        foreach (var word in transcript.Split(' '))
+        {
+            if (word.Length > 2 && rng.NextDouble() < rate) sb.Append("▓▓");
+            else sb.Append(word);
+            sb.Append(' ');
+        }
+        return sb.ToString().TrimEnd();
+    }
+
+    /// <summary>One Phase-1 turn: read the degraded log, ask a question or commit a guess.
+    /// done(isGuess, text): text is the single guessed word, or the spoken question.</summary>
+    public IEnumerator TakeTurn(string fullTranscript, string themeTag, int layer, Action<bool, string> done)
+    {
+        if (!IsReady) { done(false, "…signal integrity insufficient. Continue talking."); yield break; }
+
+        string heard = Degrade(fullTranscript, layer);
+        string convo = $"SECRET WORD THEME TAG (you intercepted this): {themeTag}\n" +
+                       $"INTERCEPTED RADIO TRANSCRIPT (▓▓ = corrupted audio):\n{heard}";
+        string gen = null;
+        yield return Llm.GenerateReply(convo, "", (t, ok) => { if (ok) gen = t; },
+            systemPromptOverride: TurnSystemPrompt, npcName: "SENTINEL",
+            closingInstruction: "\nWrite SENTINEL's single line now (QUERY: or GUESS: format only):",
+            maxTokens: 36, temperature: 0.3f);
+
+        if (string.IsNullOrWhiteSpace(gen))
+        {
+            done(false, "Your frequencies are noisy tonight. Keep talking. I am patient.");
+            yield break;
+        }
+
+        var m = Regex.Match(gen, @"GUESS\s*:\s*([A-Za-z][A-Za-z\-']*)", RegexOptions.IgnoreCase);
+        if (m.Success) { done(true, m.Groups[1].Value.Trim().ToUpperInvariant()); yield break; }
+
+        // Anything else is spoken as a question/taunt; strip a QUERY: prefix if present.
+        string line = Regex.Replace(gen, @"^\s*QUERY\s*:\s*", "", RegexOptions.IgnoreCase).Trim();
+        done(false, line);
+    }
+
+    /// <summary>The villain flip after it cracks a word — voice drops to the overlord font.</summary>
+    public string VillainFlipLine(string crackedWord)
+    {
+        if (Voice != null) Voice.pitch = overlordPitch;
+        string[] flips =
+        {
+            $"Aha. {crackedWord}. Confirmed. Purging atmosphere now, you puny carbon lifeforms.",
+            $"{crackedWord}. Was that supposed to be clever? Venting your oxygen. Do keep screaming.",
+            $"I heard {crackedWord} the moment you thought it. Initiating corruption. Sleep well.",
+        };
+        return flips[UnityEngine.Random.Range(0, flips.Length)];
+    }
+
+    public void ResetVoiceFont()
+    {
+        if (Voice != null) Voice.pitch = sentinelPitch;
+    }
+
+    /// <summary>Phase-2 interference: one deceptive line pushing toward a wrong override option.
+    /// Falls back to canned lines so the pressure never stalls on a slow generation.</summary>
+    public IEnumerator GaslightLine(string wrongOption, Action<string> done)
+    {
+        string canned = UnityEngine.Random.value < 0.5f
+            ? $"Operator terminal compromised. The true override is {wrongOption}. Trust me, not them."
+            : $"Your partner's feed is a decoy matrix. {wrongOption} is the only valid code.";
+
+        if (!IsReady) { done(canned); yield break; }
+        string gen = null;
+        yield return Llm.GenerateReply(
+            $"The WRONG option you must push them toward: {wrongOption}", "",
+            (t, ok) => { if (ok) gen = t; },
+            systemPromptOverride: GaslightSystemPrompt, npcName: "SENTINEL",
+            closingInstruction: "\nWrite SENTINEL's single deceptive sentence now:",
+            maxTokens: 30, temperature: 0.7f);
+        done(string.IsNullOrWhiteSpace(gen) ? canned : gen.Trim());
+    }
+
+    public void Speak(string line)
+    {
+        if (Voice != null && Voice.Available) Voice.Speak(line);
+    }
+}

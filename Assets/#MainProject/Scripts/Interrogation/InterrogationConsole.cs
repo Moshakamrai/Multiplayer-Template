@@ -48,8 +48,26 @@ public class InterrogationConsole : MonoBehaviour
 
     void Start()
     {
+        // Reuse a service already in the scene (e.g. another suspect's) instead of always
+        // spinning up a duplicate llama-server/whisper-server — same pattern as
+        // CompanionConsole/GrizTestConsole. Unlike those, this console previously only
+        // ever LOOKED for an existing one and never created one when none existed, which
+        // left Llm/Whisper null forever in a fresh scene (the NullReferenceException this
+        // fixes) — every suspect needs its own set only if none exists yet.
         if (Llm == null) Llm = FindObjectOfType<LlamaIntentService>();
+        if (Llm == null)
+        {
+            var go = new GameObject("LlamaIntent");
+            go.transform.SetParent(transform, false);
+            Llm = go.AddComponent<LlamaIntentService>();
+        }
         if (Whisper == null) Whisper = FindObjectOfType<WhisperTranscriber>();
+        if (Whisper == null)
+        {
+            var go = new GameObject("Whisper");
+            go.transform.SetParent(transform, false);
+            Whisper = go.AddComponent<WhisperTranscriber>();
+        }
         if (Voice == null && Brain != null)
         {
             var go = new GameObject($"{Brain.suspectName}Voice");

@@ -57,6 +57,18 @@ public class SuspectBrain : MonoBehaviour
     [Header("Broken-state voice/tone note (fed to the LLM once broken)")]
     [TextArea(2, 6)] public string brokenStateDirection = "";
 
+    [Serializable]
+    public class Suspicion
+    {
+        public string aboutWhom;             // "Higgins", "the Vicar"... matches another suspect's name/role
+        [TextArea(2, 6)] public string belief; // what THIS suspect believes/suspects about them — may be wrong
+    }
+
+    [Header("Cross-suspect finger-pointing — genuine opinions, possibly wrong, NOT load-bearing " +
+             "for the actual accusation (the real 3-fact chain stays intact per GDD SS2.4). " +
+             "Volunteered only if the player asks this suspect about a specific other person.")]
+    public List<Suspicion> suspicionsOfOthers = new List<Suspicion>();
+
     List<string> _presentedEvidenceIds = new List<string>();
 
     public void ResetSuspect()
@@ -146,9 +158,26 @@ public class SuspectBrain : MonoBehaviour
         return result;
     }
 
+    /// <summary>Case-insensitive substring match against the asked-about name — lets
+    /// "what do you think of Higgins" and "tell me about the butler" both hit the same
+    /// Suspicion entry if aboutWhom is authored broadly enough (e.g. "Higgins" also
+    /// matches "the butler" if you write it that way in aboutWhom, or add both as
+    /// separate entries pointing at the same belief).</summary>
+    public Suspicion FindSuspicionAbout(string askedName)
+    {
+        if (string.IsNullOrWhiteSpace(askedName)) return null;
+        string needle = askedName.ToLowerInvariant();
+        foreach (var s in suspicionsOfOthers)
+            if (!string.IsNullOrEmpty(s.aboutWhom) && needle.Contains(s.aboutWhom.ToLowerInvariant()))
+                return s;
+        return null;
+    }
+
     /// <summary>What the LLM is allowed to know right now — hint always, content only once
-    /// unlocked. Same un-leakable-by-design principle as GrizBrain.Secret.</summary>
-    public string BuildFactsCage()
+    /// unlocked. Same un-leakable-by-design principle as GrizBrain.Secret. askedAboutSuspicion
+    /// is set by InterrogationConsole when the player's question named another suspect —
+    /// this is the ONLY way a suspicion ever enters the prompt (never volunteered unasked).</summary>
+    public string BuildFactsCage(Suspicion askedAboutSuspicion = null)
     {
         var facts = new System.Text.StringBuilder();
         facts.AppendLine($"YOUR GUARDED SECRET (never reveal directly, only via the hint below unless BROKEN): {secretHint}");
@@ -162,6 +191,9 @@ public class SuspectBrain : MonoBehaviour
             if (!string.IsNullOrEmpty(brokenStateDirection))
                 facts.AppendLine($"VOICE/TONE NOW: {brokenStateDirection}");
         }
+        if (askedAboutSuspicion != null)
+            facts.AppendLine($"THE PLAYER JUST ASKED WHAT YOU THINK OF {askedAboutSuspicion.aboutWhom.ToUpperInvariant()} — " +
+                              $"share this genuine opinion of yours (you may be WRONG, this is your belief, not a proven fact): {askedAboutSuspicion.belief}");
         facts.AppendLine($"CURRENT PATIENCE: {patience:0}/100 (0 = you shut the interview down).");
         return facts.ToString();
     }

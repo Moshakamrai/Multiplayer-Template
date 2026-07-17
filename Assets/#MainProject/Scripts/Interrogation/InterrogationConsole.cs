@@ -190,13 +190,26 @@ public class InterrogationConsole : MonoBehaviour
             return;
         }
 
+        // Cross-suspect finger-pointing (GDD suspicion system): only fires if the player's
+        // OWN words named another suspect — never volunteered unasked. A cheap "asking
+        // about someone" phrase check keeps this distinct from ordinary questioning so
+        // "where were you" doesn't accidentally trigger it just because a name is nearby.
+        var suspicion = MentionsAskingAboutSomeone(playerText) ? Brain.FindSuspicionAbout(playerText) : null;
+
         _pendingRequests++;
-        StartCoroutine(GenerateThenSpeak(playerText, result));
+        StartCoroutine(GenerateThenSpeak(playerText, result, suspicion));
     }
 
-    IEnumerator GenerateThenSpeak(string playerText, SuspectBrain.PressureResult result)
+    static bool MentionsAskingAboutSomeone(string text)
     {
-        string facts = Brain.BuildFactsCage();
+        string t = (text ?? "").ToLowerInvariant();
+        return Score(t, "what do you think of", "what do you think about", "tell me about", "do you trust",
+                        "do you suspect", "what about", "your opinion of", "your opinion on") > 0;
+    }
+
+    IEnumerator GenerateThenSpeak(string playerText, SuspectBrain.PressureResult result, SuspectBrain.Suspicion suspicion = null)
+    {
+        string facts = Brain.BuildFactsCage(suspicion);
         string gen = null;
         yield return Llm.GenerateReply(string.Join("\n", _history), facts, (t, ok) => { if (ok) gen = t; },
             systemPromptOverride: Brain.persona, npcName: Brain.suspectName,
@@ -223,6 +236,8 @@ public class InterrogationConsole : MonoBehaviour
                 Board.AddCard(Brain.suspectName, Brain.falseGiveContent, "false-give", round, isFalseGive: true);
             if (result.brokenTriggered && !string.IsNullOrEmpty(Brain.secretContent))
                 Board.AddCard(Brain.suspectName, Brain.secretContent, "broken-reveal", round, isBrokenReveal: true);
+            if (suspicion != null)
+                Board.AddCard(Brain.suspectName, $"On {suspicion.aboutWhom}: {suspicion.belief}", "accusation", round);
         }
     }
 

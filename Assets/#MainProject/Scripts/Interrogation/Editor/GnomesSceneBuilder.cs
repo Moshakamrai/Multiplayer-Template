@@ -14,6 +14,15 @@ using UnityEngine;
 // This proves the full loop end to end: enter interview, push the wrong axis (costs time,
 // not fun), find her real weakness (gossip/flattery), get the false give, then the broken
 // state, watch it land on the board with auto-flagged contradictions against other cards.
+//
+// Cross-suspect finger-pointing (SuspectBrain.suspicionsOfOthers, added this session):
+// Pemberton's three opinions (on Constance, Higgins, Finch) are authored below. When
+// Phase 2 adds the other three suspects, give each their own suspicionsOfOthers list too —
+// e.g. Constance suspects Higgins (caught him snooping, wrong lead), Higgins suspects the
+// Vicar (jealous/petty, accidentally nudges toward the real affair), and Finch — the killer
+// — should point at Higgins's obvious financial motive as a deliberate, calm misdirect.
+// These are texture/misdirection ONLY: none of them are load-bearing for the real 3-fact
+// accusation chain in GDD §2.4, by design.
 public static class GnomesSceneBuilder
 {
     const string ScenePath = "Assets/Scenes/GnomesAndGaslightSolo.unity";
@@ -110,6 +119,33 @@ public static class GnomesSceneBuilder
         pemberton.brokenStateDirection =
             "Relief and laughter — you're no longer performing, you're rambling, half-laughing at " +
             "yourself for how small your real secret turns out to be.";
+        // Cross-suspect finger-pointing (this session's addition): a genuine opinion, only
+        // ever volunteered if the player directly asks her about someone else. She's
+        // self-absorbed about her OWN secret, so she doesn't lead with a theory unprompted
+        // — but if asked, she has one, and it's real gossip, not evidence.
+        pemberton.suspicionsOfOthers = new List<SuspectBrain.Suspicion>
+        {
+            new SuspectBrain.Suspicion
+            {
+                aboutWhom = "Constance",
+                belief = "She thinks Lady Constance's grief is 'a touch theatrical' and privately suspects " +
+                          "the marriage was unhappy — she has no real evidence, just neighborly gossip and " +
+                          "a good eye for performance."
+            },
+            new SuspectBrain.Suspicion
+            {
+                aboutWhom = "Higgins",
+                belief = "She finds the butler 'oddly twitchy lately' and jokes that 'the quiet ones always " +
+                         "have a ledger of their own' — pure hunch, she has no idea about his gambling debt."
+            },
+            new SuspectBrain.Suspicion
+            {
+                aboutWhom = "Finch",
+                belief = "She genuinely likes Dr. Finch and initially waves off any suspicion of him as " +
+                         "'the one decent man in that house' — until/unless her own secret breaks, at " +
+                         "which point her actual sighting of him near the study becomes available instead."
+            },
+        };
 
         var interviewGO = new GameObject("PembertonInterview");
         var console = interviewGO.AddComponent<InterrogationConsole>();

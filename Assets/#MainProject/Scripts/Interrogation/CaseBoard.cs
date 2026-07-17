@@ -38,6 +38,20 @@ public class CaseBoard : MonoBehaviour
         public string reason; // short auto-generated explanation shown in the UI
     }
 
+    // A "suspicion loop": suspect A points at B, AND B points at A — flagged distinctly
+    // from a factual contradiction (these are OPINIONS, may both be wrong, never
+    // load-bearing for the actual accusation per the GDD's real 3-fact chain).
+    [Serializable]
+    public class SuspicionLoop
+    {
+        public StatementCard a; // A's accusation of B
+        public StatementCard b; // B's accusation of A
+    }
+
+    public IReadOnlyList<SuspicionLoop> SuspicionLoops => _suspicionLoops;
+    readonly List<SuspicionLoop> _suspicionLoops = new List<SuspicionLoop>();
+    public event Action<SuspicionLoop> OnSuspicionLoopFound;
+
     [Header("Forensics drip — fixed per round (GDD Phase D / build-order decision)")]
     [Tooltip("Evidence discovered automatically at the END of round N (index 0 = end of round 1). " +
              "Fixed-by-round: every group sees identical evidence at identical times — no group can stall.")]
@@ -58,6 +72,7 @@ public class CaseBoard : MonoBehaviour
     {
         _cards.Clear();
         _contradictions.Clear();
+        _suspicionLoops.Clear();
         foreach (var e in evidenceDripOrder) e.discovered = false;
     }
 
@@ -103,7 +118,44 @@ public class CaseBoard : MonoBehaviour
                 OnContradictionFound?.Invoke(c);
             }
         }
+
+        if (string.Equals(tag, "accusation", StringComparison.OrdinalIgnoreCase))
+            CheckSuspicionLoop(card);
+
         return card;
+    }
+
+    // "On {name}: {belief}" — pull the accused name back out to check for a reciprocal
+    // accusation. Deliberately simple string parsing, mirrors how AddCard formats these
+    // cards in InterrogationConsole — keep the two in sync if that format ever changes.
+    static string AccusedName(StatementCard c)
+    {
+        if (!c.text.StartsWith("On ")) return null;
+        int colon = c.text.IndexOf(':');
+        return colon > 3 ? c.text.Substring(3, colon - 3).Trim() : null;
+    }
+
+    void CheckSuspicionLoop(StatementCard newCard)
+    {
+        string accused = AccusedName(newCard);
+        if (string.IsNullOrEmpty(accused)) return;
+        foreach (var other in _cards)
+        {
+            if (other == newCard || !string.Equals(other.tag, "accusation", StringComparison.OrdinalIgnoreCase)) continue;
+            // does OTHER accuse the suspect who just spoke, AND was it made by the person
+            // THIS card accuses? i.e. A accuses B, and B (elsewhere) accuses A.
+            if (!other.suspectName.Equals(accused, StringComparison.OrdinalIgnoreCase)) continue;
+            string otherAccused = AccusedName(other);
+            if (string.IsNullOrEmpty(otherAccused) || !otherAccused.Equals(newCard.suspectName, StringComparison.OrdinalIgnoreCase)) continue;
+
+            bool alreadyFound = _suspicionLoops.Exists(l =>
+                (l.a == other && l.b == newCard) || (l.a == newCard && l.b == other));
+            if (alreadyFound) continue;
+
+            var loop = new SuspicionLoop { a = other, b = newCard };
+            _suspicionLoops.Add(loop);
+            OnSuspicionLoopFound?.Invoke(loop);
+        }
     }
 
     // Deliberately dumb v1 heuristic: same tag + different clock time or number mentioned

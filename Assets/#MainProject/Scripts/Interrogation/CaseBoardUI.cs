@@ -34,6 +34,7 @@ public class CaseBoardUI : MonoBehaviour
         {
             Board.OnEvidenceDiscovered += ev => Toast($"NEW EVIDENCE: {ev.label}");
             Board.OnContradictionFound += c => Toast("CONTRADICTION FOUND — check the board");
+            Board.OnSuspicionLoopFound += l => Toast($"SUSPICION LOOP: {l.a.suspectName} ⇄ {l.b.suspectName} — check the board");
         }
         if (ActiveConsole != null)
             ActiveConsole.OnLine += (who, text) => _transcript.Add((who, text));
@@ -78,6 +79,8 @@ public class CaseBoardUI : MonoBehaviour
         DrawEvidenceTray(k, f, rich);
         GUILayout.Space(8 * k);
         DrawContradictions(k, f, rich);
+        GUILayout.Space(8 * k);
+        DrawSuspicionLoops(k, f, rich);
         GUILayout.Space(8 * k);
         DrawCards(k, f, rich);
         GUILayout.EndArea();
@@ -179,14 +182,26 @@ public class CaseBoardUI : MonoBehaviour
             GUILayout.Label($"<color={RED}>• {c.a.suspectName} vs {c.b.suspectName}:</color> {c.reason}", rich);
     }
 
+    const string CYAN = "#06b6d4";
+
+    void DrawSuspicionLoops(float k, int f, GUIStyle rich)
+    {
+        if (Board.SuspicionLoops.Count == 0) return;
+        GUILayout.Label($"<color={CYAN}>⇄ SUSPICION LOOPS (opinions, may both be wrong)</color>", rich);
+        foreach (var l in Board.SuspicionLoops)
+            GUILayout.Label($"<color={CYAN}>• {l.a.suspectName} and {l.b.suspectName} accuse EACH OTHER</color>", rich);
+    }
+
     void DrawCards(float k, int f, GUIStyle rich)
     {
         GUILayout.Label($"<color={PURPLE}>STATEMENTS</color>", rich);
         _cardScroll = GUILayout.BeginScrollView(_cardScroll, GUILayout.ExpandHeight(true));
         foreach (var c in Board.Cards)
         {
-            string color = c.isBrokenReveal ? RED : c.isFalseGive ? GOLD : "#cccccc";
-            string tag = c.isBrokenReveal ? " [BROKEN]" : c.isFalseGive ? " [false give]" : "";
+            string color = c.isBrokenReveal ? RED : c.isFalseGive ? GOLD :
+                           c.tag == "accusation" ? CYAN : "#cccccc";
+            string tag = c.isBrokenReveal ? " [BROKEN]" : c.isFalseGive ? " [false give]" :
+                        c.tag == "accusation" ? " [opinion]" : "";
             GUILayout.Label($"<color={color}><b>{c.suspectName}</b> (r{c.round + 1}){tag}: {c.text}</color>", rich);
             GUILayout.Space(4 * k);
         }

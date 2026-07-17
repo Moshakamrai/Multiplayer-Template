@@ -354,8 +354,9 @@ public class CompanionConsole : MonoBehaviour
             closingInstruction: bnStyle +
                                  "Reply with dialogue only, in ENGLISH, reacting SPECIFICALLY to what the " +
                                  "player just said (no vague metaphors, no generic deflection), then on a NEW " +
-                                 "final line write exactly \"SENTIMENT: x\" where x is one of warm, cold, " +
-                                 "funny, rude, neutral describing the TONE THE PLAYER used toward you just now.",
+                                 "final line write exactly \"SENTIMENT: x\" where x is the emotion YOUR OWN " +
+                                 "reply just expressed — one of happy, sad, terrified, confused, angry, " +
+                                 "warm, funny, cold, rude, neutral.",
             maxTokens: 110, temperature: 0.6f);
 
         _pendingRequests--;
@@ -380,7 +381,7 @@ public class CompanionConsole : MonoBehaviour
                 npcName: npcName,
                 closingInstruction: "Your previous attempt just repeated yourself. Say something DIFFERENT — " +
                                      "reply with dialogue only, in ENGLISH, then on a NEW final line write exactly " +
-                                     "\"SENTIMENT: x\" (warm, cold, funny, rude, or neutral).",
+                                     "\"SENTIMENT: x\" (happy, sad, terrified, confused, angry, warm, funny, cold, rude, or neutral).",
                 maxTokens: 110, temperature: 0.5f);
             if (!string.IsNullOrWhiteSpace(retry))
             {

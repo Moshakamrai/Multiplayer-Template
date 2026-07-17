@@ -9,9 +9,9 @@ using UnityEngine;
 //   - EYE MICRO-DARTS: small saccades between blinks so the gaze isn't glassy.
 //   - TALKING BROWS: brow raise pulses that follow speech loudness (same live-amplitude
 //     technique as MouthLipSync) — reads as emphasis.
-//   - MOOD: SetMood("warm"/"cold"/"funny"/"rude"/"neutral") eases the face toward an
-//     expression and slowly decays back to neutral. The consoles already extract exactly
-//     these sentiment tags per reply, so this is driven by what's actually being said.
+//   - MOOD: SetMood("happy"/"sad"/"terrified"/"confused"/"angry"/"neutral") — big, legible
+//     full-face expressions — eases the face toward the target and decays back to neutral
+//     after a hold period. Old subtler tags (warm/funny/cold/rude) still work as aliases.
 //
 // Auto-added by GrizAnimatorLink (like MouthLipSync). Owns every blendshape EXCEPT
 // JawOpen, which stays MouthLipSync's — no fighting over the same weights.
@@ -49,6 +49,10 @@ public class FacialExpressions : MonoBehaviour
     int _browsUC = -1, _browsUL = -1, _browsUR = -1, _browsDL = -1, _browsDR = -1, _browsSq = -1;
     int _frownL = -1, _frownR = -1, _sneerL = -1, _sneerR = -1;
     int _eyeInL = -1, _eyeInR = -1, _eyeOutL = -1, _eyeOutR = -1;
+    // extra shapes for the big legible moods (happy/sad/terrified/confused/angry)
+    int _eyeOpenL = -1, _eyeOpenR = -1, _eyeDownL = -1, _eyeDownR = -1;
+    int _mouthPressL = -1, _mouthPressR = -1, _lipsStretchL = -1, _lipsStretchR = -1;
+    int _jawOpen = -1, _lipsFunnel = -1, _lipsPucker = -1, _chinRaiseL = -1, _chinRaiseR = -1, _puff = -1;
 
     readonly Dictionary<int, float> _moodTarget = new Dictionary<int, float>();
     readonly Dictionary<int, float> _current = new Dictionary<int, float>();
@@ -94,6 +98,12 @@ public class FacialExpressions : MonoBehaviour
         _sneerL = Find("sneer_l"); _sneerR = Find("sneer_r");
         _eyeInL = Find("eyein_l"); _eyeInR = Find("eyein_r");
         _eyeOutL = Find("eyeout_l"); _eyeOutR = Find("eyeout_r");
+        _eyeOpenL = Find("eyeopen_l"); _eyeOpenR = Find("eyeopen_r");
+        _eyeDownL = Find("eyedown_l"); _eyeDownR = Find("eyedown_r");
+        _mouthPressL = Find("mouthpress_l"); _mouthPressR = Find("mouthpress_r");
+        _lipsStretchL = Find("lipsstretch_l"); _lipsStretchR = Find("lipsstretch_r");
+        _jawOpen = Find("jawopen"); _lipsFunnel = Find("lipsfunnel"); _lipsPucker = Find("lipspucker");
+        _chinRaiseL = Find("chinraise_l"); _chinRaiseR = Find("chinraise_r"); _puff = Find("puff");
 
         if (_blinkL < 0)
             Debug.LogWarning("[FacialExpressions] no EyeBlink blendshapes found — this mesh may use different names; check the MouthLipSync blendshape dump.", this);
@@ -115,26 +125,49 @@ public class FacialExpressions : MonoBehaviour
         return -1;
     }
 
-    /// <summary>Ease the face toward a mood. Accepts the consoles' sentiment tags:
-    /// warm, cold, funny, rude, neutral (anything else = neutral).</summary>
+    /// <summary>Ease the face toward a mood. Big, legible emotions (happy/sad/terrified/
+    /// confused/angry) plus the original subtler social tags (warm/funny/cold/rude), which
+    /// are now aliases into the same set so nothing calling the old names breaks. Unknown/
+    /// neutral = empty target set, everything eases back to rest.</summary>
     public void SetMood(string mood)
     {
         _moodTarget.Clear();
         switch ((mood ?? "").ToLowerInvariant())
         {
+            case "happy":
             case "warm":
-                Target(_smileL, 55f); Target(_smileR, 55f);
-                Target(_browsUC, 20f); Target(_browsUL, 20f); Target(_browsUR, 20f);
+            case "funny": // funny gets the same face, just fuller — see intensity below
+                bool big = mood.Equals("funny", System.StringComparison.OrdinalIgnoreCase);
+                Target(_smileL, big ? 80f : 55f); Target(_smileR, big ? 80f : 55f);
+                Target(_cheekL, big ? 45f : 20f); Target(_cheekR, big ? 45f : 20f);
+                Target(_browsUC, big ? 30f : 20f); Target(_browsUL, big ? 35f : 20f); Target(_browsUR, big ? 35f : 20f);
                 break;
-            case "funny":
-                Target(_smileL, 75f); Target(_smileR, 75f); Target(_cheekL, 35f); Target(_cheekR, 35f);
-                Target(_browsUC, 30f); Target(_browsUL, 35f); Target(_browsUR, 35f);
+
+            case "sad":
+                Target(_browsUC, 45f); Target(_frownL, 55f); Target(_frownR, 55f);
+                Target(_mouthPressL, 20f); Target(_mouthPressR, 20f);
+                Target(_chinRaiseL, 25f); Target(_chinRaiseR, 25f); // classic "trembling chin" pucker-up
                 break;
+
+            case "terrified":
+                Target(_browsUC, 60f); Target(_browsUL, 55f); Target(_browsUR, 55f);
+                Target(_eyeOpenL, 70f); Target(_eyeOpenR, 70f); // wide eyes — the core of fear
+                Target(_lipsStretchL, 40f); Target(_lipsStretchR, 40f); // horizontal mouth stretch
+                break;
+
+            case "confused":
+                Target(_browsUL, 45f); Target(_browsDR, 35f); // one brow up, one down — quizzical
+                Target(_mouthPressL, 15f); Target(_lipsFunnel, 15f);
+                break;
+
+            case "angry":
+            case "rude":
             case "cold":
-                Target(_browsDL, 45f); Target(_browsDR, 45f); Target(_frownL, 25f); Target(_frownR, 25f);
-                break;
-            case "rude": // the player was rude — she's offended
-                Target(_browsSq, 50f); Target(_sneerL, 30f); Target(_sneerR, 30f); Target(_frownL, 30f); Target(_frownR, 30f);
+                bool full = mood.Equals("angry", System.StringComparison.OrdinalIgnoreCase);
+                Target(_browsDL, full ? 70f : 45f); Target(_browsDR, full ? 70f : 45f);
+                Target(_browsSq, full ? 55f : 15f);
+                Target(_frownL, full ? 40f : 25f); Target(_frownR, full ? 40f : 25f);
+                Target(_sneerL, full ? 35f : 10f); Target(_sneerR, full ? 35f : 10f);
                 break;
             // neutral / unknown: empty target set → everything eases back to 0
         }
@@ -180,6 +213,11 @@ public class FacialExpressions : MonoBehaviour
         EaseMoodShape(_browsUL); EaseMoodShape(_browsUR); // _browsUC handled below (shares with talk emphasis)
         EaseMoodShape(_browsDL); EaseMoodShape(_browsDR); EaseMoodShape(_browsSq);
         EaseMoodShape(_frownL); EaseMoodShape(_frownR); EaseMoodShape(_sneerL); EaseMoodShape(_sneerR);
+        EaseMoodShape(_eyeOpenL); EaseMoodShape(_eyeOpenR); EaseMoodShape(_eyeDownL); EaseMoodShape(_eyeDownR);
+        EaseMoodShape(_mouthPressL); EaseMoodShape(_mouthPressR);
+        EaseMoodShape(_lipsStretchL); EaseMoodShape(_lipsStretchR);
+        EaseMoodShape(_lipsFunnel); EaseMoodShape(_lipsPucker);
+        EaseMoodShape(_chinRaiseL); EaseMoodShape(_chinRaiseR); EaseMoodShape(_puff);
         void EaseMoodShape(int idx)
         {
             if (idx < 0) return;

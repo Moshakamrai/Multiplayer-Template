@@ -401,16 +401,17 @@ public class GrizTestConsole : MonoBehaviour
 
     static string MoodFromIntent(GrizBrain.Reply reply)
     {
-        if (reply.kickedOut) return "rude";
+        if (reply.kickedOut) return "angry";
         switch (reply.intent)
         {
             case GrizBrain.Intent.Flatter:
             case GrizBrain.Intent.Buy:
-            case GrizBrain.Intent.Accept: return "warm";
-            case GrizBrain.Intent.Insult:
-            case GrizBrain.Intent.Threaten: return "rude";
+            case GrizBrain.Intent.Accept: return "happy";
+            case GrizBrain.Intent.Threaten: return "terrified"; // a hulking merchant, genuinely rattled
+            case GrizBrain.Intent.Insult: return "angry";
             case GrizBrain.Intent.Haggle:
             case GrizBrain.Intent.Offer: return "cold";
+            case GrizBrain.Intent.Unknown: return "confused";
             default: return "neutral";
         }
     }

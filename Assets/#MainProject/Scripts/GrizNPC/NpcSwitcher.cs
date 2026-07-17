@@ -31,6 +31,17 @@ public class NpcSwitcher : MonoBehaviour
 
         public PiperVoice Piper => grizConsole != null ? grizConsole.Piper : companionConsole?.Piper;
         public GrizVoice Gibberish => grizConsole != null ? grizConsole.Voice : companionConsole?.Voice;
+
+        // The console's own AnimLink is how it drives SetMood/facial expressions (e.g. the
+        // /mood debug command, or the LLM's own sentiment tag) — in a shared-model scene
+        // this MUST be pointed at sharedModel too, or those calls silently no-op forever
+        // (the console's own AnimLink lookup is intentionally skipped when a switcher owns
+        // the shared model — see CompanionConsole.Start).
+        public void SetAnimLink(GrizAnimatorLink link)
+        {
+            if (grizConsole != null) grizConsole.AnimLink = link;
+            if (companionConsole != null) companionConsole.AnimLink = link;
+        }
     }
 
     public List<NpcEntry> npcs = new List<NpcEntry>();
@@ -79,6 +90,10 @@ public class NpcSwitcher : MonoBehaviour
             sharedModel.piper = npcs[_current].Piper;
             sharedModel.gibberish = npcs[_current].Gibberish;
             sharedModel.PushPiperToLipSync();
+            // Also give the now-active console a reference to the shared model as ITS
+            // AnimLink — otherwise SetMood() (sentiment tags, the /mood debug command)
+            // has nothing to call and silently does nothing, forever, in every switcher scene.
+            npcs[_current].SetAnimLink(sharedModel);
         }
     }
 

@@ -1,0 +1,210 @@
+# GAME DESIGN DOCUMENT: DEAD AIR (working title — evolved from TERMINAL LEAK)
+**Project Type:** 4-6 Player PURE CO-OP Voice Horror Game (no PvP, no traitors, one shared fate)
+**Status:** 2P/solo core loop BUILT and playtested; pivoting to N-player co-op
+**Visual Aesthetic:** Minimalist Cyberpunk / Psychological Horror Terminal (#0D0D11 / #a855f7 / #06b6d4)
+**Core Stack:** Unity IMGUI terminal, Mirror + FizzySteamworks (already in repo), Local Voice Pipeline
+(Vosk partials → Whisper transcription → llama-server (Qwen 7B) → Piper TTS — all offline, all shipped with the game)
+
+---
+
+## 0. THE ONE-SENTENCE PITCH
+
+4-6 thieves must talk their way through a vault run by a listening AI — but talking is the
+only tool AND the only danger, and if it outsmarts you, you all go down together.
+
+The unique tech hook: every player's voice is transcribed and re-spoken in the SAME
+synthesized machine font. Nobody sounds like themselves — which means only text/strings ever
+cross the network (no VoIP), and the hostile AI genuinely hears exactly what the players hear.
+The AI is honest: it never sees the answer. When it cracks your word, it really deduced it.
+
+---
+
+## 1. PREMISE
+
+Late cyberpunk. Corporate vaults ("Deep Grids") are physically isolated — immune to remote
+hacking. Crews of salvagers board them in person and wire a terminal rig into the data matrix.
+The vault's decaying security AI — the SENTINEL — cannot kick you out, but it wiretaps the
+crew's radio: it reads every transcript, speaks into every headset, and hunts the passwords
+you are passing between each other. To beat its locks, the crew uses LINGUISTIC CAMOUFLAGE:
+clues in metaphor and personal context that a partner can decode but a machine (hopefully)
+cannot. All crew voices are masked through identical voice fonts — in the dark, everyone,
+including the Sentinel, sounds like the same machine.
+
+---
+
+## 2. WHAT IS ALREADY BUILT (playtested, in repo under Assets/#MainProject/Scripts/TerminalLeak/)
+
+The full core loop exists as a SOLO/2P prototype (Tools > Terminal Leak > Create Solo Test Scene):
+
+### 2.1 The word task (the game's single core verb)
+- Clue-giver gets a CLASSIFIED CARD: secret word + theme tag + 2-3 BANNED words.
+- Guesser(s) get a DECRYPTED FRAGMENT: the password hidden among 7 decoys (8 candidates).
+  The Sentinel NEVER sees this list — the human picks from 8, the AI deduces from the entire
+  language. That asymmetry is the deliberate human advantage.
+- 56-card starter deck in StreamingAssets/terminal-leak/cards.json (plain JSON, trivially extendable).
+
+### 2.2 The Sentinel (SentinelAI.cs) — an honest AI opponent
+- Real deduction: the (corrupted) radio transcript goes into local llama-server; it asks probing
+  questions or commits guesses. It never sees the deck or the answer.
+- Difficulty = HEARING QUALITY, not prompt strength: corruptionByLayer masks a fraction of
+  transcript words per vault layer (45% → 25% → 0%). One tunable knob.
+- It does NOT know the card's theme tag (playtest lesson: tag + one clue = instant crack;
+  "OBJECT/WEIGHT" + "ship" = ANCHOR). Tag revealed only on the final layer ("full lock-on").
+- EXPOSURE: a wrong Sentinel guess knocks its wiretap offline for 2 full cycles — a clean
+  window. Baiting it into a confident wrong guess, then rushing the real clue through the
+  deaf window, is a legitimate and discovered-by-players strategy.
+- It is barred from guessing before it has actually heard 2 transmissions.
+- ESCALATING MEMORY: after each cracked layer it writes a one-sentence style note on the crew
+  ("they hide words in kitchen anecdotes") and uses those notes on later layers. It opens each
+  new layer with a generated personal line built from them.
+- Villain flip: when it cracks a word its Piper voice drops to an unhinged overlord pitch.
+
+### 2.3 Strict turn structure (playtest lesson: real-time = chaos + TTS overlap)
+- Phase 1 cycle: INTEL transmission (speak) → OPERATOR inquiry (speak a question or type/click
+  a guess, or PASS) → SENTINEL inquiry (one line) → repeat. Mic is dead off-turn.
+- Global speech queue: one voice speaks at a time, everyone waits for the line to finish.
+
+### 2.4 Economies and consequences
+- RADIO TOKENS (shared, 12/card): every transmission and wrong guess burns one. 0 = breach.
+  Radio time literally feeds the trace.
+- BANNED WORDS (Taboo rule): say one on air and the wiretap LOCKS ON — that line reaches the
+  Sentinel fully uncorrupted. Clue-giving is a skill, not free association.
+- Saying the actual password out loud on the radio = instant breach (the fiction's own rule;
+  typed/clicked guesses are safe because the terminal is silent — the wire is not).
+- DATA SHARDS: leftover tokens convert to score on every crack. End-of-run haul screen.
+- SALVAGE PICKS (roguelite): each cracked layer offers 1 of 3 perks for the next, harder
+  layer — SPARE CELL (+3 tokens), TWIN JAMMER, PROBE KIT (tap-trace recharge), STATIC VEIL
+  (+15% corruption), GHOST FEED (wiretap starts offline 1 cycle).
+
+### 2.5 Crew gadgets (spendable tools)
+- JAMMER (1/card): next transmission is guaranteed clean — spend it on THE clue.
+- TAP-TRACE (1/run): forces the Sentinel to dump its top-3 suspect words. Honest and terrifying.
+- DECOY (1/card, 1 token): a typed fake clue only the wiretap hears. Chains with EXPOSURE:
+  poison its reasoning → bait the wrong guess → rush the real clue through the deaf window.
+
+### 2.6 The breach minigame (VISUAL OVERRIDE — becomes the RETRIEVAL task in co-op)
+- Turn-based, 60s: crew describes/discusses 4 abstract images vs 4 shuffled descriptions;
+  the Sentinel answers ONCE per crew line with context-aware misdirection.
+- VOICE-MASK IMPERSONATION (built, key tech): 40% of its lines are delivered through the
+  CREW'S OWN voice font, first person, urgent, wrong — labeled "OPERATOR▒" (the ▒ is the only
+  tell; in 2P+ the audio tell disappears entirely because all masks sound identical).
+- Placeholder art is procedural; any PNGs dropped in StreamingAssets/terminal-leak/images/
+  are used automatically (filename = description).
+
+### 2.7 Presentation
+- Cold open boot crawl + Sentinel first contact ("I see two heat signatures. Talk amongst
+  yourselves. I will listen.").
+- Full terminal feed, turn indicators, token/shard header, composing preview of live speech.
+
+### 2.8 Key playtest findings that shaped all of the above
+- The theme tag leak made the AI look superhuman (ANCHOR cracked off one clue). Fixed.
+- Private/shared human context ("the thing I had last week, remember?") is unbeatable by the
+  AI — a flaw in a competitive 2P game, but a FEATURE in co-op (see 3.4).
+- Players spontaneously started playing "which voice is the machine" — the voice masks are
+  the game's real identity, keep them forever.
+- LLM latency is invisible inside turn-based structure. Never go real-time chat.
+
+---
+
+## 3. WHERE WE ARE GOING: DEAD AIR — 4-6 PLAYER PURE CO-OP
+
+Design principles locked after the pivot discussion:
+- PURE CO-OP. No hidden roles, no traitor, no voting, no PvP. Humans vs the house.
+- NOBODY DIES. Consequences are SILENCE and RESCUE, not elimination.
+- ONE SHARED LOSS. The crew wins together or loses together, always.
+- SMALL SCOPE. This is the 2P loop scaled to N players — not a new game.
+
+### 3.1 The loop (one loop only)
+1. A vault lock appears. ONE player is dealt the CARD (word + banned words). Everyone else
+   sees the CANDIDATE FRAGMENT (8 words).
+2. The clue-giver describes on their turn; other players, on their turns, may ask questions
+   (radio — heard by the Sentinel, burns trace) or commit a guess (terminal — silent).
+   First correct guess cracks the lock.
+3. The Sentinel hears everything and races the crew.
+4. Crack all locks before the trace completes = extraction, crew wins.
+
+### 3.2 SILENCED, not killed (replaces the 2P breach-loss)
+If the Sentinel cracks the word first, the CLUE-GIVER IS SILENCED: comms captured, their voice
+comes out as static. They hear everything, can say nothing. They stay in the game, at their
+terminal, dying to talk.
+
+RETRIEVAL: teammates restore a silenced player by clearing the Visual Override task (already
+built — 4 images vs 4 descriptions while the Sentinel lies, including in the crew's own
+voice). Retrieval costs time and radio — rescuing a friend feeds the trace.
+
+### 3.3 The one shared loss: the TRACE
+A single trace meter for the whole crew. It rises with every transmission, banned-word slip,
+failed guess, and retrieval. Trace full = run over for everyone. ALL players silenced at
+once = instant loss. There are no individual deaths and no survivors — one fate.
+
+### 3.4 Why 4-6 players makes THIS design better (not just bigger)
+- Shared private context is now LEGAL AND ENCOURAGED: "the thing from Rafi's birthday" is a
+  legitimate super-clue in co-op — someone in the crew will get it, the machine never will.
+  The exact thing that broke competitive 2P becomes the co-op power fantasy.
+- More voices = more clue angles, but every voice burns shared trace and feeds the wiretap.
+  The real group skill is RADIO DISCIPLINE: who speaks, who stays quiet, when silence is
+  the right play.
+- Rescue decisions create the co-op dilemma: push the next lock with fewer voices, or spend
+  trace to get your friend's voice back?
+- Salvage picks become ONE shared team decision between locks.
+
+### 3.5 What stays exactly as built
+Word task, candidate fragments, banned words, tokens→trace, exposure/bait play, gadgets,
+salvage, shards, memory, opening gambits, speech queue, impersonation, terminal UI, cold open.
+
+### 3.6 New work required (the honest, small list)
+- Player seats over Mirror/Steam (strings only — transcripts, guesses, state; no VoIP).
+- N-player turn management (rotating clue-giver per lock; inquiry turn order).
+- SILENCED state + retrieval flow (re-skin of existing breach flow).
+- Shared TRACE meter (re-skin of the token economy at run scope).
+- A local "table read" mode first: one human + keyboard stand-in seats, zero networking,
+  to validate N-player turn flow before wiring Mirror.
+
+### 3.7 Build order
+1. Table-read mode (local, N seats, full loop) — validate fun.
+2. Mirror sync of the same state machine (host runs Sentinel; clients only need Piper + mic).
+3. Steam lobby wiring (SteamLobby.cs + FizzySteamworks already in repo).
+4. Art pass: pre-generated horror PNG pack for the override task; TMP font for the terminal.
+5. Playtest at 4 players → tune trace rates, corruption, candidate count (8 → 12 if too easy).
+
+---
+
+## 4. PARKED IDEAS (deliberately cut from launch scope — potential MODES later)
+
+Recorded so they aren't relitigated; none of these ship in v1:
+- THE HANDLER: a hidden human traitor allied with the Sentinel, earning sabotage powers by
+  looking helpful (forged logs, muted seats, leaked cards, phantom votes). Turns the game
+  into social deduction. Strong design, wrong scope — possible "Traitor Mode" after co-op ships.
+- BERSERK: openly accusing the AI on air enrages it (sharper hearing, faster trace), forcing
+  the crew to discuss the machine in coded speech. Pairs with the Handler mode.
+- Deception stack v2: full style-theft (AI copies a specific player's slang/texture),
+  ASR-laundering of its text, corrupted speaker labels during breach, codeword rituals as
+  counterplay. The impersonation foundation is already built.
+- Runtime image generation for override panels (5th subprocess, VRAM contention — offline
+  pre-generation is the sane version).
+- Two-word passphrases / per-layer card types as difficulty escalation.
+
+---
+
+## 5. TUNING KNOBS (all inspector fields, live-editable in play mode)
+
+- SentinelAI.corruptionByLayer — the ONE difficulty knob (hearing quality per layer)
+- SentinelAI.minCluesBeforeGuess / exposureTransmissions — guess pacing and bait-window size
+- TerminalLeakConsole.tokensPerCard (→ trace rate in co-op), overrideSeconds, vaultLayers
+- Candidate count (8 default; raise to 12, or draw decoys from the same tag family, if the
+  fragment makes guessing too easy)
+- Impersonation rate in the override (40% default)
+
+---
+
+## 6. ENGINE PROMPT CONFIGURATIONS (as implemented)
+
+Phase-1 turn (SentinelAI.TurnSystemPrompt): wiretapping AI, sees corrupted transcript, replies
+with exactly one line — "QUERY: <probing question>" or "GUESS: <single word>" — warned that
+wrong guesses expose it, barred from guessing early, given its crew style notes, NEVER given
+the theme tag (except final layer) and NEVER the candidate list.
+
+Override misdirection (MisdirectSystemPrompt / ImpersonateSystemPrompt): one line per crew
+turn, reacting to what was actually said; 40% of turns delivered disguised as the crew's own
+voice, first person, pushing the wrong option. Canned fallbacks guarantee pressure never
+stalls on a slow generation.

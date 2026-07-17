@@ -18,6 +18,15 @@ public class SuspectBrain : MonoBehaviour
 
     [Header("Identity")]
     public string suspectName = "Suspect";
+
+    [Header("Presentation — the movie feel")]
+    [TextArea(2, 4)]
+    [Tooltip("Authored cold-open line spoken the first time this suspect's interview begins — every character enters like a scene, not a chatbot.")]
+    public string openingLine = "";
+    [Tooltip("Piper voice model filename substring for THIS suspect (e.g. \"amy\", \"alba\", \"northern_english_male\"). Distinct voices per suspect — drop extra .onnx voices into StreamingAssets/piper.")]
+    public string voiceModelContains = "en_";
+    [Range(0.5f, 1.5f)] public float voicePitch = 1f;
+    [Range(0.5f, 1.5f)] public float voiceLengthScale = 1f;
     [TextArea(8, 24)]
     [Tooltip("Full character bible for this suspect — passed as the LLM system prompt. " +
              "Persona, speech patterns, how they act under pressure, per the GDD §3 entry.")]
@@ -43,6 +52,8 @@ public class SuspectBrain : MonoBehaviour
     [TextArea(2, 6)] public string falseGiveHint = "";     // always in prompt: what this suspect will offer up under generic pressure
     [TextArea(2, 6)] public string falseGiveContent = "";  // the actual confession text/fact, revealed once
     [Range(0f, 100f)] public float falseGiveAtPatience = 60f; // fires once patience drops below this, before the real break
+    [Tooltip("SHORT one-line version for the board card (\"ain't no one gonna read that much\") — the full content goes to the LLM, this goes to the players.")]
+    public string falseGiveCardText = "";
     public bool FalseGiveUsed { get; private set; }
 
     [Header("The real secret — the GDD's true-crime-relevant fact")]
@@ -52,6 +63,8 @@ public class SuspectBrain : MonoBehaviour
     [Range(0f, 100f)] public float breaksAtPatience = 20f;
     [Tooltip("If set, ONLY these evidence ids (see CaseBoard) can break this suspect — pressure alone never cracks them (GDD §3.4, Finch).")]
     public List<string> requiredEvidenceIds = new List<string>();
+    [Tooltip("SHORT one-line version of the broken-state reveal for the board card.")]
+    public string secretCardText = "";
     public bool BrokenState { get; private set; }
 
     [Header("Broken-state voice/tone note (fed to the LLM once broken)")]
@@ -62,6 +75,7 @@ public class SuspectBrain : MonoBehaviour
     {
         public string aboutWhom;             // "Higgins", "the Vicar"... matches another suspect's name/role
         [TextArea(2, 6)] public string belief; // what THIS suspect believes/suspects about them — may be wrong
+        public string beliefCard;            // SHORT one-line version for the board card
     }
 
     [Header("Cross-suspect finger-pointing — genuine opinions, possibly wrong, NOT load-bearing " +

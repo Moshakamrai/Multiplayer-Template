@@ -74,6 +74,17 @@ public class InterrogationConsole : MonoBehaviour
             go.transform.SetParent(transform, false);
             Voice = go.AddComponent<PiperVoice>();
         }
+        if (Voice != null && Brain != null)
+        {
+            // Per-suspect voice: distinct Piper model + delivery per character (GDD asset
+            // list: "4x distinct Piper voice profiles"). Route through englishModelContains
+            // + UseLanguage so the resolver re-runs with this suspect's substring — falls
+            // back gracefully to whatever voice IS installed if the named one isn't yet.
+            Voice.englishModelContains = string.IsNullOrEmpty(Brain.voiceModelContains) ? "en_" : Brain.voiceModelContains;
+            Voice.pitch = Brain.voicePitch;
+            Voice.lengthScale = Brain.voiceLengthScale;
+            Voice.UseLanguage("en");
+        }
         if (Vosk != null)
         {
             Vosk.OnTranscriptionResult += OnFinalResult;
@@ -90,12 +101,31 @@ public class InterrogationConsole : MonoBehaviour
         }
     }
 
+    bool _openingSaid;
+
     /// <summary>Called by CaseRunner/UI when this suspect's interrogation slot starts.</summary>
     public void BeginInterview()
     {
         Active = true;
         _history.Clear();
         if (Vosk != null) Vosk.StartRecordingManual();
+        // The cold open: every character enters like a scene. Authored, once per case —
+        // spoken the moment the voice is actually ready (Start-order safe).
+        if (!_openingSaid && Brain != null && !string.IsNullOrEmpty(Brain.openingLine))
+        {
+            _openingSaid = true;
+            StartCoroutine(SpeakOpening());
+        }
+    }
+
+    IEnumerator SpeakOpening()
+    {
+        float deadline = Time.time + 12f;
+        while (Voice == null && Time.time < deadline) yield return null;
+        string line = Brain.openingLine;
+        _history.Add($"{Brain.suspectName}: {line}");
+        OnLine?.Invoke(Brain.suspectName, line);
+        if (Voice != null && Voice.Available) Voice.Speak(line);
     }
 
     public void EndInterview()
@@ -225,6 +255,8 @@ public class InterrogationConsole : MonoBehaviour
                         "do you suspect", "what about", "your opinion of", "your opinion on") > 0;
     }
 
+    string _lastSuspectLine = "";
+
     IEnumerator GenerateThenSpeak(string playerText, SuspectBrain.PressureResult result, SuspectBrain.Suspicion suspicion = null)
     {
         string facts = Brain.BuildFactsCage(suspicion);
@@ -236,11 +268,28 @@ public class InterrogationConsole : MonoBehaviour
                 "Never state facts outside YOUR GUARDED SECRET/FALSE GIVE/CURRENT PATIENCE context above. " +
                 $"Write {Brain.suspectName}'s next line now:",
             maxTokens: 90, temperature: 0.75f);
+
+        // Repetition guard (same failure Sana had — observed live: the identical "Dr.
+        // Finch, always so busy with his little experiments" line three turns in a row,
+        // because each repeat becomes the next turn's own context). One retry at lower
+        // temperature with an explicit say-something-different instruction.
+        if (!string.IsNullOrWhiteSpace(gen) && IsNearDuplicate(gen, _lastSuspectLine))
+        {
+            string retry = null;
+            yield return Llm.GenerateReply(string.Join("\n", _history), facts, (t, ok) => { if (ok) retry = t; },
+                systemPromptOverride: Brain.persona, npcName: Brain.suspectName,
+                closingInstruction:
+                    "Your previous attempt REPEATED your own last line. Say something DIFFERENT that " +
+                    $"actually answers what was just asked. Write {Brain.suspectName}'s next line now:",
+                maxTokens: 90, temperature: 0.55f);
+            if (!string.IsNullOrWhiteSpace(retry)) gen = retry;
+        }
         _pendingRequests--;
 
         string line = string.IsNullOrWhiteSpace(gen)
             ? "(hesitates, loses their train of thought for a moment) ...I'm sorry, what was the question?"
             : gen.Trim();
+        _lastSuspectLine = line;
 
         _history.Add($"{Brain.suspectName}: {line}");
         OnLine?.Invoke(Brain.suspectName, line);
@@ -249,14 +298,62 @@ public class InterrogationConsole : MonoBehaviour
         if (Board != null)
         {
             int round = Runner != null ? Runner.RoundIndex : 0;
-            Board.AddCard(Brain.suspectName, line, "statement", round);
-            if (result.falseGiveTriggered && !string.IsNullOrEmpty(Brain.falseGiveContent))
-                Board.AddCard(Brain.suspectName, Brain.falseGiveContent, "false-give", round, isFalseGive: true);
-            if (result.brokenTriggered && !string.IsNullOrEmpty(Brain.secretContent))
-                Board.AddCard(Brain.suspectName, Brain.secretContent, "broken-reveal", round, isBrokenReveal: true);
+            // Board cards are SHORT, gamified one-liners — authored where possible (false
+            // give / broken / opinions), LLM-compressed for ordinary statements, and only
+            // carded at all when they contain an actual claim. The full text lives in the
+            // transcript; the board is for scanning, not reading.
+            if (result.falseGiveTriggered)
+                Board.AddCard(Brain.suspectName, CardText(Brain.falseGiveCardText, Brain.falseGiveContent),
+                    "false-give", round, isFalseGive: true);
+            if (result.brokenTriggered)
+                Board.AddCard(Brain.suspectName, CardText(Brain.secretCardText, Brain.secretContent),
+                    "broken-reveal", round, isBrokenReveal: true);
             if (suspicion != null)
-                Board.AddCard(Brain.suspectName, $"On {suspicion.aboutWhom}: {suspicion.belief}", "accusation", round);
+                Board.AddCard(Brain.suspectName, $"On {suspicion.aboutWhom}: {CardText(suspicion.beliefCard, suspicion.belief)}",
+                    "accusation", round);
+            if (!result.falseGiveTriggered && !result.brokenTriggered && suspicion == null)
+                StartCoroutine(SummarizeToCard(line, round));
         }
+    }
+
+    static string CardText(string shortVersion, string fullVersion) =>
+        string.IsNullOrWhiteSpace(shortVersion) ? fullVersion : shortVersion;
+
+    // Ordinary statements get compressed to a one-line claim by the LLM before landing on
+    // the board — and statements with no concrete claim (pleasantries, deflection) don't
+    // land at all, so the board only ever holds things worth comparing.
+    IEnumerator SummarizeToCard(string line, int round)
+    {
+        string summary = null;
+        yield return Llm.GenerateReply(
+            $"STATEMENT BY {Brain.suspectName}:\n{line}", "",
+            (t, ok) => { if (ok) summary = t; },
+            systemPromptOverride:
+                "You compress interview statements into case-board cards. Reply with ONE third-person " +
+                "factual claim of at most 12 words (e.g. \"Says she was in the garden at 9 PM.\"). " +
+                "If the statement contains NO concrete claim (no time, place, person, or action — " +
+                "just pleasantries or deflection), reply with exactly: NO CLAIM",
+            npcName: "CARD",
+            closingInstruction: "\nWrite the card text (or NO CLAIM) now:",
+            maxTokens: 24, temperature: 0.2f);
+        if (string.IsNullOrWhiteSpace(summary)) yield break;
+        summary = summary.Trim().Trim('"');
+        if (summary.ToUpperInvariant().Contains("NO CLAIM")) yield break;
+        foreach (var c in Board.Cards) // don't re-card the same claim twice
+            if (c.suspectName == Brain.suspectName && IsNearDuplicate(summary, c.text)) yield break;
+        Board.AddCard(Brain.suspectName, summary, "statement", round);
+    }
+
+    // Word-overlap near-duplicate check, ported from CompanionConsole's repetition guard.
+    static bool IsNearDuplicate(string a, string b)
+    {
+        if (string.IsNullOrWhiteSpace(a) || string.IsNullOrWhiteSpace(b)) return false;
+        var wordsA = new HashSet<string>(a.ToLowerInvariant().Split(' '));
+        var wordsB = new HashSet<string>(b.ToLowerInvariant().Split(' '));
+        if (wordsA.Count < 4 || wordsB.Count < 4) return false;
+        int overlap = 0;
+        foreach (var w in wordsA) if (wordsB.Contains(w)) overlap++;
+        return (float)overlap / Mathf.Min(wordsA.Count, wordsB.Count) > 0.6f;
     }
 
     static string ExtractText(string json)

@@ -95,6 +95,15 @@ public static class GnomesSceneBuilder
             "HARD RULES: never say you are an AI or a language model. No stage directions in asterisks " +
             "beyond a short parenthetical if truly needed. Keep replies to 1-3 sentences, spoken aloud, " +
             "in character, reacting to exactly what was just said.";
+        pemberton.openingLine =
+            "Oh! An investigator, in my little shed — how thrilling. Terrible business of course, " +
+            "poor Reginald, simply terrible. Tea? No? Well. Ask away, dear — I see everything from " +
+            "this window, you know.";
+        // Female voice: drop en_GB-alba-medium.onnx (or en_US-amy-medium) into
+        // StreamingAssets/piper — falls back to whatever IS installed until then.
+        pemberton.voiceModelContains = "alba";
+        pemberton.voicePitch = 1.12f;      // bright, chatty
+        pemberton.voiceLengthScale = 0.95f; // slightly quick — she talks like a gossip
         pemberton.weakness = SuspectBrain.PressureAxis.Flattery;
         pemberton.wrongAxisCost = 4f;
         pemberton.bluntCost = 7f; // blunt pressure actively backfires on her per the GDD
@@ -106,6 +115,7 @@ public static class GnomesSceneBuilder
         pemberton.falseGiveContent =
             "Mrs. Pemberton admits she's spread rumors that Lady Constance's marriage to Reginald was " +
             "loveless and that she 'wouldn't be surprised if the widow found comfort elsewhere.'";
+        pemberton.falseGiveCardText = "Admits spreading rumors that the Ravenscroft marriage was loveless.";
         pemberton.breaksAtPatience = 20f;
         pemberton.secretHint =
             "She has been sneaking onto the Ravenscroft grounds at night for weeks, stealing one of " +
@@ -116,6 +126,7 @@ public static class GnomesSceneBuilder
             "Mrs. Pemberton confesses to the gnome prank war — AND, almost as an aside now that she's " +
             "relieved to have that off her chest, mentions she saw Dr. Finch near the study, after the " +
             "dinner had already ended, earlier than he claims in his own account of that night.";
+        pemberton.secretCardText = "Gnome thief confessed — AND saw Finch near the study after dinner ended.";
         pemberton.brokenStateDirection =
             "Relief and laughter — you're no longer performing, you're rambling, half-laughing at " +
             "yourself for how small your real secret turns out to be.";
@@ -130,20 +141,23 @@ public static class GnomesSceneBuilder
                 aboutWhom = "Constance",
                 belief = "She thinks Lady Constance's grief is 'a touch theatrical' and privately suspects " +
                           "the marriage was unhappy — she has no real evidence, just neighborly gossip and " +
-                          "a good eye for performance."
+                          "a good eye for performance.",
+                beliefCard = "Thinks the widow's grief looks theatrical. (No evidence.)"
             },
             new SuspectBrain.Suspicion
             {
                 aboutWhom = "Higgins",
                 belief = "She finds the butler 'oddly twitchy lately' and jokes that 'the quiet ones always " +
-                         "have a ledger of their own' — pure hunch, she has no idea about his gambling debt."
+                         "have a ledger of their own' — pure hunch, she has no idea about his gambling debt.",
+                beliefCard = "Finds the butler 'oddly twitchy lately'. (Pure hunch.)"
             },
             new SuspectBrain.Suspicion
             {
                 aboutWhom = "Finch",
                 belief = "She genuinely likes Dr. Finch and initially waves off any suspicion of him as " +
                          "'the one decent man in that house' — until/unless her own secret breaks, at " +
-                         "which point her actual sighting of him near the study becomes available instead."
+                         "which point her actual sighting of him near the study becomes available instead.",
+                beliefCard = "Defends Dr. Finch: 'the one decent man in that house'."
             },
         };
 

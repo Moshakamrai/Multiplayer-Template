@@ -37,8 +37,20 @@ public class CaseBoardUI : MonoBehaviour
             Board.OnSuspicionLoopFound += l => Toast($"SUSPICION LOOP: {l.a.suspectName} ⇄ {l.b.suspectName} — check the board");
         }
         if (ActiveConsole != null)
+        {
             ActiveConsole.OnLine += (who, text) => _transcript.Add((who, text));
+            ActiveConsole.OnPressureRead += (matched, kind) =>
+            {
+                _pressureFlash = matched
+                    ? $"🔓 that landed — she's opening up ({kind})"
+                    : $"🔒 not working — try a different approach (that was read as {kind})";
+                _pressureFlashUntil = Time.time + 3.5f;
+            };
+        }
     }
+
+    string _pressureFlash = "";
+    float _pressureFlashUntil;
 
     void Toast(string msg)
     {
@@ -103,6 +115,11 @@ public class CaseBoardUI : MonoBehaviour
 
         if (Runner.CurrentPhase == CaseRunner.Phase.Interrogation && ActiveConsole != null)
         {
+            if (Time.time < _pressureFlashUntil)
+            {
+                string flashColor = _pressureFlash.StartsWith("🔓") ? GREEN : "#facc15";
+                GUILayout.Label($"<color={flashColor}>{_pressureFlash}</color>", rich);
+            }
             GUILayout.BeginHorizontal();
             GUI.SetNextControlName("interrogationInput");
             _typed = GUILayout.TextField(_typed, GUILayout.Height(36 * k));

@@ -43,6 +43,7 @@ public class InterrogationConsole : MonoBehaviour
 
     public bool Active { get; private set; } = true;
     public event Action<string, string> OnLine; // (who, text) — "YOU" or the suspect's name
+    public event Action<bool, SuspectBrain.PressureKind> OnPressureRead; // (axisMatched, kind) — lets the UI say "this isn't working" instead of a silent stall
 
     void Awake()
     {
@@ -240,6 +241,7 @@ public class InterrogationConsole : MonoBehaviour
                            (Board == null || Board.IsEvidenceDiscovered(evidenceId));
         var kind = ClassifyPressure(playerText, hasEvidence);
         var result = Brain.ApplyPressure(kind, hasEvidence ? evidenceId : null);
+        OnPressureRead?.Invoke(result.axisMatched, kind);
 
         if (result.endedEarly)
         {

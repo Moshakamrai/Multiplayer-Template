@@ -21,6 +21,10 @@ public class InterrogationConsole : MonoBehaviour
     public SuspectBrain Brain;
     public CaseBoard Board;
     public CaseRunner Runner;
+    [Tooltip("Optional 3D bust (blendshape model) for this suspect — same GrizAnimatorLink " +
+             "stack as the GrizNPC scenes (blinking/lipsync/facial expressions). Purely " +
+             "cosmetic: the interrogation loop runs identically with or without one.")]
+    public GrizAnimatorLink AnimLink;
 
     [Header("Utterance timing (same tuning as the NPC consoles)")]
     public float silenceToSendSeconds = 1f;
@@ -84,6 +88,12 @@ public class InterrogationConsole : MonoBehaviour
             Voice.pitch = Brain.voicePitch;
             Voice.lengthScale = Brain.voiceLengthScale;
             Voice.UseLanguage("en");
+        }
+        if (AnimLink == null) AnimLink = GetComponentInChildren<GrizAnimatorLink>();
+        if (AnimLink != null)
+        {
+            AnimLink.piper = Voice;
+            AnimLink.PushPiperToLipSync(); // wires MouthLipSync/FacialExpressions to THIS suspect's voice
         }
         if (Vosk != null)
         {

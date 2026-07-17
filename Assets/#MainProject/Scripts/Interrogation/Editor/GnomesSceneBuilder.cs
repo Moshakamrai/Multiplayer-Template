@@ -167,6 +167,32 @@ public static class GnomesSceneBuilder
         console.Brain = pemberton;
         console.Board = board;
 
+        // ── Bust: reuse the Gunan_animated blendshape model from the GrizNPC scenes —
+        // same FBX, same GrizAnimatorLink/MouthLipSync/FacialExpressions stack. No shop/
+        // sword logic here (useAnimatorStates = false, same as Sana's CompanionConsole) —
+        // she just sits, blinks, lipsyncs, and emotes through an interview.
+        var modelAsset = AssetDatabase.LoadAssetAtPath<GameObject>(
+            "Assets/#MainProject/Models/BlendshapeModels/source/Gunan_animated.fbx");
+        if (modelAsset != null)
+        {
+            var model = (GameObject)PrefabUtility.InstantiatePrefab(modelAsset);
+            model.name = "Pemberton (bust)";
+            model.transform.SetParent(pembertonGO.transform, false);
+
+            var animator = model.GetComponentInChildren<Animator>();
+            if (animator == null) animator = model.AddComponent<Animator>();
+
+            var animLink = model.AddComponent<GrizAnimatorLink>();
+            animLink.animator = animator;
+            animLink.useAnimatorStates = false; // interrogation suspect: no shop/sword states
+            console.AnimLink = animLink; // console.Start() finishes the wiring once Voice exists
+        }
+        else
+        {
+            Debug.LogWarning("[Gnomes & Gaslight] Gunan_animated.fbx not found at the expected path — " +
+                              "scene built without a bust. Assign one manually or fix the path in GnomesSceneBuilder.");
+        }
+
         var runnerGO = new GameObject("CaseRunner");
         var runner = runnerGO.AddComponent<CaseRunner>();
         runner.board = board;

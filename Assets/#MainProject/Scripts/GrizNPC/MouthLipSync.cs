@@ -127,26 +127,37 @@ public class MouthLipSync : MonoBehaviour
         }
     }
 
+    PiperVoice[] _allVoices;
+    float _nextVoiceScan;
+
     AudioSource ActiveSource
     {
         get
         {
             if (explicitSource != null) return explicitSource;
-            // PiperVoice is often created at RUNTIME on a different GameObject (e.g. by
-            // GrizTestConsole/CompanionConsole, as a child of the object holding the brain)
-            // — GetComponent/GetComponentInParent in Start() can miss it entirely, or
-            // Start()-ordering between sibling components can leave piperVoice null even
-            // when it exists. Re-resolve globally until we actually have one.
-            // NOTE: FindObjectOfType grabs the FIRST PiperVoice in the scene — fine for the
-            // current one-NPC-per-scene test setup (GrizTest, CompanionTest), but if you
-            // ever put two talking NPCs in the SAME scene, assign 'piperVoice' explicitly
-            // per-character instead of relying on this auto-find.
-            if (piperVoice == null) piperVoice = FindObjectOfType<PiperVoice>();
+            // PiperVoice is often created at RUNTIME on a different GameObject — and on a
+            // SHARED model (NpcSwitcher), the assigned voice can belong to a PAUSED NPC
+            // while the audible line plays through another NPC's PiperVoice. So: trust the
+            // assigned voice while it's actually playing, otherwise fall back to whichever
+            // PiperVoice in the scene IS playing right now. Self-healing, no wiring order
+            // assumptions.
+            if (piperVoice != null && piperVoice.Source != null && piperVoice.Source.isPlaying)
+                return piperVoice.Source;
+            if (_allVoices == null || Time.unscaledTime >= _nextVoiceScan)
+            {
+                _allVoices = FindObjectsOfType<PiperVoice>();
+                _nextVoiceScan = Time.unscaledTime + 2f;
+            }
+            foreach (var pv in _allVoices)
+                if (pv != null && pv.Source != null && pv.Source.isPlaying) return pv.Source;
             return piperVoice != null ? piperVoice.Source : null;
         }
     }
 
-    void Update()
+    // LateUpdate, NOT Update: the Animator evaluates between the two, and any animation
+    // clip that binds face properties would stomp weights written in Update every frame —
+    // the classic "mouth stopped moving when the Animator got real states" regression.
+    void LateUpdate()
     {
         var src = ActiveSource;
         float target = 0f;

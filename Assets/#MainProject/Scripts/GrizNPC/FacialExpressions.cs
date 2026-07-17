@@ -140,12 +140,39 @@ public class FacialExpressions : MonoBehaviour
 
     void Target(int idx, float weight) { if (idx >= 0) _moodTarget[idx] = weight; }
 
-    void Update()
+    PiperVoice[] _allVoices;
+    float _nextVoiceScan;
+
+    // Same trick as MouthLipSync.ActiveSource: trust the assigned voice while it's
+    // playing, else find whichever PiperVoice in the scene IS playing (shared-model
+    // NpcSwitcher scenes can leave us pointing at a paused NPC's silent voice).
+    AudioSource ActiveSource
+    {
+        get
+        {
+            if (piperVoice != null && piperVoice.Source != null && piperVoice.Source.isPlaying)
+                return piperVoice.Source;
+            if (_allVoices == null || Time.unscaledTime >= _nextVoiceScan)
+            {
+                _allVoices = FindObjectsOfType<PiperVoice>();
+                _nextVoiceScan = Time.unscaledTime + 2f;
+            }
+            foreach (var pv in _allVoices)
+                if (pv != null && pv.Source != null && pv.Source.isPlaying) return pv.Source;
+            return piperVoice != null ? piperVoice.Source : null;
+        }
+    }
+
+    // LateUpdate, NOT Update: the Animator evaluates between the two and stomps any
+    // blendshape weights written in Update if a clip binds face properties — the reason
+    // blinking/brows/mouth all died when the model's Animator got real states.
+    void LateUpdate()
     {
         if (face == null) return;
 
-        // ── mood easing (+ slow decay back to neutral after the hold period) ──
-        float decay = Time.time - _moodSetTime > moodHoldSeconds ? 0.35f : 1f;
+        // ── mood easing (+ decay fully back to neutral after the hold period) ──
+        float over = Time.time - _moodSetTime - moodHoldSeconds;
+        float decay = over <= 0f ? 1f : Mathf.Clamp01(1f - over / 8f);
         EaseMoodShape(_smileL); EaseMoodShape(_smileR); EaseMoodShape(_cheekL); EaseMoodShape(_cheekR);
         EaseMoodShape(_browsDL); EaseMoodShape(_browsDR); EaseMoodShape(_browsSq);
         EaseMoodShape(_frownL); EaseMoodShape(_frownR); EaseMoodShape(_sneerL); EaseMoodShape(_sneerR);
@@ -161,7 +188,7 @@ public class FacialExpressions : MonoBehaviour
 
         // ── talking brow emphasis (live loudness, same trick as MouthLipSync) ──
         float browTarget = 0f;
-        var src = piperVoice != null ? piperVoice.Source : null;
+        var src = ActiveSource;
         if (src != null && src.isPlaying)
         {
             src.GetOutputData(_samples, 0);

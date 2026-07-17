@@ -46,7 +46,7 @@ public class FacialExpressions : MonoBehaviour
     // found blendshape indices (-1 = not present on this mesh)
     int _blinkL = -1, _blinkR = -1;
     int _smileL = -1, _smileR = -1, _cheekL = -1, _cheekR = -1;
-    int _browsUC = -1, _browsDL = -1, _browsDR = -1, _browsSq = -1;
+    int _browsUC = -1, _browsUL = -1, _browsUR = -1, _browsDL = -1, _browsDR = -1, _browsSq = -1;
     int _frownL = -1, _frownR = -1, _sneerL = -1, _sneerR = -1;
     int _eyeInL = -1, _eyeInR = -1, _eyeOutL = -1, _eyeOutR = -1;
 
@@ -87,7 +87,8 @@ public class FacialExpressions : MonoBehaviour
         _blinkL = Find("eyeblink_l"); _blinkR = Find("eyeblink_r");
         _smileL = Find("mouthsmile_l"); _smileR = Find("mouthsmile_r");
         _cheekL = Find("cheeksquint_l"); _cheekR = Find("cheeksquint_r");
-        _browsUC = Find("browsu_c"); _browsDL = Find("browsd_l"); _browsDR = Find("browsd_r");
+        _browsUC = Find("browsu_c"); _browsUL = Find("browsu_l"); _browsUR = Find("browsu_r");
+        _browsDL = Find("browsd_l"); _browsDR = Find("browsd_r");
         _browsSq = Find("browssqueeze");
         _frownL = Find("mouthfrown_l"); _frownR = Find("mouthfrown_r");
         _sneerL = Find("sneer_l"); _sneerR = Find("sneer_r");
@@ -122,10 +123,12 @@ public class FacialExpressions : MonoBehaviour
         switch ((mood ?? "").ToLowerInvariant())
         {
             case "warm":
-                Target(_smileL, 55f); Target(_smileR, 55f); Target(_browsUC, 20f);
+                Target(_smileL, 55f); Target(_smileR, 55f);
+                Target(_browsUC, 20f); Target(_browsUL, 20f); Target(_browsUR, 20f);
                 break;
             case "funny":
-                Target(_smileL, 75f); Target(_smileR, 75f); Target(_cheekL, 35f); Target(_cheekR, 35f); Target(_browsUC, 30f);
+                Target(_smileL, 75f); Target(_smileR, 75f); Target(_cheekL, 35f); Target(_cheekR, 35f);
+                Target(_browsUC, 30f); Target(_browsUL, 35f); Target(_browsUR, 35f);
                 break;
             case "cold":
                 Target(_browsDL, 45f); Target(_browsDR, 45f); Target(_frownL, 25f); Target(_frownR, 25f);
@@ -174,6 +177,7 @@ public class FacialExpressions : MonoBehaviour
         float over = Time.time - _moodSetTime - moodHoldSeconds;
         float decay = over <= 0f ? 1f : Mathf.Clamp01(1f - over / 8f);
         EaseMoodShape(_smileL); EaseMoodShape(_smileR); EaseMoodShape(_cheekL); EaseMoodShape(_cheekR);
+        EaseMoodShape(_browsUL); EaseMoodShape(_browsUR); // _browsUC handled below (shares with talk emphasis)
         EaseMoodShape(_browsDL); EaseMoodShape(_browsDR); EaseMoodShape(_browsSq);
         EaseMoodShape(_frownL); EaseMoodShape(_frownR); EaseMoodShape(_sneerL); EaseMoodShape(_sneerR);
         void EaseMoodShape(int idx)

@@ -167,12 +167,17 @@ public static class GnomesSceneBuilder
         console.Brain = pemberton;
         console.Board = board;
 
-        // ── Bust: reuse the Gunan_animated blendshape model from the GrizNPC scenes —
-        // same FBX, same GrizAnimatorLink/MouthLipSync/FacialExpressions stack. No shop/
-        // sword logic here (useAnimatorStates = false, same as Sana's CompanionConsole) —
-        // she just sits, blinks, lipsyncs, and emotes through an interview.
+        // ── Bust: reuse the Gunan_animated blendshape model/prefab from the GrizNPC scenes.
+        // The prefab already carries its OWN GrizAnimatorLink (with autoLipSync/
+        // autoFacialExpressions on) — reuse that instance rather than adding a second one,
+        // which would fight the first over the same blendshapes. No shop/sword logic here
+        // (useAnimatorStates = false, same as Sana's CompanionConsole) — she just sits,
+        // blinks, lipsyncs, and emotes through an interview.
         var modelAsset = AssetDatabase.LoadAssetAtPath<GameObject>(
-            "Assets/#MainProject/Models/BlendshapeModels/source/Gunan_animated.fbx");
+            "Assets/#MainProject/Prefabs/Gunan_animated.prefab");
+        if (modelAsset == null) // fall back to the raw FBX if the prefab ever moves/is deleted
+            modelAsset = AssetDatabase.LoadAssetAtPath<GameObject>(
+                "Assets/#MainProject/Models/BlendshapeModels/source/Gunan_animated.fbx");
         if (modelAsset != null)
         {
             var model = (GameObject)PrefabUtility.InstantiatePrefab(modelAsset);
@@ -182,15 +187,16 @@ public static class GnomesSceneBuilder
             var animator = model.GetComponentInChildren<Animator>();
             if (animator == null) animator = model.AddComponent<Animator>();
 
-            var animLink = model.AddComponent<GrizAnimatorLink>();
+            var animLink = model.GetComponentInChildren<GrizAnimatorLink>();
+            if (animLink == null) animLink = model.AddComponent<GrizAnimatorLink>();
             animLink.animator = animator;
             animLink.useAnimatorStates = false; // interrogation suspect: no shop/sword states
             console.AnimLink = animLink; // console.Start() finishes the wiring once Voice exists
         }
         else
         {
-            Debug.LogWarning("[Gnomes & Gaslight] Gunan_animated.fbx not found at the expected path — " +
-                              "scene built without a bust. Assign one manually or fix the path in GnomesSceneBuilder.");
+            Debug.LogWarning("[Gnomes & Gaslight] Gunan_animated prefab/FBX not found at the expected " +
+                              "path — scene built without a bust. Assign one manually or fix the path in GnomesSceneBuilder.");
         }
 
         var runnerGO = new GameObject("CaseRunner");

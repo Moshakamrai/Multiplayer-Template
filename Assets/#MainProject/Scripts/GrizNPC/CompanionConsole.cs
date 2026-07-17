@@ -306,8 +306,29 @@ public class CompanionConsole : MonoBehaviour
         SendToBrain(useWhisper ? refined : voskText, vol, useWhisper ? "·w" : "·v");
     }
 
+    // Debug/testing hook: "/mood happy" (typed or spoken) forces an expression directly,
+    // no LLM round-trip — lets you eyeball each face on demand instead of waiting for the
+    // model to pick a matching sentiment. Doesn't touch history or count as a real turn.
+    static readonly string[] DebugMoods = { "happy", "sad", "terrified", "confused", "angry", "warm", "funny", "cold", "rude", "neutral" };
+
+    bool TryHandleMoodCommand(string text)
+    {
+        var m = Regex.Match(text.Trim(), @"^/mood\s+(\w+)$", RegexOptions.IgnoreCase);
+        if (!m.Success) return false;
+        string mood = m.Groups[1].Value.ToLowerInvariant();
+        if (System.Array.IndexOf(DebugMoods, mood) < 0)
+        {
+            Say("*", $"/mood: unknown '{mood}'. Try: {string.Join(", ", DebugMoods)}");
+            return true;
+        }
+        if (AnimLink != null) AnimLink.SetMood(mood);
+        Say("*", $"/mood → forcing '{mood}' on {(Brain != null ? Brain.npcName : "the NPC")}'s face.");
+        return true;
+    }
+
     void SendToBrain(string text, float vol, string srcTag = "")
     {
+        if (TryHandleMoodCommand(text)) return;
         Say("YOU", $"{text}   <vol {vol:0.00}{srcTag}>");
         _lastYouLine = text;
         _lastYouLineTime = Time.time;

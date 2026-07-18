@@ -84,7 +84,10 @@ public class WhisperTranscriber : MonoBehaviour
 
     void Launch()
     {
-        string dir = Path.Combine(Application.streamingAssetsPath, "whisper");
+        // Path.GetFullPath normalizes mixed forward/backslash separators (streamingAssetsPath
+        // uses "/", Path.Combine's later segments use "\" on Windows) — that mixed form
+        // silently fails Process.Start in standalone builds (Editor Play mode tolerates it).
+        string dir = Path.GetFullPath(Path.Combine(Application.streamingAssetsPath, "whisper"));
         string exe = Path.Combine(dir, "whisper-server.exe");
         if (!File.Exists(exe)) exe = Path.Combine(dir, "server.exe"); // older release name
         // Pick the model by language: small is fine for English, but Bangla needs a bigger

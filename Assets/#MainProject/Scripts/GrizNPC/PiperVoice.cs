@@ -87,7 +87,10 @@ public class PiperVoice : MonoBehaviour
     {
         _checked = true;
         _available = false;
-        string dir = Path.Combine(Application.streamingAssetsPath, "piper");
+        // Path.GetFullPath normalizes mixed forward/backslash separators (streamingAssetsPath
+        // uses "/", Path.Combine's later segments use "\" on Windows) — that mixed form
+        // silently fails Process.Start in standalone builds (Editor Play mode tolerates it).
+        string dir = Path.GetFullPath(Path.Combine(Application.streamingAssetsPath, "piper"));
         _exePath = Path.Combine(dir, "piper.exe");
         if (!File.Exists(_exePath)) return;
         if (!Directory.Exists(dir)) return;

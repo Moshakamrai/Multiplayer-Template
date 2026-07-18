@@ -71,7 +71,13 @@ public class LlamaIntentService : MonoBehaviour
 
     void Start()
     {
-        string dir = Path.Combine(Application.streamingAssetsPath, "llama");
+        // Path.GetFullPath normalizes to consistent OS-native separators. Without this,
+        // streamingAssetsPath's forward slashes + Path.Combine's backslashes produced a
+        // MIXED separator path (".../StreamingAssets\llama\llama-server.exe") that Unity's
+        // Editor Play mode tolerates but standalone builds' Process.Start (UseShellExecute
+        // = false) can silently fail to launch on Windows — logged as the misleading
+        // "Native error= Success", nothing ever appearing in Task Manager.
+        string dir = Path.GetFullPath(Path.Combine(Application.streamingAssetsPath, "llama"));
         string exe = Path.Combine(dir, "llama-server.exe");
         string model = null;
         if (Directory.Exists(dir))

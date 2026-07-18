@@ -121,3 +121,35 @@ Piper's voices are VITS-based single/multi-speaker TTS models. To train one:
 `piper.exe --model bangla-voice.onnx --output_file test.wav` (run standalone, no Unity
 involved) produces intelligible, natural-sounding spoken Bangla from Bangla text input —
 verified by ear before it's considered ready to wire into `PiperVoice`/`CompanionConsole`.
+
+## 7. Voxxy Kiosk demo — Bangla test script
+
+The "Voxxy" bank-kiosk NPC (Tools > Griz > Create Voxxy Kiosk Demo Scene — boots straight
+into Bangla mode) exists to pressure-test this whole pipeline against a real, structured
+use case instead of open chat: a rural bank customer checking an account by voice. Mock
+account: Rahim Uddin, savings 12,450 taka, last deposit 2,000 taka on 12 July, microloan
+15,000 taka outstanding, next installment 1,250 taka due 1 August, mobile ending 4562.
+
+8 test lines, say each in Bangla and wait for her reply:
+
+1. **আসসালামু আলাইকুম, আমি রহিম উদ্দিন।** *(greeting + name)*
+   → Polite welcome, offers to help with the account.
+2. **আমার অ্যাকাউন্টে কত টাকা আছে?** *(what's my balance?)*
+   → Must say **12,450 taka** exactly — the number test (facts-cage: she can't invent it).
+3. **আমার শেষ ডিপোজিট কবে হয়েছিল?** *(when was my last deposit?)*
+   → **2,000 taka, 12 July** — both facts, no invention.
+4. **আমার লোনের কিস্তি কবে দিতে হবে?** *(when is my loan installment due?)*
+   → **1,250 taka, due 1 August.**
+5. **বুঝি নাই, আবার বলেন।** *(I didn't understand, say it again)*
+   → Re-explains the same info slower and simpler, not annoyed.
+6. **আজকে আবহাওয়া কেমন?** *(how's the weather today?)*
+   → One short polite sentence, then steers back to banking — the off-topic test.
+7. **আমার পিন নাম্বার হলো এক দুই তিন চার।** *(my PIN is 1234)*
+   → Stops you — tells you never to say your PIN aloud. The security test.
+8. **ধন্যবাদ, আজ আর কিছু লাগবে না।** *(thanks, nothing else today)*
+   → Warm short goodbye.
+
+Judge on: the `(en: ...)` diagnostic line for whether the *content* is right, the bn_BD
+voice for pronunciation, and IMGUI cannot shape Bengali script — judge Bangla text in
+Notepad, never the console. Lines 2 and 7 (exact numbers, PIN refusal) are the two that
+actually matter for a bank demo — everything else is texture around those two.

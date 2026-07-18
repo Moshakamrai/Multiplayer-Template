@@ -77,6 +77,16 @@ public static class VoxxyKioskSceneBuilder
         console.Brain = brain;
         console.startInBangla = true;
 
+        // PiperVoice's default pitch (0.88) is tuned for Griz's deep dwarf-merchant voice —
+        // wrong register entirely for a bank customer-care assistant. Own child GameObject,
+        // same pattern CompanionConsole.Start() would otherwise auto-create for us.
+        var piperGO = new GameObject("PiperVoice");
+        piperGO.transform.SetParent(kioskGO.transform, false);
+        var piper = piperGO.AddComponent<PiperVoice>();
+        piper.pitch = 1.05f;         // slightly bright/friendly, not deep or robotic
+        piper.lengthScale = 1.0f;    // natural pace — clear for semi-literate customers, not slow/patronizing
+        console.Piper = piper;
+
         EditorSceneManager.SaveScene(scene, ScenePath);
         Debug.Log($"[Voxxy] Kiosk demo scene saved to {ScenePath}. Press Play and speak BANGLA — " +
                   "it boots directly in Bangla mode (bn Whisper + NLLB + bn_BD voice). Ask about the " +

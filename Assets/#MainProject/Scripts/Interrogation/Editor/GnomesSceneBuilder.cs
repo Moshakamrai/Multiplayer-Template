@@ -243,6 +243,7 @@ public static class GnomesSceneBuilder
         runner.soloSuspect = pemberton;
         runner.soloConsole = console;
         runner.intro = intro;
+        runner.caseMusicFileName = "case-music.mp3"; // starts once the intro finishes and the case begins
         console.Runner = runner;
 
         var uiGO = new GameObject("CaseBoardUI");

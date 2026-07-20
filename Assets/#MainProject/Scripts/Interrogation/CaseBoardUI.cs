@@ -1,34 +1,46 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-// GNOMES & GASLIGHT — the persistent side panel: statement cards slide in live during
-// interrogation, contradictions are auto-flagged in red (players still have to notice WHY
-// and connect them — the board never explains the case, only that two things don't match),
-// an evidence tray lets a player "hold" a discovered item to present it mid-interview, and
-// the top HUD shows phase/round/patience so nothing needs to be remembered by hand.
+// GNOMES & GASLIGHT — the interrogation HUD, laid out as three floating panels over the
+// 3D bust + room backdrop rather than one big side slab:
+//   • bottom-LEFT  : the suspect's speech, in a rounded dialogue bubble (the main event)
+//   • top-RIGHT    : what YOU just said + the live "listening…" mic transcript
+//   • bottom-RIGHT : the case board (objectives / evidence / statements — reference only)
+// A slim top bar keeps round/phase/patience. Objectives show at most 3 UNFINISHED at a
+// time and refill as they tick, so the list always reads as "here's what to do next".
 public class CaseBoardUI : MonoBehaviour
 {
     public CaseBoard Board;
     public CaseRunner Runner;
     public InterrogationConsole ActiveConsole;
 
-    [Header("Layout")]
-    [Tooltip("The board is reference material, not the main event — the backdrop art and bust are. Kept narrow so most of the screen stays clear.")]
-    [Range(0.12f, 0.35f)] public float panelWidthFraction = 0.2f;
-    [Tooltip("Panel background opacity — low enough that the room backdrop stays visible through it.")]
-    [Range(0f, 1f)] public float panelOpacity = 0.55f;
-    public bool collapsed = false;
+    [Header("Optional custom font (a .ttf/.otf dropped in Assets and assigned here). " +
+            "Leave null to use Unity's built-in font at the styled sizes below.")]
+    public Font uiFont;
 
-    Vector2 _cardScroll, _evidenceScroll, _transcriptScroll;
+    [Header("Panel look")]
+    [Range(0f, 1f)] public float panelOpacity = 0.72f;
+    [Range(0.22f, 0.42f)] public float boardWidthFraction = 0.3f;
+
+    Vector2 _cardScroll;
     string _lastToast = "";
     float _toastUntil;
     readonly List<(string who, string text)> _transcript = new List<(string, string)>();
+    string _lastSuspectLine = "";
+    string _pressureFlash = "";
+    float _pressureFlashUntil;
 
-    const string BG = "#12121a";
-    const string PURPLE = "#a855f7";
-    const string RED = "#f87171";
-    const string GREEN = "#4ade80";
-    const string GOLD = "#facc15";
+    const string PURPLE = "#c9a2ff";
+    const string RED = "#ff8a8a";
+    const string GREEN = "#8ff0a4";
+    const string GOLD = "#ffd968";
+    const string CYAN = "#5fd7e8";
+    const string SUSPECT = "#ffcf9e";
+    const string PLAYER = "#a9d4ff";
+    const string DIM = "#d0d0d8";
+
+    Texture2D _panelTex;
+    GUIStyle _body, _bodyDim, _header, _bubble, _hudStyle;
 
     void OnEnable()
     {
@@ -36,16 +48,16 @@ public class CaseBoardUI : MonoBehaviour
         {
             Board.OnEvidenceDiscovered += ev => Toast($"NEW EVIDENCE: {ev.label}");
             Board.OnContradictionFound += c => Toast("CONTRADICTION FOUND — check the board");
-            Board.OnSuspicionLoopFound += l => Toast($"SUSPICION LOOP: {l.a.suspectName} ⇄ {l.b.suspectName} — check the board");
+            Board.OnSuspicionLoopFound += l => Toast($"SUSPICION LOOP: {l.a.suspectName} ⇄ {l.b.suspectName}");
         }
         if (ActiveConsole != null)
         {
-            ActiveConsole.OnLine += (who, text) => _transcript.Add((who, text));
+            ActiveConsole.OnLine += OnLine;
             ActiveConsole.OnPressureRead += (matched, kind) =>
             {
                 _pressureFlash = matched
-                    ? $"🔓 that landed — she's opening up ({kind})"
-                    : $"🔒 not working — try a different approach (that was read as {kind})";
+                    ? "✦ that landed — she's opening up"
+                    : "✕ not working — try a different approach";
                 _pressureFlashUntil = Time.time + 3.5f;
             };
             if (ActiveConsole.Brain != null)
@@ -53,186 +65,213 @@ public class CaseBoardUI : MonoBehaviour
         }
     }
 
-    string _pressureFlash = "";
-    float _pressureFlashUntil;
-
-    void Toast(string msg)
+    void OnLine(string who, string text)
     {
-        _lastToast = msg;
-        _toastUntil = Time.time + 4f;
+        _transcript.Add((who, text));
+        if (who != "YOU") _lastSuspectLine = text;
+    }
+
+    void Toast(string msg) { _lastToast = msg; _toastUntil = Time.time + 4f; }
+
+    // Solid rounded-ish panel background (a flat tinted texture; GUI has no real rounded
+    // rects, so a subtle dark fill + the styled text does the heavy lifting).
+    Texture2D PanelTex()
+    {
+        if (_panelTex != null) return _panelTex;
+        _panelTex = new Texture2D(1, 1);
+        _panelTex.SetPixel(0, 0, new Color(0.055f, 0.05f, 0.075f, 1f));
+        _panelTex.Apply();
+        return _panelTex;
+    }
+
+    void BuildStyles(float k)
+    {
+        if (_body != null && (uiFont == null || _body.font == uiFont)) return;
+        GUIStyle Base(int size, FontStyle fs) => new GUIStyle
+        {
+            font = uiFont,
+            fontSize = Mathf.RoundToInt(size * k),
+            fontStyle = fs,
+            richText = true,
+            wordWrap = true,
+            normal = { textColor = Color.white },
+            padding = new RectOffset(2, 2, 2, 2)
+        };
+        _body = Base(20, FontStyle.Normal);
+        _bodyDim = Base(20, FontStyle.Normal);
+        _header = Base(17, FontStyle.Bold);
+        _bubble = Base(24, FontStyle.Normal);
+        _bubble.padding = new RectOffset((int)(18 * k), (int)(18 * k), (int)(14 * k), (int)(14 * k));
+        _hudStyle = Base(19, FontStyle.Bold);
+    }
+
+    void Panel(Rect r)
+    {
+        var prev = GUI.color;
+        GUI.color = new Color(1, 1, 1, panelOpacity);
+        GUI.DrawTexture(r, PanelTex());
+        GUI.color = prev;
     }
 
     void OnGUI()
     {
-        if (Runner == null || Board == null || !Runner.IsCaseStarted) return; // stay hidden during the intro cold open
+        if (Runner == null || Board == null || !Runner.IsCaseStarted) return;
         float k = Mathf.Max(1f, Screen.height / 900f);
-        int f = Mathf.RoundToInt(22 * k); // bigger, readable-at-a-glance text — this was sized for a placeholder scene
-        var rich = new GUIStyle(GUI.skin.label) { fontSize = f, richText = true, wordWrap = true };
+        BuildStyles(k);
 
-        DrawTopHud(k, f, rich);
-        DrawMainArea(k, f, rich);
-
-        if (collapsed)
-        {
-            if (GUI.Button(new Rect(Screen.width - 140 * k, 72 * k, 120 * k, 36 * k), "Show board ▶"))
-                collapsed = false;
-            return;
-        }
-
-        float w = Screen.width * panelWidthFraction;
-        var panelRect = new Rect(Screen.width - w, 72 * k, w, Screen.height - 70 * k);
-        GUI.color = new Color(0.07f, 0.07f, 0.10f, panelOpacity);
-        GUI.DrawTexture(panelRect, Texture2D.whiteTexture);
-        GUI.color = Color.white;
-
-        GUILayout.BeginArea(panelRect);
-        GUILayout.BeginHorizontal();
-        GUILayout.Label($"<color={PURPLE}><b>CASE BOARD</b></color>", rich);
-        GUILayout.FlexibleSpace();
-        if (GUILayout.Button("◀ hide", GUILayout.Width(70 * k))) collapsed = true;
-        GUILayout.EndHorizontal();
-
-        DrawObjectives(k, f, rich);
-        GUILayout.Space(8 * k);
-        DrawEvidenceTray(k, f, rich);
-        GUILayout.Space(8 * k);
-        DrawContradictions(k, f, rich);
-        GUILayout.Space(8 * k);
-        DrawSuspicionLoops(k, f, rich);
-        GUILayout.Space(8 * k);
-        DrawCards(k, f, rich);
-        GUILayout.EndArea();
+        DrawTopBar(k);
+        DrawSuspectBubble(k);   // bottom-left
+        DrawPlayerPanel(k);     // top-right
+        DrawBoardPanel(k);      // bottom-right
     }
 
-    void DrawMainArea(float k, int f, GUIStyle rich)
+    // ── top bar: round / phase / patience / toast ──
+    void DrawTopBar(float k)
     {
-        float panelW = collapsed ? 0f : Screen.width * panelWidthFraction;
-        var area = new Rect(10 * k, 72 * k, Screen.width - panelW - 20 * k, Screen.height - 130 * k);
-        GUILayout.BeginArea(area);
-
-        _transcriptScroll = GUILayout.BeginScrollView(_transcriptScroll, GUILayout.ExpandHeight(true));
-        foreach (var (who, text) in _transcript)
-        {
-            string color = who == "YOU" ? "#99ccff" : "#ffb366";
-            GUILayout.Label($"<color={color}>[{who}]</color> {text}", rich);
-            GUILayout.Space(4 * k);
-        }
-        GUILayout.EndScrollView();
-
-        if (Runner.CurrentPhase == CaseRunner.Phase.Interrogation && ActiveConsole != null)
-        {
-            if (Time.time < _pressureFlashUntil)
-            {
-                string flashColor = _pressureFlash.StartsWith("🔓") ? GREEN : "#facc15";
-                GUILayout.Label($"<color={flashColor}>{_pressureFlash}</color>", rich);
-            }
-            // Full mic mode — no typed input. Live partial transcript doubles as the only
-            // feedback that the player is actually being heard.
-            string hearing = ActiveConsole.LiveHearingText;
-            string micLine = string.IsNullOrEmpty(hearing)
-                ? $"<color={GREEN}>🎤 listening…</color>"
-                : $"<color={GREEN}>🎤</color> <i>{hearing}</i>";
-            GUILayout.Label(micLine, rich);
-        }
-        else if (Runner.CurrentPhase == CaseRunner.Phase.Huddle)
-        {
-            GUILayout.Label($"<color={PURPLE}>Compare notes, then continue when ready.</color>", rich);
-            if (GUILayout.Button("End huddle → next round", GUILayout.Height(40 * k)))
-                Runner.EndHuddle();
-        }
-        else if (Runner.CurrentPhase == CaseRunner.Phase.Ended)
-        {
-            GUILayout.Label($"<color={RED}>Case complete — build your accusation from the board.</color>", rich);
-        }
-
-        GUILayout.EndArea();
-    }
-
-    void DrawTopHud(float k, int f, GUIStyle rich)
-    {
-        var r = new Rect(10 * k, 10 * k, Screen.width - 20 * k, 56 * k);
-        GUI.color = new Color(0, 0, 0, 0.55f);
-        GUI.DrawTexture(r, Texture2D.whiteTexture);
-        GUI.color = Color.white;
-
+        var r = new Rect(0, 0, Screen.width, 40 * k);
+        Panel(r);
         string phase = Runner.CurrentPhase switch
         {
-            CaseRunner.Phase.Assignment => $"<color={GOLD}>ASSIGNMENT</color> — choose who to interrogate",
-            CaseRunner.Phase.Interrogation => $"<color={GREEN}>INTERROGATION</color> — {Mathf.Max(0f, Runner.PhaseTimeRemaining):0}s left" +
-                (Runner.ActiveSuspect != null ? $"  ·  {Runner.ActiveSuspect.suspectName}  (patience {Runner.ActiveSuspect.patience:0})" : ""),
-            CaseRunner.Phase.Huddle => $"<color={PURPLE}>HUDDLE</color> — compare notes (suspects can't hear this)",
+            CaseRunner.Phase.Assignment => $"<color={GOLD}>ASSIGNMENT</color>",
+            CaseRunner.Phase.Interrogation => $"<color={GREEN}>INTERROGATION</color>  ·  {Mathf.Max(0f, Runner.PhaseTimeRemaining):0}s" +
+                (Runner.ActiveSuspect != null ? $"  ·  <b>{Runner.ActiveSuspect.suspectName}</b>  ·  patience {Runner.ActiveSuspect.patience:0}" : ""),
+            CaseRunner.Phase.Huddle => $"<color={PURPLE}>HUDDLE</color>",
             CaseRunner.Phase.Ended => $"<color={RED}>CASE READY FOR ACCUSATION</color>",
             _ => ""
         };
-        GUILayout.BeginArea(r);
-        GUILayout.BeginHorizontal();
-        GUILayout.Label($"round <b>{Mathf.Min(Runner.RoundIndex + 1, Runner.totalRounds)}/{Runner.totalRounds}</b>   {phase}", rich);
-        GUILayout.FlexibleSpace();
+        GUI.Label(new Rect(16 * k, 0, Screen.width * 0.6f, 40 * k),
+            $"<color={DIM}>Round {Mathf.Min(Runner.RoundIndex + 1, Runner.totalRounds)}/{Runner.totalRounds}</color>   {phase}", _hudStyle);
         if (Time.time < _toastUntil)
-            GUILayout.Label($"<color={GOLD}>{_lastToast}</color>", rich);
-        GUILayout.EndHorizontal();
-        GUILayout.EndArea();
-    }
-
-    void DrawObjectives(float k, int f, GUIStyle rich)
-    {
-        var brain = ActiveConsole != null ? ActiveConsole.Brain : null;
-        if (brain == null || brain.objectives.Count == 0) return;
-        GUILayout.Label($"<color={GREEN}>THIS ENCOUNTER</color>", rich);
-        foreach (var o in brain.objectives)
         {
-            string box = o.Done ? "☑" : "☐";
-            string color = o.Done ? GREEN : "#cccccc";
-            GUILayout.Label($"<color={color}>{box} {o.label}</color>", rich);
+            var ts = new GUIStyle(_hudStyle) { alignment = TextAnchor.MiddleRight };
+            GUI.Label(new Rect(Screen.width * 0.4f - 16 * k, 0, Screen.width * 0.6f, 40 * k), $"<color={GOLD}>{_lastToast}</color>", ts);
         }
     }
 
-    void DrawEvidenceTray(float k, int f, GUIStyle rich)
+    // ── bottom-left: the suspect's current line, in a dialogue bubble ──
+    void DrawSuspectBubble(float k)
     {
-        GUILayout.Label($"<color={GOLD}>EVIDENCE</color>", rich);
-        _evidenceScroll = GUILayout.BeginScrollView(_evidenceScroll, GUILayout.Height(90 * k));
+        if (string.IsNullOrEmpty(_lastSuspectLine)) return;
+        float w = Mathf.Min(Screen.width * 0.44f, 640 * k);
+        float h = Mathf.Min(Screen.height * 0.32f, 260 * k);
+        var r = new Rect(24 * k, Screen.height - h - 24 * k, w, h);
+        Panel(r);
+        string name = Runner.ActiveSuspect != null ? Runner.ActiveSuspect.suspectName : "Suspect";
+        GUI.Label(new Rect(r.x + 18 * k, r.y + 10 * k, r.width - 36 * k, 28 * k), $"<color={SUSPECT}><b>{name}</b></color>", _header);
+        GUI.Label(new Rect(r.x, r.y + 34 * k, r.width, r.height - 40 * k), $"<color=#ffffff>“{_lastSuspectLine}”</color>", _bubble);
+    }
+
+    // ── top-right: what you last said + the live mic transcript ──
+    void DrawPlayerPanel(float k)
+    {
+        float w = Mathf.Min(Screen.width * 0.32f, 460 * k);
+        var r = new Rect(Screen.width - w - 20 * k, 52 * k, w, 128 * k);
+        Panel(r);
+        GUILayout.BeginArea(new Rect(r.x + 14 * k, r.y + 10 * k, r.width - 28 * k, r.height - 20 * k));
+
+        string lastYou = "";
+        for (int i = _transcript.Count - 1; i >= 0; i--)
+            if (_transcript[i].who == "YOU") { lastYou = _transcript[i].text; break; }
+        GUILayout.Label(string.IsNullOrEmpty(lastYou)
+            ? $"<color={DIM}>You haven't spoken yet.</color>"
+            : $"<color={PLAYER}><b>You:</b></color> {lastYou}", _body);
+
+        GUILayout.FlexibleSpace();
+        if (Runner.CurrentPhase == CaseRunner.Phase.Interrogation && ActiveConsole != null)
+        {
+            if (Time.time < _pressureFlashUntil)
+                GUILayout.Label($"<color={(_pressureFlash.StartsWith("✦") ? GREEN : GOLD)}>{_pressureFlash}</color>", _body);
+            string hearing = ActiveConsole.LiveHearingText;
+            GUILayout.Label(string.IsNullOrEmpty(hearing)
+                ? $"<color={GREEN}>🎤 listening…</color>"
+                : $"<color={GREEN}>🎤</color> <i>{hearing}</i>", _body);
+        }
+        else if (Runner.CurrentPhase == CaseRunner.Phase.Huddle)
+        {
+            if (GUILayout.Button("End huddle → next round", GUILayout.Height(38 * k))) Runner.EndHuddle();
+        }
+        GUILayout.EndArea();
+    }
+
+    // ── bottom-right: objectives (max 3 shown, refilling) + evidence + statements ──
+    void DrawBoardPanel(float k)
+    {
+        float w = Screen.width * boardWidthFraction;
+        float h = Screen.height * 0.6f;
+        var r = new Rect(Screen.width - w - 20 * k, Screen.height - h - 24 * k, w, h);
+        Panel(r);
+        GUILayout.BeginArea(new Rect(r.x + 16 * k, r.y + 12 * k, r.width - 32 * k, r.height - 24 * k));
+
+        DrawObjectives(k);
+        GUILayout.Space(10 * k);
+        DrawEvidence(k);
+        GUILayout.Space(10 * k);
+        DrawStatements(k);
+
+        GUILayout.EndArea();
+    }
+
+    void DrawObjectives(float k)
+    {
+        var brain = ActiveConsole != null ? ActiveConsole.Brain : null;
+        if (brain == null || brain.objectives.Count == 0) return;
+        GUILayout.Label($"<color={GREEN}>YOUR NEXT MOVES</color>", _header);
+
+        // Show at most 3 UNFINISHED objectives; as each ticks off, the next slides in.
+        // A couple recently-completed ones stay visible (struck through) for a beat of
+        // satisfaction before scrolling off.
+        int shown = 0, doneShown = 0;
+        foreach (var o in brain.objectives)
+        {
+            if (o.Done)
+            {
+                if (doneShown >= 1) continue; // keep just the most recent tick visible
+                doneShown++;
+                GUILayout.Label($"<color={GREEN}>✓ <s>{o.label}</s></color>", _body);
+            }
+            else
+            {
+                if (shown >= 3) break;
+                shown++;
+                GUILayout.Label($"<color={DIM}>○ {o.label}</color>", _body);
+            }
+        }
+    }
+
+    void DrawEvidence(float k)
+    {
+        bool any = false;
+        foreach (var e in Board.AllEvidence) if (e.discovered) { any = true; break; }
+        if (!any) return;
+        GUILayout.Label($"<color={GOLD}>EVIDENCE</color>", _header);
         foreach (var e in Board.AllEvidence)
         {
             if (!e.discovered) continue;
             GUILayout.BeginHorizontal();
-            GUILayout.Label($"<color={GOLD}>◆</color> <b>{e.label}</b> — {e.description}", rich);
+            GUILayout.Label($"<color={GOLD}>◆</color> {e.label}", _body);
             if (ActiveConsole != null && Runner.CurrentPhase == CaseRunner.Phase.Interrogation &&
-                GUILayout.Button("Present", GUILayout.Width(80 * k)))
+                GUILayout.Button("Present", GUILayout.Width(84 * k)))
                 ActiveConsole.presentedEvidenceId = e.id;
             GUILayout.EndHorizontal();
         }
-        GUILayout.EndScrollView();
     }
 
-    void DrawContradictions(float k, int f, GUIStyle rich)
+    void DrawStatements(float k)
     {
-        if (Board.Contradictions.Count == 0) return;
-        GUILayout.Label($"<color={RED}>⚠ CONTRADICTIONS</color>", rich);
-        foreach (var c in Board.Contradictions)
-            GUILayout.Label($"<color={RED}>• {c.a.suspectName} vs {c.b.suspectName}:</color> {c.reason}", rich);
-    }
-
-    const string CYAN = "#06b6d4";
-
-    void DrawSuspicionLoops(float k, int f, GUIStyle rich)
-    {
-        if (Board.SuspicionLoops.Count == 0) return;
-        GUILayout.Label($"<color={CYAN}>⇄ SUSPICION LOOPS (opinions, may both be wrong)</color>", rich);
-        foreach (var l in Board.SuspicionLoops)
-            GUILayout.Label($"<color={CYAN}>• {l.a.suspectName} and {l.b.suspectName} accuse EACH OTHER</color>", rich);
-    }
-
-    void DrawCards(float k, int f, GUIStyle rich)
-    {
-        GUILayout.Label($"<color={PURPLE}>STATEMENTS</color>", rich);
+        if (Board.Cards.Count == 0 && Board.Contradictions.Count == 0 && Board.SuspicionLoops.Count == 0) return;
+        GUILayout.Label($"<color={PURPLE}>NOTES</color>", _header);
         _cardScroll = GUILayout.BeginScrollView(_cardScroll, GUILayout.ExpandHeight(true));
+
+        foreach (var c in Board.Contradictions)
+            GUILayout.Label($"<color={RED}>⚠ {c.a.suspectName} vs {c.b.suspectName}:</color> {c.reason}", _body);
+        foreach (var l in Board.SuspicionLoops)
+            GUILayout.Label($"<color={CYAN}>⇄ {l.a.suspectName} & {l.b.suspectName} accuse each other</color>", _body);
+
         foreach (var c in Board.Cards)
         {
-            string color = c.isBrokenReveal ? RED : c.isFalseGive ? GOLD :
-                           c.tag == "accusation" ? CYAN : "#cccccc";
-            string tag = c.isBrokenReveal ? " [BROKEN]" : c.isFalseGive ? " [false give]" :
-                        c.tag == "accusation" ? " [opinion]" : "";
-            GUILayout.Label($"<color={color}><b>{c.suspectName}</b> (r{c.round + 1}){tag}: {c.text}</color>", rich);
+            string color = c.isBrokenReveal ? RED : c.isFalseGive ? GOLD : c.tag == "accusation" ? CYAN : DIM;
+            string tag = c.isBrokenReveal ? " [secret]" : c.isFalseGive ? " [petty]" : c.tag == "accusation" ? " [opinion]" : "";
+            GUILayout.Label($"<color={color}><b>{c.suspectName}</b>{tag}: {c.text}</color>", _body);
             GUILayout.Space(4 * k);
         }
         GUILayout.EndScrollView();

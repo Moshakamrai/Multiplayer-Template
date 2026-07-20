@@ -24,11 +24,14 @@ public class BackdropQuad : MonoBehaviour
 
         // Build the material fresh at runtime rather than trusting a build-time material to
         // have survived scene serialization (it often doesn't — same non-serialized-object
-        // trap as the texture). Prefer URP Unlit, fall back to legacy Unlit/Texture.
+        // trap as the texture). Sprites/Default is what the rest of this project uses for
+        // "unlit, always visible" runtime meshes (see BeatApproachRing, MatchResultHud) —
+        // it's guaranteed never stripped from builds and binds the texture via _MainTex,
+        // unlike URP Unlit which reads _BaseMap and renders black if you set mainTexture.
         var rend = GetComponent<Renderer>();
-        var shader = Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Unlit/Texture");
-        var mat = new Material(shader);
-        mat.mainTexture = tex;
+        var shader = Shader.Find("Sprites/Default");
+        if (shader == null) { Debug.LogWarning("[BackdropQuad] Sprites/Default shader not found.", this); return; }
+        var mat = new Material(shader) { mainTexture = tex };
         rend.material = mat;
 
         // Match the quad's aspect to the image so the room isn't stretched — keep the

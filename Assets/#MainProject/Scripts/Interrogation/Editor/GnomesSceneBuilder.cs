@@ -151,21 +151,39 @@ public static class GnomesSceneBuilder
         // SUSPECT'S OWN reply, not the player's question, so it only completes when she
         // actually answers. Keywords matched against her generated lines; tune if she
         // phrases things in ways that miss these (same iteration loop as the pressure classifier).
+        // Small, concrete, ordered steps. Only the first 3 UNFINISHED ones show at a time
+        // (CaseBoardUI) — as each ticks off, the next slides in. Broken into granular beats
+        // so the player always has a clear "ask about X next" rather than a vague goal.
         pemberton.objectives = new List<SuspectBrain.Objective>
         {
             new SuspectBrain.Objective
             {
-                label = "Know her alibi",
-                keywords = new List<string> { "home", "reading", "tea", "book", "grounds", "shed", "garden" }
+                label = "Where was she that night?",
+                keywords = new List<string> { "home", "shed", "window", "garden", "grounds" }
             },
             new SuspectBrain.Objective
             {
-                label = "Learn her connection to the case",
+                label = "What was she doing?",
+                keywords = new List<string> { "reading", "tea", "book", "resting", "watching", "tending" }
+            },
+            new SuspectBrain.Objective
+            {
+                label = "How well did she know Reginald?",
+                keywords = new List<string> { "neighbor", "years", "fence", "gnome", "collection", "quarrel", "argued" }
+            },
+            new SuspectBrain.Objective
+            {
+                label = "Get her gossiping about the household",
+                keywords = new List<string> { "constance", "widow", "marriage", "higgins", "butler", "finch", "doctor" }
+            },
+            new SuspectBrain.Objective
+            {
+                label = "Make her admit a petty secret",
                 source = SuspectBrain.Objective.Source.FalseGiveTriggered
             },
             new SuspectBrain.Objective
             {
-                label = "Crack her real secret",
+                label = "Crack what she's really hiding",
                 source = SuspectBrain.Objective.Source.Broken
             },
         };
@@ -251,8 +269,8 @@ public static class GnomesSceneBuilder
                 // URP Unlit). Rotate 180° on Y so the textured front faces the camera.
                 quad.transform.rotation = Quaternion.Euler(0f, 180f, 0f);
                 quad.transform.localScale = new Vector3(18f, 10f, 1f); // BackdropQuad fixes the aspect at runtime; oversized so no sky peeks past its edges
-                var unlit = Shader.Find("Universal Render Pipeline/Unlit");
-                quad.GetComponent<Renderer>().sharedMaterial = new Material(unlit != null ? unlit : Shader.Find("Unlit/Texture"));
+                // Material + texture are fully (re)built at runtime by BackdropQuad using
+                // Sprites/Default — no build-time material to serialize/lose.
                 var bq = quad.AddComponent<BackdropQuad>();
                 bq.streamingPath = pemberton.backdropStreamingPath;
             }

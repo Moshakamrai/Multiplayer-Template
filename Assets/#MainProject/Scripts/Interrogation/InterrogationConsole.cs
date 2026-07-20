@@ -293,40 +293,38 @@ public class InterrogationConsole : MonoBehaviour
     IEnumerator GenerateThenSpeak(string playerText, SuspectBrain.PressureResult result, SuspectBrain.Suspicion suspicion = null)
     {
         string facts = Brain.BuildFactsCage(suspicion);
-        // Explicitly show her what she's ALREADY said so she stops recycling it — the biggest
-        // driver of the loop was that her own repeated lines were in _history as "context to
-        // continue from" with no instruction NOT to reuse them.
+        // Only reminds her not to reuse the SAME WORDING — NOT to dodge. Answering the
+        // question is the priority; the earlier "always deflect with a new tangent" wording
+        // made her ignore questions and invent random nonsense, which is worse than looping.
         string antiRepeat = _recentSuspectLines.Count > 0
-            ? "\nYOU HAVE ALREADY SAID THESE — do NOT repeat them or rephrase them, MOVE THE " +
-              "CONVERSATION FORWARD with new detail, a new tangent, or a new deflection:\n- " +
-              string.Join("\n- ", _recentSuspectLines)
+            ? "\n(Don't phrase your answer the same way you did in these earlier lines — say it fresh:\n- " +
+              string.Join("\n- ", _recentSuspectLines) + "\n)"
             : "";
 
         string gen = null;
         yield return Llm.GenerateReply(string.Join("\n", _history), facts + antiRepeat, (t, ok) => { if (ok) gen = t; },
             systemPromptOverride: Brain.persona, npcName: Brain.suspectName,
             closingInstruction:
-                "Reply with dialogue only, in character, reacting SPECIFICALLY to what was just said. " +
-                "Never state facts outside YOUR GUARDED SECRET/FALSE GIVE/CURRENT PATIENCE context above. " +
-                "STAY CONSISTENT with your own prior lines — never flatly contradict what you already " +
-                "admitted (deflect the IMPLICATION, not the FACT). Every reply must add SOMETHING new: a " +
-                "fresh detail, a new digression, a question back, a different mood — never restate a point " +
-                "you've already made. " +
+                "ACTUALLY ANSWER the question you were just asked — directly and specifically, in character. " +
+                "Do NOT change the subject or bring up unrelated people/places; respond to what was asked. " +
+                "The ONLY thing you guard is your one real secret (see the CONTEXT above) — everything else " +
+                "you answer honestly and in colourful detail. Never invent facts that aren't in your context " +
+                "or the conversation. Never contradict what you already admitted. 1-3 sentences. " +
                 $"Write {Brain.suspectName}'s next line now:",
-            maxTokens: 90, temperature: 0.9f); // higher temp = less likely to fall into the same groove
+            maxTokens: 90, temperature: 0.6f); // 7B stays coherent + on-topic here; higher was making it ramble
 
-        // Retry if it STILL near-matches any of her recent lines (not just the immediately
-        // previous one — she was cycling A/B/A/B and slipping past a last-line-only check).
+        // Retry only if it near-repeats a recent line's WORDING — nudge for a fresh phrasing
+        // of an ON-TOPIC answer, not a subject change.
         if (!string.IsNullOrWhiteSpace(gen) && RecentlyRepeated(gen))
         {
             string retry = null;
             yield return Llm.GenerateReply(string.Join("\n", _history), facts + antiRepeat, (t, ok) => { if (ok) retry = t; },
                 systemPromptOverride: Brain.persona, npcName: Brain.suspectName,
                 closingInstruction:
-                    "Your previous attempt REPEATED something you already said. Say something COMPLETELY " +
-                    "DIFFERENT — bring up a new subject, ask the investigator a question, or reveal a small " +
-                    $"new harmless detail. Write {Brain.suspectName}'s next line now:",
-                maxTokens: 90, temperature: 1.0f);
+                    "You just phrased that too much like something you already said. Answer the SAME question " +
+                    "again but in genuinely different words, still directly on-topic (do not change the " +
+                    $"subject). Write {Brain.suspectName}'s next line now:",
+                maxTokens: 90, temperature: 0.7f);
             if (!string.IsNullOrWhiteSpace(retry)) gen = retry;
         }
         _pendingRequests--;

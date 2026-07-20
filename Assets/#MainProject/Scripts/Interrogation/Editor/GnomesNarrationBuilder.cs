@@ -85,8 +85,16 @@ public static class GnomesNarrationBuilder
             }
 
             string finalPath = Path.Combine(IntroDir, "narration.wav");
-            StitchWavs(linePaths, finalPath, GapSeconds);
-            Debug.Log($"[Gnomes Narration] Done — {finalPath}. Press Play and run the intro to hear it.");
+            var lineStarts = StitchWavs(linePaths, finalPath, GapSeconds);
+
+            // One start-time (seconds) per line, same order as narration.txt — lets
+            // IntroSequence advance each slide exactly when ITS line begins instead of
+            // guessing an even split across the whole clip (which drifts out of sync the
+            // moment lines have different lengths, which they always do).
+            string timingsPath = Path.Combine(IntroDir, "narration_timings.txt");
+            File.WriteAllLines(timingsPath, lineStarts.ConvertAll(t => t.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture)));
+
+            Debug.Log($"[Gnomes Narration] Done — {finalPath} (+ narration_timings.txt for exact per-slide sync). Press Play and run the intro to hear it.");
             EditorUtility.RevealInFinder(finalPath);
         }
         finally
@@ -123,15 +131,19 @@ public static class GnomesNarrationBuilder
     // Minimal PCM WAV reader/writer — concatenates each line's samples with a silence gap
     // between them. Piper always emits 16-bit mono PCM, so this stays deliberately simple
     // rather than pulling in a full audio library for one offline authoring tool.
-    static void StitchWavs(List<string> paths, string outPath, float gapSeconds)
+    // Returns each line's START TIME in the stitched clip (seconds) so the caller can write
+    // an exact per-slide timing file instead of assuming an even split.
+    static List<float> StitchWavs(List<string> paths, string outPath, float gapSeconds)
     {
         int sampleRate = 0, channels = 0, bitsPerSample = 0;
         var allSamples = new List<short>();
+        var lineStarts = new List<float>();
 
         for (int i = 0; i < paths.Count; i++)
         {
             ReadWav(paths[i], out int sr, out int ch, out int bits, out short[] samples);
             if (i == 0) { sampleRate = sr; channels = ch; bitsPerSample = bits; }
+            lineStarts.Add((float)allSamples.Count / (sampleRate * channels));
             allSamples.AddRange(samples);
             if (i < paths.Count - 1)
             {
@@ -140,6 +152,7 @@ public static class GnomesNarrationBuilder
             }
         }
         WriteWav(outPath, sampleRate, channels, bitsPerSample, allSamples);
+        return lineStarts;
     }
 
     static void ReadWav(string path, out int sampleRate, out int channels, out int bitsPerSample, out short[] samples)

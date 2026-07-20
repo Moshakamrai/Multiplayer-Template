@@ -14,6 +14,15 @@ using UnityEngine;
 //     001_manor.jpg, 002_table.jpg, 003_gnomes.jpg, 004_staircase.jpg, ...  (any count, sorted by filename)
 //     narration.mp3 (or .wav/.ogg)      <- your own recorded voiceover, full sequence
 //     narration.txt                     <- ONE caption line per photo, blank line = no caption change
+//     narration_timings.txt             <- OPTIONAL, one float (seconds) per line = exactly
+//                                          when that line starts in narration.*. Auto-written
+//                                          by Tools > Gnomes & Gaslight > Generate Intro
+//                                          Narration (Piper). Without this file, slides get an
+//                                          EVEN split of the total runtime, which drifts out
+//                                          of sync the moment lines have different lengths
+//                                          (they always do) — this file is what keeps the
+//                                          photo, the caption, and the spoken line locked
+//                                          together instead of slowly drifting apart.
 //     music.mp3 (or .wav/.ogg)          <- OPTIONAL looping ambient bed, auto-ducked under narration
 //     sfx/001.mp3, sfx/004.mp3, ...     <- OPTIONAL one-shot stinger per slide (matches slide's
 //                                          1-based index — e.g. sfx/004.mp3 plays the instant
@@ -51,6 +60,7 @@ public class IntroSequence : MonoBehaviour
     AudioSource _sfxSource;
     Texture2D[] _photos;
     string[] _captions;
+    float[] _slideStartTimes; // seconds into narration.* — null if narration_timings.txt absent
     AudioClip[] _sfxPerSlide; // index-aligned with _photos/_captions; null = no stinger that slide
     int _current = -1;
     float _alpha; // crossfade blend 0..1 toward _current
@@ -108,6 +118,20 @@ public class IntroSequence : MonoBehaviour
         _captions = File.Exists(captionPath)
             ? File.ReadAllLines(captionPath)
             : new[] { "The Ravenscroft estate. A death, and a house full of reasons." };
+
+        // Per-line timing (exact sync — see header comment). Falls back to null, which
+        // RunSequence reads as "no exact timing available, use an even split".
+        string timingsPath = Path.Combine(dir, "narration_timings.txt");
+        if (File.Exists(timingsPath))
+        {
+            var raw = File.ReadAllLines(timingsPath);
+            var parsed = new List<float>();
+            foreach (var line in raw)
+                if (float.TryParse(line, System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out float t))
+                    parsed.Add(t);
+            if (parsed.Count > 0) _slideStartTimes = parsed.ToArray();
+        }
 
         // narration audio: try common extensions; missing = silent slideshow, still testable
         foreach (var ext in new[] { "mp3", "wav", "ogg" })
@@ -174,20 +198,53 @@ public class IntroSequence : MonoBehaviour
 
         // Give narration audio a moment to start loading/playing before timing off its length.
         yield return new WaitForSeconds(0.15f);
-        float totalSeconds = (_narrationSource.clip != null)
-            ? _narrationSource.clip.length
-            : slideCount * secondsPerSlideNoAudio;
-        float perSlide = Mathf.Max(2f, totalSeconds / slideCount);
 
-        for (int i = 0; i < slideCount; i++)
+        bool hasExactTimings = _slideStartTimes != null && _slideStartTimes.Length >= slideCount
+                                && _narrationSource.clip != null;
+
+        if (hasExactTimings)
         {
-            if (_finished) yield break;
-            AdvanceTo(i);
-            float t0 = Time.time;
-            while (Time.time - t0 < perSlide)
+            // Drive slide advances off the NARRATION CLIP'S OWN PLAYBACK POSITION
+            // (_narrationSource.time), not an accumulated Time.time countdown — this is
+            // what keeps photo/caption/voice locked together for the whole sequence
+            // instead of slowly drifting apart (the original bug: every slide got total
+            // length / slideCount seconds regardless of how long its OWN line actually
+            // took to say, so a short line and a long line got identical screen time).
+            for (int i = 0; i < slideCount; i++)
             {
                 if (_finished) yield break;
-                yield return null;
+                AdvanceTo(i);
+                float nextStart = (i + 1 < _slideStartTimes.Length) ? _slideStartTimes[i + 1] : _narrationSource.clip.length;
+                while (_narrationSource.isPlaying && _narrationSource.time < nextStart)
+                {
+                    if (_finished) yield break;
+                    yield return null;
+                }
+                // If narration already finished early for some reason, still honor the
+                // remaining slides' minimum screen time rather than snapping through them.
+                if (!_narrationSource.isPlaying && i < slideCount - 1)
+                    yield return new WaitForSeconds(Mathf.Max(0.5f, secondsPerSlideNoAudio * 0.3f));
+            }
+        }
+        else
+        {
+            // No exact per-line timings available (older intro without narration_timings.txt,
+            // or a silent slideshow) — fall back to the even split this always used.
+            float totalSeconds = (_narrationSource.clip != null)
+                ? _narrationSource.clip.length
+                : slideCount * secondsPerSlideNoAudio;
+            float perSlide = Mathf.Max(2f, totalSeconds / slideCount);
+
+            for (int i = 0; i < slideCount; i++)
+            {
+                if (_finished) yield break;
+                AdvanceTo(i);
+                float t0 = Time.time;
+                while (Time.time - t0 < perSlide)
+                {
+                    if (_finished) yield break;
+                    yield return null;
+                }
             }
         }
         Finish();

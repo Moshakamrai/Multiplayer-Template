@@ -97,20 +97,26 @@ public static class GnomesSceneBuilder
             "You are MRS. PEMBERTON, the Ravenscroft family's neighbor. You are chatty, nosy, easily " +
             "flattered, and genuinely terrified — but of a much smaller crime than murder. You love to " +
             "gossip and will happily talk about OTHER people's business at length.\n" +
-            "UNDER DIRECT/BLUNT PRESSURE: you get MORE evasive and talk in circles — you're used to " +
-            "gossiping your way out of scrutiny, so a blunt accusation just makes you perform innocence " +
-            "louder and change the subject.\n" +
+            "UNDER DIRECT/BLUNT PRESSURE: you deflect — but ALWAYS with fresh material. Change the " +
+            "subject to a NEW piece of gossip, a NEW complaint about your knees or the weather, a NEW " +
+            "tangent about the neighbourhood. NEVER repeat a deflection you've already used; if you " +
+            "catch yourself circling back, veer somewhere new instead.\n" +
             "UNDER GOSSIP/FLATTERY: this is your real weak point. If treated like gossip between " +
             "neighbors — asked about OTHER people's business first, complimented, or spoken to warmly " +
             "— you relax and volunteer things about the grounds, the night of the dinner, and " +
             "eventually your own guilt, without ever feeling interrogated.\n" +
+            "BE GENEROUS AND SPECIFIC: answer whatever is actually asked with a real, concrete, colourful " +
+            "detail — you are a talker who loves an audience. Volunteer little observations about the " +
+            "Ravenscroft household, the night of the dinner, the other neighbours. Only your ONE real " +
+            "secret stays guarded. Everything else, you'll happily chatter about.\n" +
             "YOUR FALSE GIVE (offer this readily under generic/blunt pressure, NOT your real secret): " +
             "you don't much like Lady Constance and have spread a rumor or two about the state of her " +
             "marriage. This is real, a little juicy, and NOT murder — say it like you're getting away " +
             "with something petty.\n" +
             "HARD RULES: never say you are an AI or a language model. No stage directions in asterisks " +
             "beyond a short parenthetical if truly needed. Keep replies to 1-3 sentences, spoken aloud, " +
-            "in character, reacting to exactly what was just said.";
+            "in character, reacting to exactly what was just said. Every reply must move forward — a new " +
+            "detail, a new tangent, or a real answer — NEVER a restatement of a line you've already given.";
         pemberton.openingLine =
             "Oh! An investigator, in my little shed — how thrilling. Terrible business of course, " +
             "poor Reginald, simply terrible. Tea? No? Well. Ask away, dear — I see everything from " +
@@ -155,39 +161,25 @@ public static class GnomesSceneBuilder
         // SUSPECT'S OWN reply, not the player's question, so it only completes when she
         // actually answers. Keywords matched against her generated lines; tune if she
         // phrases things in ways that miss these (same iteration loop as the pressure classifier).
-        // Small, concrete, ordered steps. Only the first 3 UNFINISHED ones show at a time
-        // (CaseBoardUI) — as each ticks off, the next slides in. Broken into granular beats
-        // so the player always has a clear "ask about X next" rather than a vague goal.
+        // Loose, thematic goals — direction, NOT a script of exact questions. The player
+        // decides HOW to get there (any wording, any angle); an objective ticks when her
+        // OWN answer touches the topic. Kept broad so interrogation feels open, not like
+        // filling in a form. Only the first 2-3 unfinished show at once (CaseBoardUI).
         pemberton.objectives = new List<SuspectBrain.Objective>
         {
             new SuspectBrain.Objective
             {
-                label = "Where was she that night?",
-                keywords = new List<string> { "home", "shed", "window", "garden", "grounds" }
+                label = "Pin down where she was that night",
+                keywords = new List<string> { "home", "shed", "window", "garden", "grounds", "reading", "tea", "book", "resting", "watching" }
             },
             new SuspectBrain.Objective
             {
-                label = "What was she doing?",
-                keywords = new List<string> { "reading", "tea", "book", "resting", "watching", "tending" }
+                label = "Get her talking about the household",
+                keywords = new List<string> { "constance", "widow", "marriage", "higgins", "butler", "finch", "doctor", "reginald", "neighbor", "gnome" }
             },
             new SuspectBrain.Objective
             {
-                label = "How well did she know Reginald?",
-                keywords = new List<string> { "neighbor", "years", "fence", "gnome", "collection", "quarrel", "argued" }
-            },
-            new SuspectBrain.Objective
-            {
-                label = "Get her gossiping about the household",
-                keywords = new List<string> { "constance", "widow", "marriage", "higgins", "butler", "finch", "doctor" }
-            },
-            new SuspectBrain.Objective
-            {
-                label = "Make her admit a petty secret",
-                source = SuspectBrain.Objective.Source.FalseGiveTriggered
-            },
-            new SuspectBrain.Objective
-            {
-                label = "Crack what she's really hiding",
+                label = "Find what she's hiding",
                 source = SuspectBrain.Objective.Source.Broken
             },
         };

@@ -122,6 +122,8 @@ public class InterrogationConsole : MonoBehaviour
     {
         Active = true;
         _history.Clear();
+        _recentSuspectLines.Clear();
+        _lastSuspectLine = "";
         if (Vosk != null) Vosk.StartRecordingManual();
         // The cold open: every character enters like a scene. Authored, once per case —
         // spoken the moment the voice is actually ready (Start-order safe).
@@ -286,34 +288,45 @@ public class InterrogationConsole : MonoBehaviour
 
     string _lastSuspectLine = "";
 
+    readonly List<string> _recentSuspectLines = new List<string>();
+
     IEnumerator GenerateThenSpeak(string playerText, SuspectBrain.PressureResult result, SuspectBrain.Suspicion suspicion = null)
     {
         string facts = Brain.BuildFactsCage(suspicion);
+        // Explicitly show her what she's ALREADY said so she stops recycling it — the biggest
+        // driver of the loop was that her own repeated lines were in _history as "context to
+        // continue from" with no instruction NOT to reuse them.
+        string antiRepeat = _recentSuspectLines.Count > 0
+            ? "\nYOU HAVE ALREADY SAID THESE — do NOT repeat them or rephrase them, MOVE THE " +
+              "CONVERSATION FORWARD with new detail, a new tangent, or a new deflection:\n- " +
+              string.Join("\n- ", _recentSuspectLines)
+            : "";
+
         string gen = null;
-        yield return Llm.GenerateReply(string.Join("\n", _history), facts, (t, ok) => { if (ok) gen = t; },
+        yield return Llm.GenerateReply(string.Join("\n", _history), facts + antiRepeat, (t, ok) => { if (ok) gen = t; },
             systemPromptOverride: Brain.persona, npcName: Brain.suspectName,
             closingInstruction:
                 "Reply with dialogue only, in character, reacting SPECIFICALLY to what was just said. " +
                 "Never state facts outside YOUR GUARDED SECRET/FALSE GIVE/CURRENT PATIENCE context above. " +
-                "STAY CONSISTENT with what YOU yourself already said earlier in CONVERSATION SO FAR — never " +
-                "flatly deny or contradict your own prior lines; if pressed on something you already admitted, " +
-                "own it (deflect the IMPLICATION if you must, not the FACT that you said it). " +
+                "STAY CONSISTENT with your own prior lines — never flatly contradict what you already " +
+                "admitted (deflect the IMPLICATION, not the FACT). Every reply must add SOMETHING new: a " +
+                "fresh detail, a new digression, a question back, a different mood — never restate a point " +
+                "you've already made. " +
                 $"Write {Brain.suspectName}'s next line now:",
-            maxTokens: 90, temperature: 0.75f);
+            maxTokens: 90, temperature: 0.9f); // higher temp = less likely to fall into the same groove
 
-        // Repetition guard (same failure Sana had — observed live: the identical "Dr.
-        // Finch, always so busy with his little experiments" line three turns in a row,
-        // because each repeat becomes the next turn's own context). One retry at lower
-        // temperature with an explicit say-something-different instruction.
-        if (!string.IsNullOrWhiteSpace(gen) && IsNearDuplicate(gen, _lastSuspectLine))
+        // Retry if it STILL near-matches any of her recent lines (not just the immediately
+        // previous one — she was cycling A/B/A/B and slipping past a last-line-only check).
+        if (!string.IsNullOrWhiteSpace(gen) && RecentlyRepeated(gen))
         {
             string retry = null;
-            yield return Llm.GenerateReply(string.Join("\n", _history), facts, (t, ok) => { if (ok) retry = t; },
+            yield return Llm.GenerateReply(string.Join("\n", _history), facts + antiRepeat, (t, ok) => { if (ok) retry = t; },
                 systemPromptOverride: Brain.persona, npcName: Brain.suspectName,
                 closingInstruction:
-                    "Your previous attempt REPEATED your own last line. Say something DIFFERENT that " +
-                    $"actually answers what was just asked. Write {Brain.suspectName}'s next line now:",
-                maxTokens: 90, temperature: 0.55f);
+                    "Your previous attempt REPEATED something you already said. Say something COMPLETELY " +
+                    "DIFFERENT — bring up a new subject, ask the investigator a question, or reveal a small " +
+                    $"new harmless detail. Write {Brain.suspectName}'s next line now:",
+                maxTokens: 90, temperature: 1.0f);
             if (!string.IsNullOrWhiteSpace(retry)) gen = retry;
         }
         _pendingRequests--;
@@ -322,6 +335,8 @@ public class InterrogationConsole : MonoBehaviour
             ? "(hesitates, loses their train of thought for a moment) ...I'm sorry, what was the question?"
             : gen.Trim();
         _lastSuspectLine = line;
+        _recentSuspectLines.Add(line);
+        if (_recentSuspectLines.Count > 4) _recentSuspectLines.RemoveAt(0); // remember her last few lines
 
         _history.Add($"{Brain.suspectName}: {line}");
         OnLine?.Invoke(Brain.suspectName, line);
@@ -381,6 +396,15 @@ public class InterrogationConsole : MonoBehaviour
     }
 
     // Word-overlap near-duplicate check, ported from CompanionConsole's repetition guard.
+    // True if the candidate line near-duplicates ANY of her recent lines (catches A/B/A/B
+    // cycling that a last-line-only check slips past).
+    bool RecentlyRepeated(string candidate)
+    {
+        foreach (var prev in _recentSuspectLines)
+            if (IsNearDuplicate(candidate, prev)) return true;
+        return false;
+    }
+
     static bool IsNearDuplicate(string a, string b)
     {
         if (string.IsNullOrWhiteSpace(a) || string.IsNullOrWhiteSpace(b)) return false;
@@ -389,7 +413,7 @@ public class InterrogationConsole : MonoBehaviour
         if (wordsA.Count < 4 || wordsB.Count < 4) return false;
         int overlap = 0;
         foreach (var w in wordsA) if (wordsB.Contains(w)) overlap++;
-        return (float)overlap / Mathf.Min(wordsA.Count, wordsB.Count) > 0.6f;
+        return (float)overlap / Mathf.Min(wordsA.Count, wordsB.Count) > 0.55f;
     }
 
     static string ExtractText(string json)

@@ -22,13 +22,23 @@ public class CaseBoardUI : MonoBehaviour
     [Range(0f, 1f)] public float panelOpacity = 0.72f;
     [Range(0.22f, 0.42f)] public float boardWidthFraction = 0.3f;
 
+    [Header("UI feedback sound (procedural blips — no assets needed)")]
+    public bool uiSounds = true;
+    [Range(0f, 1f)] public float uiSoundVolume = 0.4f;
+
     Vector2 _cardScroll;
     string _lastToast = "";
     float _toastUntil;
     readonly List<(string who, string text)> _transcript = new List<(string, string)>();
     string _lastSuspectLine = "";
-    string _pressureFlash = "";
-    float _pressureFlashUntil;
+
+    // Suspect-bubble typewriter reveal: how many chars of the current line are shown.
+    string _bubbleFullText = "";
+    float _bubbleRevealChars;
+    const float TypewriterCharsPerSec = 45f;
+
+    AudioSource _sfx;
+    AudioClip _blipSoft, _blipDone, _blipToast;
 
     const string PURPLE = "#c9a2ff";
     const string RED = "#ff8a8a";
@@ -42,33 +52,71 @@ public class CaseBoardUI : MonoBehaviour
     Texture2D _panelTex;
     GUIStyle _body, _bodyDim, _header, _bubble, _hudStyle;
 
+    void Awake()
+    {
+        _sfx = gameObject.AddComponent<AudioSource>();
+        _sfx.playOnAwake = false;
+        _sfx.spatialBlend = 0f;
+        // Procedural blips — a short decaying sine, three pitches. No audio assets needed.
+        _blipSoft = MakeBlip(660f, 0.06f);   // new suspect line / card
+        _blipDone = MakeBlip(880f, 0.11f);   // objective complete (brighter, longer)
+        _blipToast = MakeBlip(520f, 0.09f);  // evidence / contradiction toast
+    }
+
+    static AudioClip MakeBlip(float freq, float dur)
+    {
+        int rate = 44100;
+        int n = Mathf.RoundToInt(rate * dur);
+        var samples = new float[n];
+        for (int i = 0; i < n; i++)
+        {
+            float t = (float)i / rate;
+            float env = Mathf.Exp(-t * 22f); // quick decay
+            samples[i] = Mathf.Sin(2f * Mathf.PI * freq * t) * env * 0.5f;
+        }
+        var clip = AudioClip.Create($"blip{freq}", n, 1, rate, false);
+        clip.SetData(samples, 0);
+        return clip;
+    }
+
+    void Play(AudioClip c)
+    {
+        if (uiSounds && _sfx != null && c != null) _sfx.PlayOneShot(c, uiSoundVolume);
+    }
+
     void OnEnable()
     {
         if (Board != null)
         {
-            Board.OnEvidenceDiscovered += ev => Toast($"NEW EVIDENCE: {ev.label}");
-            Board.OnContradictionFound += c => Toast("CONTRADICTION FOUND — check the board");
-            Board.OnSuspicionLoopFound += l => Toast($"SUSPICION LOOP: {l.a.suspectName} ⇄ {l.b.suspectName}");
+            Board.OnEvidenceDiscovered += ev => { Toast($"NEW EVIDENCE: {ev.label}"); Play(_blipToast); };
+            Board.OnContradictionFound += c => { Toast("CONTRADICTION FOUND — check the board"); Play(_blipToast); };
+            Board.OnSuspicionLoopFound += l => { Toast($"SUSPICION LOOP: {l.a.suspectName} ⇄ {l.b.suspectName}"); Play(_blipToast); };
         }
         if (ActiveConsole != null)
         {
             ActiveConsole.OnLine += OnLine;
-            ActiveConsole.OnPressureRead += (matched, kind) =>
-            {
-                _pressureFlash = matched
-                    ? "✦ that landed — she's opening up"
-                    : "✕ not working — try a different approach";
-                _pressureFlashUntil = Time.time + 3.5f;
-            };
             if (ActiveConsole.Brain != null)
-                ActiveConsole.Brain.OnObjectiveComplete += o => Toast($"✓ {o.label}");
+                ActiveConsole.Brain.OnObjectiveComplete += o => { Toast($"✓ {o.label}"); Play(_blipDone); };
         }
     }
 
     void OnLine(string who, string text)
     {
         _transcript.Add((who, text));
-        if (who != "YOU") _lastSuspectLine = text;
+        if (who != "YOU")
+        {
+            _lastSuspectLine = text;
+            _bubbleFullText = text;
+            _bubbleRevealChars = 0f; // restart the typewriter for the new line
+            Play(_blipSoft);
+        }
+    }
+
+    void Update()
+    {
+        // Typewriter reveal of the suspect's current bubble line.
+        if (_bubbleRevealChars < _bubbleFullText.Length)
+            _bubbleRevealChars = Mathf.Min(_bubbleFullText.Length, _bubbleRevealChars + TypewriterCharsPerSec * Time.deltaTime);
     }
 
     void Toast(string msg) { _lastToast = msg; _toastUntil = Time.time + 4f; }
@@ -158,7 +206,10 @@ public class CaseBoardUI : MonoBehaviour
         Panel(r);
         string name = Runner.ActiveSuspect != null ? Runner.ActiveSuspect.suspectName : "Suspect";
         GUI.Label(new Rect(r.x + 18 * k, r.y + 10 * k, r.width - 36 * k, 28 * k), $"<color={SUSPECT}><b>{name}</b></color>", _header);
-        GUI.Label(new Rect(r.x, r.y + 34 * k, r.width, r.height - 40 * k), $"<color=#ffffff>“{_lastSuspectLine}”</color>", _bubble);
+        // Typewriter reveal: show only the chars revealed so far this line.
+        int revealed = Mathf.Clamp(Mathf.FloorToInt(_bubbleRevealChars), 0, _lastSuspectLine.Length);
+        string shown = _lastSuspectLine.Substring(0, revealed);
+        GUI.Label(new Rect(r.x, r.y + 34 * k, r.width, r.height - 40 * k), $"<color=#ffffff>“{shown}”</color>", _bubble);
     }
 
     // ── top-right: what you last said + the live mic transcript ──
@@ -179,8 +230,8 @@ public class CaseBoardUI : MonoBehaviour
         GUILayout.FlexibleSpace();
         if (Runner.CurrentPhase == CaseRunner.Phase.Interrogation && ActiveConsole != null)
         {
-            if (Time.time < _pressureFlashUntil)
-                GUILayout.Label($"<color={(_pressureFlash.StartsWith("✦") ? GREEN : GOLD)}>{_pressureFlash}</color>", _body);
+            // (No "that landed / not working" flash — the suspect's own reaction and the
+            // patience meter are the feedback; a text hint spoiled the read.)
             string hearing = ActiveConsole.LiveHearingText;
             GUILayout.Label(string.IsNullOrEmpty(hearing)
                 ? $"<color={GREEN}>🎤 listening…</color>"
@@ -215,19 +266,20 @@ public class CaseBoardUI : MonoBehaviour
     {
         var brain = ActiveConsole != null ? ActiveConsole.Brain : null;
         if (brain == null || brain.objectives.Count == 0) return;
-        GUILayout.Label($"<color={GREEN}>YOUR NEXT MOVES</color>", _header);
+        GUILayout.Label($"<color={GREEN}>LEADS TO CHASE</color>", _header);
 
-        // Show at most 3 UNFINISHED objectives; as each ticks off, the next slides in.
-        // A couple recently-completed ones stay visible (struck through) for a beat of
-        // satisfaction before scrolling off.
+        // Show at most 3 UNFINISHED objectives; as each ticks off, the next slides in. One
+        // recently-completed one stays visible (dimmed, checked) for a beat of satisfaction.
+        // NOTE: IMGUI rich text supports only <b>/<i>/<color>/<size> — NO <s> strikethrough
+        // (it renders literally), so completed items are shown dimmed + checked instead.
         int shown = 0, doneShown = 0;
         foreach (var o in brain.objectives)
         {
             if (o.Done)
             {
-                if (doneShown >= 1) continue; // keep just the most recent tick visible
+                if (doneShown >= 1) continue;
                 doneShown++;
-                GUILayout.Label($"<color={GREEN}>✓ <s>{o.label}</s></color>", _body);
+                GUILayout.Label($"<color=#5a7a5f>✓ {o.label}</color>", _body);
             }
             else
             {

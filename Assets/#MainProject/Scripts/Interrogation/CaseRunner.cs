@@ -25,6 +25,8 @@ public class CaseRunner : MonoBehaviour
     public bool autoStartSolo = false;
     public SuspectBrain soloSuspect;
     public InterrogationConsole soloConsole;
+    [Tooltip("If assigned, autoStartSolo waits for this to finish (or be skipped) before beginning the case — the narrated cold open.")]
+    public IntroSequence intro;
 
     public Phase CurrentPhase { get; private set; } = Phase.Assignment;
     public int RoundIndex { get; private set; } // 0-based
@@ -40,14 +42,22 @@ public class CaseRunner : MonoBehaviour
 
     void Start()
     {
-        if (autoStartSolo)
+        if (!autoStartSolo) return;
+        if (intro != null)
         {
-            BeginCase();
-            if (soloSuspect != null)
-            {
-                BeginInterrogation(soloSuspect);
-                soloConsole?.BeginInterview();
-            }
+            intro.OnIntroComplete += StartSoloCase;
+            intro.Begin();
+        }
+        else StartSoloCase();
+    }
+
+    void StartSoloCase()
+    {
+        BeginCase();
+        if (soloSuspect != null)
+        {
+            BeginInterrogation(soloSuspect);
+            soloConsole?.BeginInterview();
         }
     }
 

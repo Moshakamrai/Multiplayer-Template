@@ -199,6 +199,14 @@ public static class GnomesSceneBuilder
                               "path — scene built without a bust. Assign one manually or fix the path in GnomesSceneBuilder.");
         }
 
+        // ── Cold open: narrated photographs before the first interview (the highest-
+        // leverage polish pass — pure authored pacing, zero LLM variance). Content lives in
+        // StreamingAssets/gnomes-intro/ (photos + narration.mp3/.wav/.ogg + narration.txt) —
+        // works today with just the placeholder narration.txt (silent captioned slideshow)
+        // and upgrades to real photography/voiceover later with no code changes.
+        var introGO = new GameObject("IntroSequence");
+        var intro = introGO.AddComponent<IntroSequence>();
+
         var runnerGO = new GameObject("CaseRunner");
         var runner = runnerGO.AddComponent<CaseRunner>();
         runner.board = board;
@@ -207,6 +215,7 @@ public static class GnomesSceneBuilder
         runner.autoStartSolo = true;
         runner.soloSuspect = pemberton;
         runner.soloConsole = console;
+        runner.intro = intro;
         console.Runner = runner;
 
         var uiGO = new GameObject("CaseBoardUI");
@@ -216,10 +225,11 @@ public static class GnomesSceneBuilder
         ui.ActiveConsole = console;
 
         EditorSceneManager.SaveScene(scene, ScenePath);
-        Debug.Log($"[Gnomes & Gaslight] Solo test scene saved to {ScenePath}. Press Play — the case " +
-                  "auto-starts (call runner.BeginCase() + runner.BeginInterrogation(pemberton) from a " +
-                  "quick debug hook, or wire a start button). Push BLUNT questions first to feel the " +
-                  "'this isn't working' cost, then try warm/gossipy flattery — that's her real axis. " +
-                  "Watch the side panel for her false give (gold) and eventual broken-state reveal (red).");
+        Debug.Log($"[Gnomes & Gaslight] Solo test scene saved to {ScenePath}. Press Play — the narrated " +
+                  "cold open runs first (click/space to skip), then the case auto-starts into Pemberton's " +
+                  "interview. Push BLUNT questions first to feel the 'this isn't working' cost, then try " +
+                  "warm/gossipy flattery — that's her real axis. Watch the side panel for her false give " +
+                  "(gold) and eventual broken-state reveal (red). Drop real photos + narration.mp3 into " +
+                  "StreamingAssets/gnomes-intro/ whenever ready — no code changes needed.");
     }
 }

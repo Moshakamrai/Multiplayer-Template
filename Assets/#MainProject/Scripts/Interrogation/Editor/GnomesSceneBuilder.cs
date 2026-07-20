@@ -93,6 +93,16 @@ public static class GnomesSceneBuilder
         var pembertonGO = new GameObject("Pemberton");
         var pemberton = pembertonGO.AddComponent<SuspectBrain>();
         pemberton.suspectName = "Mrs. Pemberton";
+        pemberton.role = "The Neighbour";
+        pemberton.bio =
+            "The Ravenscrofts' next-door neighbour of many years — a chatty, nosy widow who prides " +
+            "herself on knowing everyone's business and misses very little from her garden window. " +
+            "Harmless enough on the surface, and she does love an audience.";
+        pemberton.whySuspect =
+            "She was seen on the manor grounds late on the night Reginald died — well after dark, with " +
+            "no obvious reason to be there. She's been evasive about exactly why. Whatever she was up to, " +
+            "she may also have seen who else was moving about that night.\n" +
+            "Try: ask where she was and what she was doing — and get her gossiping about the household.";
         pemberton.persona =
             "You are MRS. PEMBERTON, the Ravenscroft family's neighbor. You are chatty, nosy, easily " +
             "flattered, and genuinely terrified — but of a much smaller crime than murder. You love to " +

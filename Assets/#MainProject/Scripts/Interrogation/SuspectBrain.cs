@@ -19,6 +19,16 @@ public class SuspectBrain : MonoBehaviour
     [Header("Identity")]
     public string suspectName = "Suspect";
 
+    [Header("Dossier — shown to the player BEFORE the interview starts")]
+    [Tooltip("One-line role/relationship, e.g. 'The Neighbour' or 'The Family Physician'.")]
+    public string role = "";
+    [TextArea(2, 5)]
+    [Tooltip("Who they are as a person — a couple of sentences of character/background to set expectations.")]
+    public string bio = "";
+    [TextArea(2, 5)]
+    [Tooltip("WHY they're a suspect — what puts them in the frame. This is what points the player at the right questions to ask.")]
+    public string whySuspect = "";
+
     [Header("Presentation — the movie feel")]
     [TextArea(2, 4)]
     [Tooltip("Authored cold-open line spoken the first time this suspect's interview begins — every character enters like a scene, not a chatbot.")]

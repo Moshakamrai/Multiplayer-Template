@@ -167,10 +167,68 @@ public class CaseBoardUI : MonoBehaviour
         float k = Mathf.Max(1f, Screen.height / 900f);
         BuildStyles(k);
 
+        // Dossier card takes over the whole screen before the interview begins — the
+        // interrogation HUD stays hidden until the player has read who this is.
+        if (Runner.ShowingDossier) { DrawDossier(k); return; }
+
         DrawTopBar(k);
         DrawSuspectBubble(k);   // bottom-left
         DrawPlayerPanel(k);     // top-right
         DrawBoardPanel(k);      // bottom-right
+    }
+
+    // ── the suspect dossier: who they are + why they're a suspect, shown before you talk ──
+    void DrawDossier(float k)
+    {
+        var s = Runner.ActiveSuspect;
+        if (s == null) { Runner.DismissDossier(); return; }
+
+        // dim the whole screen, then a centered card over it
+        var full = new Rect(0, 0, Screen.width, Screen.height);
+        var dim = GUI.color; GUI.color = new Color(0, 0, 0, 0.6f);
+        GUI.DrawTexture(full, Texture2D.whiteTexture); GUI.color = dim;
+
+        float w = Mathf.Min(Screen.width * 0.6f, 820 * k);
+        float h = Mathf.Min(Screen.height * 0.72f, 640 * k);
+        var card = new Rect((Screen.width - w) / 2f, (Screen.height - h) / 2f, w, h);
+        var p = GUI.color; GUI.color = new Color(1, 1, 1, 0.95f);
+        GUI.DrawTexture(card, PanelTex()); GUI.color = p;
+
+        var title = new GUIStyle(_bubble) { fontStyle = FontStyle.Bold, alignment = TextAnchor.UpperLeft };
+        var head = new GUIStyle(_header);
+        var body = new GUIStyle(_body);
+
+        float pad = 32 * k, x = card.x + pad, y = card.y + pad, cw = card.width - pad * 2;
+        GUI.Label(new Rect(x, y, cw, 44 * k), $"<color={SUSPECT}>{s.suspectName}</color>", title);
+        y += 46 * k;
+        if (!string.IsNullOrEmpty(s.role))
+        {
+            GUI.Label(new Rect(x, y, cw, 30 * k), $"<color={GOLD}>{s.role}</color>", head);
+            y += 40 * k;
+        }
+        if (!string.IsNullOrEmpty(s.bio))
+        {
+            GUI.Label(new Rect(x, y, cw, 30 * k), $"<color={DIM}>BACKGROUND</color>", head);
+            y += 30 * k;
+            float bh = body.CalcHeight(new GUIContent(s.bio), cw);
+            GUI.Label(new Rect(x, y, cw, bh), s.bio, body);
+            y += bh + 22 * k;
+        }
+        if (!string.IsNullOrEmpty(s.whySuspect))
+        {
+            GUI.Label(new Rect(x, y, cw, 30 * k), $"<color={RED}>WHY THEY'RE A SUSPECT</color>", head);
+            y += 30 * k;
+            float wh = body.CalcHeight(new GUIContent(s.whySuspect), cw);
+            GUI.Label(new Rect(x, y, cw, wh), s.whySuspect, body);
+        }
+
+        var btn = new Rect(card.x + card.width - 260 * k - pad, card.y + card.height - 60 * k, 260 * k, 44 * k);
+        var btnStyle = new GUIStyle(GUI.skin.button) { fontSize = Mathf.RoundToInt(20 * k), fontStyle = FontStyle.Bold, richText = true };
+        if (GUI.Button(btn, "Begin interview  ▶", btnStyle))
+        {
+            Play(_blipDone);
+            Runner.DismissDossier();
+        }
     }
 
     // ── top bar: round / phase / patience / toast ──

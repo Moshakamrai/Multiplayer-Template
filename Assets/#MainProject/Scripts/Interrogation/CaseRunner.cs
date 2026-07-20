@@ -82,10 +82,7 @@ public class CaseRunner : MonoBehaviour
     {
         BeginCase();
         if (soloSuspect != null)
-        {
-            BeginInterrogation(soloSuspect);
-            soloConsole?.BeginInterview();
-        }
+            BeginInterrogation(soloSuspect); // console starts on dossier dismiss (or immediately if none)
     }
 
     public void BeginCase()
@@ -138,18 +135,37 @@ public class CaseRunner : MonoBehaviour
         return true;
     }
 
+    // While true, the interview is set up but PAUSED on the dossier card — the timer
+    // doesn't run and the console isn't listening yet. CaseBoardUI draws the dossier and
+    // calls DismissDossier() when the player clicks "Begin interview".
+    public bool ShowingDossier { get; private set; }
+
     /// <summary>Solo/2P convenience: start interrogating a specific suspect directly
     /// (skips a formal multi-seat assignment UI — see GDD Phase 3's "fallback: solo/2P via
-    /// taking turns").</summary>
+    /// taking turns"). Opens on the dossier card first if the suspect has one authored.</summary>
     public void BeginInterrogation(SuspectBrain suspect)
     {
         ActiveSuspect = suspect;
         SetPhase(Phase.Interrogation);
+        // Pause on the dossier if there's anything to show; otherwise go straight in.
+        ShowingDossier = suspect != null &&
+            (!string.IsNullOrEmpty(suspect.bio) || !string.IsNullOrEmpty(suspect.whySuspect) || !string.IsNullOrEmpty(suspect.role));
+        if (ShowingDossier) PhaseTimeRemaining = interrogationSeconds; // freeze the clock until dismissed
+        else soloConsole?.BeginInterview();                            // no dossier — start listening now
+    }
+
+    /// <summary>Called by the UI's "Begin interview" button — clears the dossier and kicks
+    /// off the console (mic + opening line + timer).</summary>
+    public void DismissDossier()
+    {
+        if (!ShowingDossier) return;
+        ShowingDossier = false;
+        soloConsole?.BeginInterview();
     }
 
     void Update()
     {
-        if (CurrentPhase == Phase.Interrogation)
+        if (CurrentPhase == Phase.Interrogation && !ShowingDossier)
         {
             PhaseTimeRemaining -= Time.deltaTime;
             if (PhaseTimeRemaining <= 0f || (ActiveSuspect != null && ActiveSuspect.BrokenState))
@@ -188,10 +204,7 @@ public class CaseRunner : MonoBehaviour
         // Phase 1 solo bootstrap: only one suspect exists, so skip the (not-yet-built)
         // assignment UI and jump straight back into interrogating them for the next round.
         if (autoStartSolo && soloSuspect != null && !soloSuspect.BrokenState)
-        {
-            BeginInterrogation(soloSuspect);
-            soloConsole?.BeginInterview();
-        }
+            BeginInterrogation(soloSuspect); // BeginInterview fires on dossier dismiss (or immediately if none)
     }
 
     /// <summary>Players can call this any round instead of continuing — GDD's "any round,

@@ -234,6 +234,11 @@ public static class GnomesSceneBuilder
                 quad.name = "Pemberton Backdrop";
                 Object.DestroyImmediate(quad.GetComponent<Collider>());
                 quad.transform.position = new Vector3(0f, 1f, 6f);
+                // A Quad's front face normal is +Z by default — facing AWAY from a camera
+                // at z=-10 looking toward +Z. Without this rotation the camera sees only the
+                // back face, which URP's Unlit shader culls by default: invisible, no error,
+                // looked exactly like "the backdrop vanished".
+                quad.transform.rotation = Quaternion.Euler(0f, 180f, 0f);
                 float aspect = (float)backdropTex.width / backdropTex.height;
                 float height = 9f;
                 quad.transform.localScale = new Vector3(height * aspect, height, 1f);

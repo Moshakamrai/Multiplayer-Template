@@ -196,8 +196,20 @@ public class IntroSequence : MonoBehaviour
     {
         int slideCount = Mathf.Max(1, _photos.Length == 0 ? _captions.Length : _photos.Length);
 
-        // Give narration audio a moment to start loading/playing before timing off its length.
-        yield return new WaitForSeconds(0.15f);
+        // Narration is loaded ASYNCHRONOUSLY (UnityWebRequestMultimedia) and can easily take
+        // well over a second to actually start playing for a multi-MB clip — a fixed 0.15s
+        // wait here was NOT enough, and slide 1 would appear on screen while the audio was
+        // still loading, then every later slide inherited that same fixed lag once the clip
+        // finally started (the reported "narration behind by ~2 seconds, every time" bug).
+        // Wait for the clip to genuinely be playing (or a short timeout if there's no
+        // narration file at all / it fails to load) before the slideshow clock starts.
+        float waitStart = Time.time;
+        while (Time.time - waitStart < 4f)
+        {
+            if (_narrationSource.clip != null && _narrationSource.isPlaying) break;
+            if (_narrationSource.clip == null && Time.time - waitStart > 1f) break; // no narration file — proceed silently
+            yield return null;
+        }
 
         bool hasExactTimings = _slideStartTimes != null && _slideStartTimes.Length >= slideCount
                                 && _narrationSource.clip != null;

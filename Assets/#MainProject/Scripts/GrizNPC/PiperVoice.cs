@@ -94,19 +94,30 @@ public class PiperVoice : MonoBehaviour
         _exePath = Path.Combine(dir, "piper.exe");
         if (!File.Exists(_exePath)) return;
         if (!Directory.Exists(dir)) return;
-        // prefer a model whose filename contains preferredModel; else first one found
-        string fallback = null;
+        // Prefer a model whose filename contains preferredModel. If that's not installed,
+        // fall back to a SAME-LANGUAGE-FAMILY voice rather than blindly grabbing the first
+        // .onnx — otherwise an English character whose specific voice isn't installed would
+        // get spoken by whatever sorts first alphabetically, which is the Bangla model
+        // (bn_ < en_). A Bangla model reading English is the "shit TTS" bug this prevents.
+        bool wantBangla = !string.IsNullOrEmpty(preferredModel) &&
+                          preferredModel.ToLowerInvariant().Contains("bn");
+        string sameFamilyFallback = null; // an en_/bn_ voice matching the requested language
+        string anyFallback = null;        // truly-last resort: any voice at all
         foreach (var f in Directory.GetFiles(dir, "*.onnx"))
         {
-            if (fallback == null) fallback = f;
-            if (!string.IsNullOrEmpty(preferredModel) &&
-                Path.GetFileName(f).ToLowerInvariant().Contains(preferredModel.ToLowerInvariant()))
+            string name = Path.GetFileName(f).ToLowerInvariant();
+            if (anyFallback == null) anyFallback = f;
+
+            bool isBangla = name.Contains("bn_") || name.Contains("bangla");
+            if (sameFamilyFallback == null && isBangla == wantBangla) sameFamilyFallback = f;
+
+            if (!string.IsNullOrEmpty(preferredModel) && name.Contains(preferredModel.ToLowerInvariant()))
             {
                 _modelPath = f;
                 break;
             }
         }
-        if (string.IsNullOrEmpty(_modelPath)) _modelPath = fallback;
+        if (string.IsNullOrEmpty(_modelPath)) _modelPath = sameFamilyFallback ?? anyFallback;
         if (string.IsNullOrEmpty(_modelPath)) return;
 
         _cacheDir = Path.Combine(Application.persistentDataPath, "piper-cache");

@@ -116,11 +116,15 @@ public static class GnomesSceneBuilder
             "poor Reginald, simply terrible. Tea? No? Well. Ask away, dear — I see everything from " +
             "this window, you know.";
         pemberton.backdropStreamingPath = "gnomes-intro/backdrops/pemberton.png";
-        // Female voice: drop en_GB-alba-medium.onnx (or en_US-amy-medium) into
-        // StreamingAssets/piper — falls back to whatever IS installed until then.
-        pemberton.voiceModelContains = "alba";
-        pemberton.voicePitch = 1.12f;      // bright, chatty
-        pemberton.voiceLengthScale = 0.95f; // slightly quick — she talks like a gossip
+        // Voice: en_GB-jenny_dioco-medium (warm higher female — fits a nosy neighbor).
+        // Download both .onnx + .onnx.json from huggingface rhasspy/piper-voices into
+        // StreamingAssets/piper. Until then PiperVoice falls back to an English MALE voice
+        // (no longer the Bangla model — see the same-language-family fallback fix).
+        // Phase 2 voices: Constance -> "alba" (softer female), Higgins ->
+        // "northern_english_male" (already installed), Finch -> "alan" (already installed).
+        pemberton.voiceModelContains = "jenny";
+        pemberton.voicePitch = 1.06f;      // bright, chatty (jenny is already female, so less pitch-up needed)
+        pemberton.voiceLengthScale = 0.98f; // slightly quick — she talks like a gossip
         pemberton.weakness = SuspectBrain.PressureAxis.Flattery;
         pemberton.wrongAxisCost = 4f;
         pemberton.bluntCost = 7f; // blunt pressure actively backfires on her per the GDD

@@ -23,6 +23,10 @@ using UnityEngine;
 // — should point at Higgins's obvious financial motive as a deliberate, calm misdirect.
 // These are texture/misdirection ONLY: none of them are load-bearing for the real 3-fact
 // accusation chain in GDD §2.4, by design.
+//
+// Backdrops: already generated and copied into StreamingAssets/gnomes-intro/backdrops/ as
+// constance.png, higgins.png, finch.png (pemberton.png is wired below) — Phase 2 just needs
+// suspect.backdropStreamingPath = "gnomes-intro/backdrops/<name>.png" for each.
 public static class GnomesSceneBuilder
 {
     const string ScenePath = "Assets/Scenes/GnomesAndGaslightSolo.unity";
@@ -99,6 +103,7 @@ public static class GnomesSceneBuilder
             "Oh! An investigator, in my little shed — how thrilling. Terrible business of course, " +
             "poor Reginald, simply terrible. Tea? No? Well. Ask away, dear — I see everything from " +
             "this window, you know.";
+        pemberton.backdropStreamingPath = "gnomes-intro/backdrops/pemberton.png";
         // Female voice: drop en_GB-alba-medium.onnx (or en_US-amy-medium) into
         // StreamingAssets/piper — falls back to whatever IS installed until then.
         pemberton.voiceModelContains = "alba";

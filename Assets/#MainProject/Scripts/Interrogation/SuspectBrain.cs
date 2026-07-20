@@ -23,6 +23,10 @@ public class SuspectBrain : MonoBehaviour
     [TextArea(2, 4)]
     [Tooltip("Authored cold-open line spoken the first time this suspect's interview begins — every character enters like a scene, not a chatbot.")]
     public string openingLine = "";
+    [Tooltip("Static backdrop image shown full-screen behind this suspect's bust during their interview (the GDD's 'a space, not a walkable environment'). Assign the Texture2D directly, or leave null and set backdropStreamingPath instead.")]
+    public Texture2D backdrop;
+    [Tooltip("Alternative to 'backdrop': a path relative to StreamingAssets to load at runtime (e.g. for scene-builder-authored suspects that can't hold a direct asset reference at edit time). Ignored if 'backdrop' is already assigned.")]
+    public string backdropStreamingPath = "";
     [Tooltip("Piper voice model filename substring for THIS suspect (e.g. \"amy\", \"alba\", \"northern_english_male\"). Distinct voices per suspect — drop extra .onnx voices into StreamingAssets/piper.")]
     public string voiceModelContains = "en_";
     [Range(0.5f, 1.5f)] public float voicePitch = 1f;
@@ -120,6 +124,25 @@ public class SuspectBrain : MonoBehaviour
     public List<Suspicion> suspicionsOfOthers = new List<Suspicion>();
 
     List<string> _presentedEvidenceIds = new List<string>();
+
+    /// <summary>Resolves the backdrop to actually draw: the direct reference if assigned,
+    /// else loads backdropStreamingPath from disk the first time it's asked for (cached
+    /// after). Returns null if neither is set — callers should fall back to a plain
+    /// background rather than erroring.</summary>
+    Texture2D _loadedBackdrop;
+    bool _backdropLoadAttempted;
+    public Texture2D ResolveBackdrop()
+    {
+        if (backdrop != null) return backdrop;
+        if (_loadedBackdrop != null || _backdropLoadAttempted) return _loadedBackdrop;
+        _backdropLoadAttempted = true;
+        if (string.IsNullOrEmpty(backdropStreamingPath)) return null;
+        string full = System.IO.Path.Combine(Application.streamingAssetsPath, backdropStreamingPath);
+        if (!System.IO.File.Exists(full)) return null;
+        var tex = new Texture2D(2, 2);
+        if (tex.LoadImage(System.IO.File.ReadAllBytes(full))) _loadedBackdrop = tex;
+        return _loadedBackdrop;
+    }
 
     public void ResetSuspect()
     {

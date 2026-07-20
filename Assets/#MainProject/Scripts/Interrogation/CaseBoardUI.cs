@@ -13,13 +13,13 @@ public class CaseBoardUI : MonoBehaviour
     public InterrogationConsole ActiveConsole;
 
     [Header("Layout")]
-    [Range(0.2f, 0.5f)] public float panelWidthFraction = 0.3f;
+    [Tooltip("The board is reference material, not the main event — the backdrop art and bust are. Kept narrow so most of the screen stays clear.")]
+    [Range(0.12f, 0.35f)] public float panelWidthFraction = 0.2f;
     public bool collapsed = false;
 
     Vector2 _cardScroll, _evidenceScroll, _transcriptScroll;
     string _lastToast = "";
     float _toastUntil;
-    string _typed = "";
     readonly List<(string who, string text)> _transcript = new List<(string, string)>();
 
     const string BG = "#12121a";
@@ -64,21 +64,22 @@ public class CaseBoardUI : MonoBehaviour
     {
         if (Runner == null || Board == null || !Runner.IsCaseStarted) return; // stay hidden during the intro cold open
         float k = Mathf.Max(1f, Screen.height / 900f);
-        int f = Mathf.RoundToInt(15 * k);
+        int f = Mathf.RoundToInt(22 * k); // bigger, readable-at-a-glance text — this was sized for a placeholder scene
         var rich = new GUIStyle(GUI.skin.label) { fontSize = f, richText = true, wordWrap = true };
 
+        DrawBackdrop();
         DrawTopHud(k, f, rich);
         DrawMainArea(k, f, rich);
 
         if (collapsed)
         {
-            if (GUI.Button(new Rect(Screen.width - 140 * k, 60 * k, 120 * k, 36 * k), "Show board ▶"))
+            if (GUI.Button(new Rect(Screen.width - 140 * k, 72 * k, 120 * k, 36 * k), "Show board ▶"))
                 collapsed = false;
             return;
         }
 
         float w = Screen.width * panelWidthFraction;
-        var panelRect = new Rect(Screen.width - w, 60 * k, w, Screen.height - 70 * k);
+        var panelRect = new Rect(Screen.width - w, 72 * k, w, Screen.height - 70 * k);
         GUI.color = new Color(0.07f, 0.07f, 0.10f, 0.92f);
         GUI.DrawTexture(panelRect, Texture2D.whiteTexture);
         GUI.color = Color.white;
@@ -102,10 +103,39 @@ public class CaseBoardUI : MonoBehaviour
         GUILayout.EndArea();
     }
 
+    Texture2D _lastBackdropShown;
+
+    // Full-screen room backdrop behind the bust — drawn COVER-fit (fills the screen,
+    // crops overflow) rather than letterboxed like the intro slideshow, since a static
+    // room should read as "the space you're standing in", not a bordered photograph.
+    void DrawBackdrop()
+    {
+        var brain = ActiveConsole != null ? ActiveConsole.Brain : null;
+        var tex = brain != null ? brain.ResolveBackdrop() : null;
+        if (tex == null) return;
+        _lastBackdropShown = tex;
+
+        var full = new Rect(0, 0, Screen.width, Screen.height);
+        float texAspect = (float)tex.width / tex.height;
+        float areaAspect = full.width / full.height;
+        Rect fit;
+        if (texAspect > areaAspect)
+        {
+            float w = full.height * texAspect;
+            fit = new Rect(full.x - (w - full.width) / 2f, full.y, w, full.height);
+        }
+        else
+        {
+            float h = full.width / texAspect;
+            fit = new Rect(full.x, full.y - (h - full.height) / 2f, full.width, h);
+        }
+        GUI.DrawTexture(fit, tex, ScaleMode.ScaleToFit);
+    }
+
     void DrawMainArea(float k, int f, GUIStyle rich)
     {
         float panelW = collapsed ? 0f : Screen.width * panelWidthFraction;
-        var area = new Rect(10 * k, 60 * k, Screen.width - panelW - 20 * k, Screen.height - 130 * k);
+        var area = new Rect(10 * k, 72 * k, Screen.width - panelW - 20 * k, Screen.height - 130 * k);
         GUILayout.BeginArea(area);
 
         _transcriptScroll = GUILayout.BeginScrollView(_transcriptScroll, GUILayout.ExpandHeight(true));
@@ -124,19 +154,13 @@ public class CaseBoardUI : MonoBehaviour
                 string flashColor = _pressureFlash.StartsWith("🔓") ? GREEN : "#facc15";
                 GUILayout.Label($"<color={flashColor}>{_pressureFlash}</color>", rich);
             }
-            GUILayout.BeginHorizontal();
-            GUI.SetNextControlName("interrogationInput");
-            _typed = GUILayout.TextField(_typed, GUILayout.Height(36 * k));
-            bool submit = GUILayout.Button("Ask / Say", GUILayout.Width(110 * k), GUILayout.Height(36 * k)) ||
-                          (Event.current.type == EventType.KeyUp && Event.current.keyCode == KeyCode.Return &&
-                           GUI.GetNameOfFocusedControl() == "interrogationInput");
-            GUILayout.EndHorizontal();
-            if (submit && !string.IsNullOrWhiteSpace(_typed))
-            {
-                ActiveConsole.SendTyped(_typed);
-                _typed = "";
-                GUI.FocusControl("interrogationInput");
-            }
+            // Full mic mode — no typed input. Live partial transcript doubles as the only
+            // feedback that the player is actually being heard.
+            string hearing = ActiveConsole.LiveHearingText;
+            string micLine = string.IsNullOrEmpty(hearing)
+                ? $"<color={GREEN}>🎤 listening…</color>"
+                : $"<color={GREEN}>🎤</color> <i>{hearing}</i>";
+            GUILayout.Label(micLine, rich);
         }
         else if (Runner.CurrentPhase == CaseRunner.Phase.Huddle)
         {
@@ -154,7 +178,7 @@ public class CaseBoardUI : MonoBehaviour
 
     void DrawTopHud(float k, int f, GUIStyle rich)
     {
-        var r = new Rect(10 * k, 10 * k, Screen.width - 20 * k, 44 * k);
+        var r = new Rect(10 * k, 10 * k, Screen.width - 20 * k, 56 * k);
         GUI.color = new Color(0, 0, 0, 0.55f);
         GUI.DrawTexture(r, Texture2D.whiteTexture);
         GUI.color = Color.white;

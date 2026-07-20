@@ -42,6 +42,9 @@ public class InterrogationConsole : MonoBehaviour
     int _pendingRequests;
 
     public bool Active { get; private set; } = true;
+    /// <summary>Live in-progress speech-to-text, for a "hearing: ..." UI indicator — mic-only
+    /// input has no other feedback that the player is actually being heard.</summary>
+    public string LiveHearingText => string.IsNullOrEmpty(_pendingText) ? _partial : (_pendingText + " " + _partial).Trim();
     public event Action<string, string> OnLine; // (who, text) — "YOU" or the suspect's name
     public event Action<bool, SuspectBrain.PressureKind> OnPressureRead; // (axisMatched, kind) — lets the UI say "this isn't working" instead of a silent stall
 

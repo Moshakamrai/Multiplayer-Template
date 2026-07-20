@@ -14,10 +14,15 @@ using UnityEngine;
 //     001_manor.jpg, 002_table.jpg, 003_gnomes.jpg, 004_staircase.jpg, ...  (any count, sorted by filename)
 //     narration.mp3 (or .wav/.ogg)      <- your own recorded voiceover, full sequence
 //     narration.txt                     <- ONE caption line per photo, blank line = no caption change
+//     music.mp3 (or .wav/.ogg)          <- OPTIONAL looping ambient bed, auto-ducked under narration
+//     sfx/001.mp3, sfx/004.mp3, ...     <- OPTIONAL one-shot stinger per slide (matches slide's
+//                                          1-based index — e.g. sfx/004.mp3 plays the instant
+//                                          slide 4 appears). Any of mp3/wav/ogg works.
 //
 // If narration.mp3 is missing, captions still display (silent slideshow) so the scene is
 // always testable. If photos are missing, a single dark placeholder card is shown so the
-// beats and timing can still be judged before real photography exists.
+// beats and timing can still be judged before real photography exists. Music/SFX are both
+// fully optional — nothing breaks if the folders/files aren't there yet.
 public class IntroSequence : MonoBehaviour
 {
     [Tooltip("Called when the intro finishes or is skipped — hook this to CaseRunner.BeginCase()/BeginInterrogation.")]
@@ -30,14 +35,26 @@ public class IntroSequence : MonoBehaviour
     [Tooltip("Fraction of narration audio duration allotted per slide if slide count doesn't evenly divide — even split is used unless narration.txt has per-line timing (not required for v1).")]
     public bool allowSkip = true;
 
+    [Header("Music (optional — looping ambient bed under the narration)")]
+    [Range(0f, 1f)] public float musicVolume = 0.35f; // kept low — narration must stay clearly audible
+    public float musicFadeInSeconds = 2f;
+    public float musicFadeOutSeconds = 1.5f;
+
+    [Header("SFX (optional — one-shot stinger per slide, see header comment for filenames)")]
+    [Range(0f, 1f)] public float sfxVolume = 0.8f;
+
     AudioSource _narrationSource;
+    AudioSource _musicSource;
+    AudioSource _sfxSource;
     Texture2D[] _photos;
     string[] _captions;
+    AudioClip[] _sfxPerSlide; // index-aligned with _photos/_captions; null = no stinger that slide
     int _current = -1;
     float _alpha; // crossfade blend 0..1 toward _current
     Texture2D _prevPhoto;
     bool _finished;
     bool _started;
+    float _musicFadeTarget;
 
     const string BG = "#0a0a0d";
 
@@ -46,6 +63,17 @@ public class IntroSequence : MonoBehaviour
         _narrationSource = gameObject.AddComponent<AudioSource>();
         _narrationSource.playOnAwake = false;
         _narrationSource.spatialBlend = 0f;
+
+        _musicSource = gameObject.AddComponent<AudioSource>();
+        _musicSource.playOnAwake = false;
+        _musicSource.spatialBlend = 0f;
+        _musicSource.loop = true;
+        _musicSource.volume = 0f; // fades up once loaded
+
+        _sfxSource = gameObject.AddComponent<AudioSource>();
+        _sfxSource.playOnAwake = false;
+        _sfxSource.spatialBlend = 0f;
+        _sfxSource.loop = false;
     }
 
     public void Begin()
@@ -83,21 +111,56 @@ public class IntroSequence : MonoBehaviour
         {
             string audioPath = Path.Combine(dir, $"narration.{ext}");
             if (File.Exists(audioPath))
-                StartCoroutine(LoadNarrationAudio(audioPath));
+                StartCoroutine(LoadClip(audioPath, clip =>
+                {
+                    _narrationSource.clip = clip;
+                    _narrationSource.Play();
+                }));
+        }
+
+        // music: optional looping ambient bed, faded up once loaded and faded down on Finish()
+        foreach (var ext in new[] { "mp3", "wav", "ogg" })
+        {
+            string musicPath = Path.Combine(dir, $"music.{ext}");
+            if (File.Exists(musicPath))
+                StartCoroutine(LoadClip(musicPath, clip =>
+                {
+                    _musicSource.clip = clip;
+                    _musicSource.Play();
+                    _musicFadeTarget = musicVolume;
+                }));
+        }
+
+        // per-slide SFX: sfx/001.mp3 fires the instant slide 1 (1-based) appears, etc.
+        _sfxPerSlide = new AudioClip[Mathf.Max(_photos.Length, _captions.Length)];
+        string sfxDir = Path.Combine(dir, "sfx");
+        if (Directory.Exists(sfxDir))
+        {
+            for (int i = 0; i < _sfxPerSlide.Length; i++)
+            {
+                int slideNum = i + 1; // filenames are 1-based ("which slide", not an array index)
+                foreach (var ext in new[] { "mp3", "wav", "ogg" })
+                {
+                    string sfxPath = Path.Combine(sfxDir, $"{slideNum:000}.{ext}");
+                    if (File.Exists(sfxPath))
+                    {
+                        int captured = i; // avoid the classic closure-over-loop-variable bug
+                        StartCoroutine(LoadClip(sfxPath, clip => _sfxPerSlide[captured] = clip));
+                        break;
+                    }
+                }
+            }
         }
     }
 
-    IEnumerator LoadNarrationAudio(string path)
+    IEnumerator LoadClip(string path, Action<AudioClip> onLoaded)
     {
         var type = path.EndsWith(".mp3") ? AudioType.MPEG : path.EndsWith(".ogg") ? AudioType.OGGVORBIS : AudioType.WAV;
         using (var req = UnityEngine.Networking.UnityWebRequestMultimedia.GetAudioClip("file://" + path, type))
         {
             yield return req.SendWebRequest();
             if (req.result == UnityEngine.Networking.UnityWebRequest.Result.Success)
-            {
-                _narrationSource.clip = UnityEngine.Networking.DownloadHandlerAudioClip.GetContent(req);
-                _narrationSource.Play();
-            }
+                onLoaded(UnityEngine.Networking.DownloadHandlerAudioClip.GetContent(req));
         }
     }
 
@@ -131,11 +194,25 @@ public class IntroSequence : MonoBehaviour
         _prevPhoto = _current >= 0 && _current < _photos.Length ? _photos[_current] : null;
         _current = index;
         _alpha = 0f;
+
+        if (_sfxPerSlide != null && index >= 0 && index < _sfxPerSlide.Length && _sfxPerSlide[index] != null)
+            _sfxSource.PlayOneShot(_sfxPerSlide[index], sfxVolume);
     }
 
     void Update()
     {
-        if (!_started || _finished) return;
+        if (!_started) return;
+
+        // Music keeps fading (up on start, down on finish) even after _finished, so the
+        // fade-out on skip/completion isn't an abrupt cut.
+        if (_musicSource.clip != null)
+        {
+            float speed = 1f / Mathf.Max(0.01f, _musicFadeTarget > _musicSource.volume ? musicFadeInSeconds : musicFadeOutSeconds);
+            _musicSource.volume = Mathf.MoveTowards(_musicSource.volume, _musicFadeTarget, speed * Time.deltaTime);
+            if (_finished && _musicSource.volume <= 0.001f && _musicSource.isPlaying) _musicSource.Stop();
+        }
+        if (_finished) return;
+
         _alpha = Mathf.MoveTowards(_alpha, 1f, Time.deltaTime / Mathf.Max(0.01f, crossfadeSeconds));
 
         if (allowSkip && (Input.GetKeyDown(KeyCode.Space) || Input.GetKeyDown(KeyCode.Return) || Input.GetMouseButtonDown(0)))
@@ -147,6 +224,7 @@ public class IntroSequence : MonoBehaviour
         if (_finished) return;
         _finished = true;
         if (_narrationSource.isPlaying) _narrationSource.Stop();
+        _musicFadeTarget = 0f; // Update() keeps fading it out and stops it once silent
         OnIntroComplete?.Invoke();
     }
 

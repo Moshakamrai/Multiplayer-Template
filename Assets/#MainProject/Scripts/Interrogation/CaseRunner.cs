@@ -29,6 +29,10 @@ public class CaseRunner : MonoBehaviour
     public IntroSequence intro;
 
     public Phase CurrentPhase { get; private set; } = Phase.Assignment;
+    // False until BeginCase() actually runs — while the intro is still playing, CurrentPhase
+    // sits at its default (Assignment) even though nothing has started yet. CaseBoardUI uses
+    // this to stay hidden during the cold open instead of showing a premature board.
+    public bool IsCaseStarted { get; private set; }
     public int RoundIndex { get; private set; } // 0-based
     public SuspectBrain ActiveSuspect { get; private set; }
     public float PhaseTimeRemaining { get; private set; }
@@ -63,6 +67,7 @@ public class CaseRunner : MonoBehaviour
 
     public void BeginCase()
     {
+        IsCaseStarted = true;
         RoundIndex = 0;
         board.ResetCase();
         foreach (var s in suspects) if (s != null) s.ResetSuspect();

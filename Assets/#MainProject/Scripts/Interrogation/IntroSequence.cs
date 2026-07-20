@@ -35,8 +35,11 @@ public class IntroSequence : MonoBehaviour
     [Tooltip("Fraction of narration audio duration allotted per slide if slide count doesn't evenly divide — even split is used unless narration.txt has per-line timing (not required for v1).")]
     public bool allowSkip = true;
 
+    [Header("Narration")]
+    [Range(0f, 1f)] public float narrationVolume = 0.85f;
+
     [Header("Music (optional — looping ambient bed under the narration)")]
-    [Range(0f, 1f)] public float musicVolume = 0.35f; // kept low — narration must stay clearly audible
+    [Range(0f, 1f)] public float musicVolume = 0.5f; // kept below narration so voice stays clearly audible
     public float musicFadeInSeconds = 2f;
     public float musicFadeOutSeconds = 1.5f;
 
@@ -114,6 +117,7 @@ public class IntroSequence : MonoBehaviour
                 StartCoroutine(LoadClip(audioPath, clip =>
                 {
                     _narrationSource.clip = clip;
+                    _narrationSource.volume = narrationVolume;
                     _narrationSource.Play();
                 }));
         }

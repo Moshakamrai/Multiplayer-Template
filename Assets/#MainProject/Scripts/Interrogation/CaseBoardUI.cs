@@ -62,7 +62,7 @@ public class CaseBoardUI : MonoBehaviour
 
     void OnGUI()
     {
-        if (Runner == null || Board == null) return;
+        if (Runner == null || Board == null || !Runner.IsCaseStarted) return; // stay hidden during the intro cold open
         float k = Mathf.Max(1f, Screen.height / 900f);
         int f = Mathf.RoundToInt(15 * k);
         var rich = new GUIStyle(GUI.skin.label) { fontSize = f, richText = true, wordWrap = true };

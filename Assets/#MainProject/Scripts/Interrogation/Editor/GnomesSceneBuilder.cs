@@ -39,6 +39,18 @@ public static class GnomesSceneBuilder
 
         var scene = EditorSceneManager.NewScene(NewSceneSetup.DefaultGameObjects, NewSceneMode.Single);
 
+        // Frame the bust as a close portrait. Default camera at z=-10 makes a head look
+        // tiny; pull it in and raise it to the bust's eye line, no skybox tint bleeding in.
+        var cam = Camera.main;
+        if (cam != null)
+        {
+            cam.transform.position = new Vector3(0f, 1.5f, -2.4f);
+            cam.transform.rotation = Quaternion.identity;
+            cam.fieldOfView = 45f;
+            cam.clearFlags = CameraClearFlags.SolidColor;
+            cam.backgroundColor = new Color(0.05f, 0.05f, 0.07f);
+        }
+
         var voskGO = new GameObject("Vosk (free vocabulary)");
         var vp = voskGO.AddComponent<VoiceProcessor>();
         var stt = voskGO.AddComponent<VoskSpeechToText>();
@@ -210,9 +222,8 @@ public static class GnomesSceneBuilder
             var model = (GameObject)PrefabUtility.InstantiatePrefab(modelAsset);
             model.name = "Pemberton (bust)";
             model.transform.SetParent(pembertonGO.transform, false);
-            // Sit in front of the default Main Camera (Unity's DefaultGameObjects places it
-            // at (0,1,-10) looking down +Z) so the bust is actually framed on Play.
-            model.transform.position = new Vector3(0f, 0.9f, 0f);
+            // Framed by the portrait camera set above (cam at (0,1.5,-2.4), 45° FOV).
+            model.transform.position = new Vector3(0f, 0f, 0f);
 
             var animator = model.GetComponentInChildren<Animator>();
             if (animator == null) animator = model.AddComponent<Animator>();
@@ -224,28 +235,26 @@ public static class GnomesSceneBuilder
             console.AnimLink = animLink; // console.Start() finishes the wiring once Voice exists
 
             // World-space backdrop quad, positioned BEHIND the bust so the camera's normal
-            // depth sort puts the 3D character in front of it — an IMGUI OnGUI() overlay
-            // (the previous approach) draws over the ENTIRE screen including the 3D render,
-            // which is what made the bust disappear the moment a backdrop was wired in.
-            var backdropTex = pemberton.ResolveBackdrop();
-            if (backdropTex != null)
+            // depth sort puts the 3D character in front of it (an IMGUI OnGUI() overlay draws
+            // over the ENTIRE screen including the 3D render, which hides the bust). The
+            // TEXTURE is loaded at RUNTIME by BackdropQuad, NOT baked here: a Texture2D made
+            // in the editor via LoadImage is non-serialized and vanishes when the scene
+            // reloads on Play, which is what made the backdrop keep disappearing.
+            if (!string.IsNullOrEmpty(pemberton.backdropStreamingPath))
             {
                 var quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
                 quad.name = "Pemberton Backdrop";
                 Object.DestroyImmediate(quad.GetComponent<Collider>());
-                quad.transform.position = new Vector3(0f, 1f, 6f);
-                // A Quad's front face normal is +Z by default — facing AWAY from a camera
-                // at z=-10 looking toward +Z. Without this rotation the camera sees only the
-                // back face, which URP's Unlit shader culls by default: invisible, no error,
-                // looked exactly like "the backdrop vanished".
+                quad.transform.position = new Vector3(0f, 1.5f, 6f); // centered on the camera's eye line
+                // A Quad's front face normal is +Z by default — facing AWAY from a camera at
+                // z=-10 looking toward +Z, so the camera sees only the back face (culled by
+                // URP Unlit). Rotate 180° on Y so the textured front faces the camera.
                 quad.transform.rotation = Quaternion.Euler(0f, 180f, 0f);
-                float aspect = (float)backdropTex.width / backdropTex.height;
-                float height = 9f;
-                quad.transform.localScale = new Vector3(height * aspect, height, 1f);
+                quad.transform.localScale = new Vector3(18f, 10f, 1f); // BackdropQuad fixes the aspect at runtime; oversized so no sky peeks past its edges
                 var unlit = Shader.Find("Universal Render Pipeline/Unlit");
-                var mat = new Material(unlit != null ? unlit : Shader.Find("Unlit/Texture"));
-                mat.mainTexture = backdropTex;
-                quad.GetComponent<Renderer>().sharedMaterial = mat;
+                quad.GetComponent<Renderer>().sharedMaterial = new Material(unlit != null ? unlit : Shader.Find("Unlit/Texture"));
+                var bq = quad.AddComponent<BackdropQuad>();
+                bq.streamingPath = pemberton.backdropStreamingPath;
             }
         }
         else

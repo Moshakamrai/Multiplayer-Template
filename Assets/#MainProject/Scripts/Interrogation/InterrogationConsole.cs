@@ -140,6 +140,7 @@ public class InterrogationConsole : MonoBehaviour
         _history.Add($"{Brain.suspectName}: {line}");
         OnLine?.Invoke(Brain.suspectName, line);
         if (Voice != null && Voice.Available) Voice.Speak(line);
+        if (AnimLink != null) AnimLink.SetMood("neutral"); // clean slate — no leftover mood from a prior interview
     }
 
     public void EndInterview()
@@ -263,6 +264,19 @@ public class InterrogationConsole : MonoBehaviour
         StartCoroutine(GenerateThenSpeak(playerText, result, suspicion));
     }
 
+    // Drives the suspect's facial expression (FacialExpressions.SetMood via GrizAnimatorLink)
+    // from what this turn's pressure result actually was, priority = dramatic weight: her
+    // real secret breaking is the biggest beat, then the false give, then whether the
+    // player's approach landed or not.
+    static string MoodFromPressure(SuspectBrain.PressureResult result)
+    {
+        if (result.brokenTriggered) return "terrified"; // the mask drops — her real secret is out
+        if (result.falseGiveTriggered) return "sad"; // caught out on something embarrassing, not the murder
+        if (result.endedEarly) return "angry"; // patience gone, shutting the interview down
+        if (result.axisMatched) return "happy"; // her real weakness landed — she's opening up, relaxed
+        return "confused"; // wrong approach — she's deflecting, thrown off, not tracking with you
+    }
+
     static bool MentionsAskingAboutSomeone(string text)
     {
         string t = (text ?? "").ToLowerInvariant();
@@ -313,6 +327,7 @@ public class InterrogationConsole : MonoBehaviour
         OnLine?.Invoke(Brain.suspectName, line);
         if (Voice != null && Voice.Available) Voice.Speak(line);
         Brain.CheckObjectives(line, result.falseGiveTriggered, result.brokenTriggered);
+        if (AnimLink != null) AnimLink.SetMood(MoodFromPressure(result));
 
         if (Board != null)
         {

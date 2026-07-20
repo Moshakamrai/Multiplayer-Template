@@ -15,6 +15,8 @@ public class CaseBoardUI : MonoBehaviour
     [Header("Layout")]
     [Tooltip("The board is reference material, not the main event — the backdrop art and bust are. Kept narrow so most of the screen stays clear.")]
     [Range(0.12f, 0.35f)] public float panelWidthFraction = 0.2f;
+    [Tooltip("Panel background opacity — low enough that the room backdrop stays visible through it.")]
+    [Range(0f, 1f)] public float panelOpacity = 0.55f;
     public bool collapsed = false;
 
     Vector2 _cardScroll, _evidenceScroll, _transcriptScroll;
@@ -67,7 +69,6 @@ public class CaseBoardUI : MonoBehaviour
         int f = Mathf.RoundToInt(22 * k); // bigger, readable-at-a-glance text — this was sized for a placeholder scene
         var rich = new GUIStyle(GUI.skin.label) { fontSize = f, richText = true, wordWrap = true };
 
-        DrawBackdrop();
         DrawTopHud(k, f, rich);
         DrawMainArea(k, f, rich);
 
@@ -80,7 +81,7 @@ public class CaseBoardUI : MonoBehaviour
 
         float w = Screen.width * panelWidthFraction;
         var panelRect = new Rect(Screen.width - w, 72 * k, w, Screen.height - 70 * k);
-        GUI.color = new Color(0.07f, 0.07f, 0.10f, 0.92f);
+        GUI.color = new Color(0.07f, 0.07f, 0.10f, panelOpacity);
         GUI.DrawTexture(panelRect, Texture2D.whiteTexture);
         GUI.color = Color.white;
 
@@ -101,35 +102,6 @@ public class CaseBoardUI : MonoBehaviour
         GUILayout.Space(8 * k);
         DrawCards(k, f, rich);
         GUILayout.EndArea();
-    }
-
-    Texture2D _lastBackdropShown;
-
-    // Full-screen room backdrop behind the bust — drawn COVER-fit (fills the screen,
-    // crops overflow) rather than letterboxed like the intro slideshow, since a static
-    // room should read as "the space you're standing in", not a bordered photograph.
-    void DrawBackdrop()
-    {
-        var brain = ActiveConsole != null ? ActiveConsole.Brain : null;
-        var tex = brain != null ? brain.ResolveBackdrop() : null;
-        if (tex == null) return;
-        _lastBackdropShown = tex;
-
-        var full = new Rect(0, 0, Screen.width, Screen.height);
-        float texAspect = (float)tex.width / tex.height;
-        float areaAspect = full.width / full.height;
-        Rect fit;
-        if (texAspect > areaAspect)
-        {
-            float w = full.height * texAspect;
-            fit = new Rect(full.x - (w - full.width) / 2f, full.y, w, full.height);
-        }
-        else
-        {
-            float h = full.width / texAspect;
-            fit = new Rect(full.x, full.y - (h - full.height) / 2f, full.width, h);
-        }
-        GUI.DrawTexture(fit, tex, ScaleMode.ScaleToFit);
     }
 
     void DrawMainArea(float k, int f, GUIStyle rich)

@@ -210,6 +210,9 @@ public static class GnomesSceneBuilder
             var model = (GameObject)PrefabUtility.InstantiatePrefab(modelAsset);
             model.name = "Pemberton (bust)";
             model.transform.SetParent(pembertonGO.transform, false);
+            // Sit in front of the default Main Camera (Unity's DefaultGameObjects places it
+            // at (0,1,-10) looking down +Z) so the bust is actually framed on Play.
+            model.transform.position = new Vector3(0f, 0.9f, 0f);
 
             var animator = model.GetComponentInChildren<Animator>();
             if (animator == null) animator = model.AddComponent<Animator>();
@@ -219,6 +222,26 @@ public static class GnomesSceneBuilder
             animLink.animator = animator;
             animLink.useAnimatorStates = false; // interrogation suspect: no shop/sword states
             console.AnimLink = animLink; // console.Start() finishes the wiring once Voice exists
+
+            // World-space backdrop quad, positioned BEHIND the bust so the camera's normal
+            // depth sort puts the 3D character in front of it — an IMGUI OnGUI() overlay
+            // (the previous approach) draws over the ENTIRE screen including the 3D render,
+            // which is what made the bust disappear the moment a backdrop was wired in.
+            var backdropTex = pemberton.ResolveBackdrop();
+            if (backdropTex != null)
+            {
+                var quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                quad.name = "Pemberton Backdrop";
+                Object.DestroyImmediate(quad.GetComponent<Collider>());
+                quad.transform.position = new Vector3(0f, 1f, 6f);
+                float aspect = (float)backdropTex.width / backdropTex.height;
+                float height = 9f;
+                quad.transform.localScale = new Vector3(height * aspect, height, 1f);
+                var unlit = Shader.Find("Universal Render Pipeline/Unlit");
+                var mat = new Material(unlit != null ? unlit : Shader.Find("Unlit/Texture"));
+                mat.mainTexture = backdropTex;
+                quad.GetComponent<Renderer>().sharedMaterial = mat;
+            }
         }
         else
         {

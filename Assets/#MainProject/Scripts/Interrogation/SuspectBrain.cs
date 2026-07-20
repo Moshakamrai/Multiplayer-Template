@@ -71,6 +71,42 @@ public class SuspectBrain : MonoBehaviour
     [TextArea(2, 6)] public string brokenStateDirection = "";
 
     [Serializable]
+    public class Objective
+    {
+        [Tooltip("SHORT — this is a checklist label, not a sentence (\"Know their alibi\", \"How they're connected to the victim\").")]
+        public string label;
+        public enum Source { KeywordInReply, FalseGiveTriggered, Broken }
+        public Source source = Source.KeywordInReply;
+        [Tooltip("Only for KeywordInReply: ticks the moment the SUSPECT'S OWN reply contains any of these words — i.e. she actually answered, not just that you asked.")]
+        public List<string> keywords = new List<string>();
+        [NonSerialized] public bool Done;
+    }
+
+    [Header("Per-encounter task checklist — small, concrete, player-facing goals")]
+    public List<Objective> objectives = new List<Objective>();
+    public event Action<Objective> OnObjectiveComplete;
+
+    /// <summary>Checked against the suspect's OWN generated reply after each turn — an
+    /// objective ticks when she actually answers it, not merely when the player asks.</summary>
+    public void CheckObjectives(string suspectReply, bool falseGiveJustTriggered, bool brokenJustTriggered)
+    {
+        string lower = (suspectReply ?? "").ToLowerInvariant();
+        foreach (var o in objectives)
+        {
+            if (o.Done) continue;
+            bool hit = o.source switch
+            {
+                Objective.Source.FalseGiveTriggered => falseGiveJustTriggered,
+                Objective.Source.Broken => brokenJustTriggered,
+                _ => o.keywords.Exists(k => !string.IsNullOrEmpty(k) && lower.Contains(k.ToLowerInvariant())),
+            };
+            if (hit) { o.Done = true; OnObjectiveComplete?.Invoke(o); }
+        }
+    }
+
+    public void ResetObjectives() { foreach (var o in objectives) o.Done = false; }
+
+    [Serializable]
     public class Suspicion
     {
         public string aboutWhom;             // "Higgins", "the Vicar"... matches another suspect's name/role
@@ -91,6 +127,7 @@ public class SuspectBrain : MonoBehaviour
         FalseGiveUsed = false;
         BrokenState = false;
         _presentedEvidenceIds.Clear();
+        ResetObjectives();
     }
 
     /// <summary>Between-round recovery (GDD Phase D) — never past the false-give ceiling

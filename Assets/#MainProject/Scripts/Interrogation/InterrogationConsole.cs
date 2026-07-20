@@ -309,6 +309,7 @@ public class InterrogationConsole : MonoBehaviour
         _history.Add($"{Brain.suspectName}: {line}");
         OnLine?.Invoke(Brain.suspectName, line);
         if (Voice != null && Voice.Available) Voice.Speak(line);
+        Brain.CheckObjectives(line, result.falseGiveTriggered, result.brokenTriggered);
 
         if (Board != null)
         {
@@ -344,13 +345,15 @@ public class InterrogationConsole : MonoBehaviour
             $"STATEMENT BY {Brain.suspectName}:\n{line}", "",
             (t, ok) => { if (ok) summary = t; },
             systemPromptOverride:
-                "You compress interview statements into case-board cards. Reply with ONE third-person " +
-                "factual claim of at most 12 words (e.g. \"Says she was in the garden at 9 PM.\"). " +
-                "If the statement contains NO concrete claim (no time, place, person, or action — " +
-                "just pleasantries or deflection), reply with exactly: NO CLAIM",
+                "You compress interview statements into case-board cards for a checklist UI — players " +
+                "SCAN these, they don't read them. Reply with ONE third-person claim of AT MOST 8 WORDS, " +
+                "no filler words, headline style (e.g. \"Was home alone, reading.\" not \"She claims that " +
+                "on the night in question she was at home reading a book.\"). If the statement contains " +
+                "NO concrete claim (no time, place, person, or action — just pleasantries or deflection), " +
+                "reply with exactly: NO CLAIM",
             npcName: "CARD",
-            closingInstruction: "\nWrite the card text (or NO CLAIM) now:",
-            maxTokens: 24, temperature: 0.2f);
+            closingInstruction: "\nWrite the card text (8 words max, or NO CLAIM) now:",
+            maxTokens: 16, temperature: 0.2f);
         if (string.IsNullOrWhiteSpace(summary)) yield break;
         summary = summary.Trim().Trim('"');
         if (summary.ToUpperInvariant().Contains("NO CLAIM")) yield break;

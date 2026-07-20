@@ -130,6 +130,28 @@ public static class GnomesSceneBuilder
         pemberton.brokenStateDirection =
             "Relief and laughter — you're no longer performing, you're rambling, half-laughing at " +
             "yourself for how small your real secret turns out to be.";
+        // Per-encounter task checklist: small, concrete, player-facing goals — ticks off the
+        // SUSPECT'S OWN reply, not the player's question, so it only completes when she
+        // actually answers. Keywords matched against her generated lines; tune if she
+        // phrases things in ways that miss these (same iteration loop as the pressure classifier).
+        pemberton.objectives = new List<SuspectBrain.Objective>
+        {
+            new SuspectBrain.Objective
+            {
+                label = "Know her alibi",
+                keywords = new List<string> { "home", "reading", "tea", "book", "grounds", "shed", "garden" }
+            },
+            new SuspectBrain.Objective
+            {
+                label = "Learn her connection to the case",
+                source = SuspectBrain.Objective.Source.FalseGiveTriggered
+            },
+            new SuspectBrain.Objective
+            {
+                label = "Crack her real secret",
+                source = SuspectBrain.Objective.Source.Broken
+            },
+        };
         // Cross-suspect finger-pointing (this session's addition): a genuine opinion, only
         // ever volunteered if the player directly asks her about someone else. She's
         // self-absorbed about her OWN secret, so she doesn't lead with a theory unprompted

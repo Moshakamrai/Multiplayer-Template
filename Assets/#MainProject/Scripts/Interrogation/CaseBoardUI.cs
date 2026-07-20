@@ -46,6 +46,8 @@ public class CaseBoardUI : MonoBehaviour
                     : $"🔒 not working — try a different approach (that was read as {kind})";
                 _pressureFlashUntil = Time.time + 3.5f;
             };
+            if (ActiveConsole.Brain != null)
+                ActiveConsole.Brain.OnObjectiveComplete += o => Toast($"✓ {o.label}");
         }
     }
 
@@ -88,6 +90,8 @@ public class CaseBoardUI : MonoBehaviour
         if (GUILayout.Button("◀ hide", GUILayout.Width(70 * k))) collapsed = true;
         GUILayout.EndHorizontal();
 
+        DrawObjectives(k, f, rich);
+        GUILayout.Space(8 * k);
         DrawEvidenceTray(k, f, rich);
         GUILayout.Space(8 * k);
         DrawContradictions(k, f, rich);
@@ -172,6 +176,19 @@ public class CaseBoardUI : MonoBehaviour
             GUILayout.Label($"<color={GOLD}>{_lastToast}</color>", rich);
         GUILayout.EndHorizontal();
         GUILayout.EndArea();
+    }
+
+    void DrawObjectives(float k, int f, GUIStyle rich)
+    {
+        var brain = ActiveConsole != null ? ActiveConsole.Brain : null;
+        if (brain == null || brain.objectives.Count == 0) return;
+        GUILayout.Label($"<color={GREEN}>THIS ENCOUNTER</color>", rich);
+        foreach (var o in brain.objectives)
+        {
+            string box = o.Done ? "☑" : "☐";
+            string color = o.Done ? GREEN : "#cccccc";
+            GUILayout.Label($"<color={color}>{box} {o.label}</color>", rich);
+        }
     }
 
     void DrawEvidenceTray(float k, int f, GUIStyle rich)

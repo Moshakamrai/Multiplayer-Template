@@ -195,9 +195,16 @@ public class SuspectBrain : MonoBehaviour
     {
         var facts = new System.Text.StringBuilder();
         facts.AppendLine($"YOUR GUARDED SECRET (never reveal directly, only via the hint below unless BROKEN): {secretHint}");
-        if (!string.IsNullOrEmpty(falseGiveHint))
-            facts.AppendLine($"YOUR FALSE GIVE (a real but harmless confession you'll offer under enough generic pressure): {falseGiveHint}");
-        if (FalseGiveUsed && !string.IsNullOrEmpty(falseGiveContent))
+        // The false-give HINT only enters the prompt once it's actually TRIGGERED (patience
+        // crossed the threshold) — before that, showing the model "here's a juicy fact about
+        // yourself" free-associates it into early answers way ahead of schedule (observed:
+        // Pemberton confessing the Constance rumor on turn one, unprompted, then denying it
+        // next turn because the game state never actually considered it given). Guarded the
+        // same way the real secret always was.
+        if (!FalseGiveUsed)
+            facts.AppendLine("YOU HAVE A PIECE OF HARMLESS GOSSIP YOU MIGHT LET SLIP LATER IF PRESSED HARD ENOUGH — " +
+                              "but NOT yet, and NOT unprompted. Do not reveal or hint at any specific secret right now.");
+        else if (!string.IsNullOrEmpty(falseGiveContent))
             facts.AppendLine($"YOU HAVE ALREADY GIVEN THIS UP THIS INTERVIEW — you may reference it, don't repeat it fresh: {falseGiveContent}");
         if (BrokenState)
         {

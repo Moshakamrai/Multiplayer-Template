@@ -278,6 +278,9 @@ public class InterrogationConsole : MonoBehaviour
             closingInstruction:
                 "Reply with dialogue only, in character, reacting SPECIFICALLY to what was just said. " +
                 "Never state facts outside YOUR GUARDED SECRET/FALSE GIVE/CURRENT PATIENCE context above. " +
+                "STAY CONSISTENT with what YOU yourself already said earlier in CONVERSATION SO FAR — never " +
+                "flatly deny or contradict your own prior lines; if pressed on something you already admitted, " +
+                "own it (deflect the IMPLICATION if you must, not the FACT that you said it). " +
                 $"Write {Brain.suspectName}'s next line now:",
             maxTokens: 90, temperature: 0.75f);
 

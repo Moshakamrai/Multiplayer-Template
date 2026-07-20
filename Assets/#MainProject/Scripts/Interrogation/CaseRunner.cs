@@ -36,7 +36,7 @@ public class CaseRunner : MonoBehaviour
              "cue from the intro's own music.*, since the cold open and the interrogation gameplay " +
              "are different moods. Left empty = no case music.")]
     public string caseMusicFileName = "";
-    [Range(0f, 1f)] public float caseMusicVolume = 0.4f;
+    [Range(0f, 1f)] public float caseMusicVolume = 0.2f;
     public float caseMusicFadeInSeconds = 2f;
     public float caseMusicFadeOutSeconds = 2f;
     AudioSource _caseMusicSource;

@@ -41,7 +41,9 @@ public class InterrogationConsole : MonoBehaviour
     readonly List<string> _history = new List<string>();
     int _pendingRequests;
 
-    public bool Active { get; private set; } = true;
+    // Starts FALSE — the console must not accept speech until BeginInterview() runs, or it
+    // captures the player (and the narration audio) during the intro and dossier card.
+    public bool Active { get; private set; }
     /// <summary>Live in-progress speech-to-text, for a "hearing: ..." UI indicator — mic-only
     /// input has no other feedback that the player is actually being heard.</summary>
     public string LiveHearingText => string.IsNullOrEmpty(_pendingText) ? _partial : (_pendingText + " " + _partial).Trim();

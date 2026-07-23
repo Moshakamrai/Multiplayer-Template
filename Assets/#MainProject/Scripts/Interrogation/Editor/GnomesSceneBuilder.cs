@@ -55,7 +55,10 @@ public static class GnomesSceneBuilder
         var vp = voskGO.AddComponent<VoiceProcessor>();
         var stt = voskGO.AddComponent<VoskSpeechToText>();
         stt.VoiceProcessor = vp;
-        stt.AutoStart = true;
+        // NOT auto-start: the mic must stay closed through the intro narration and the
+        // dossier card, or the game "hears" the player (and the narration itself) before
+        // the interview has even begun. InterrogationConsole.BeginInterview() opens it.
+        stt.AutoStart = false;
         stt.KeyPhrases = new List<string>();
         stt.FreeDictation = true;
         stt.MaxAlternatives = 0;

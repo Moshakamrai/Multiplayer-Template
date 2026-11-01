@@ -5,8 +5,13 @@ A multiplayer action game where **your voice is the controller**. Players shout 
 beat of the music. Card selection is always voice-driven; beat execution is swappable between
 shouting and a keypress so a quiet player can still play.
 
-Built in Unity 2022.3 LTS (URP) with Mirror networking and offline on-device speech
-recognition. Roughly 29k lines of C# across 88 scripts.
+Alongside the combat game, the project contains a second, deeper line of work: **NPCs you
+talk to out loud**, driven by a fully local speech-to-LLM-to-speech stack with no cloud
+dependency — a merchant you haggle with, and an interrogation game where you question
+suspects by speaking.
+
+Built in Unity 2022.3 LTS (URP) with Mirror networking and entirely offline, on-device
+speech recognition and synthesis. Roughly 38k lines of C# across 122 scripts.
 
 ---
 
@@ -16,7 +21,8 @@ recognition. Roughly 29k lines of C# across 88 scripts.
 - [Core gameplay loop](#core-gameplay-loop)
 - [Architecture](#architecture)
 - [Voice recognition pipeline](#voice-recognition-pipeline)
-- [Bangla NPC negotiation pipeline](#bangla-npc-negotiation-pipeline)
+- [Conversational NPCs: the local AI stack](#conversational-npcs-the-local-ai-stack)
+- [Bangla speech pipeline](#bangla-speech-pipeline)
 - [Project layout](#project-layout)
 - [Running the project](#running-the-project)
 - [Multiplayer setup](#multiplayer-setup)
@@ -48,9 +54,9 @@ up at that timescale:
 - **Fully offline recognition.** Vosk runs on-device with no network round-trip and no
   per-request cost, which is what makes sub-beat response times possible at all.
 
-The same intent-matching approach is extended to NPC conversation (see the Bangla pipeline
-below), where the goal is negotiating with a merchant by speaking naturally rather than
-picking dialogue options.
+The same intent-matching philosophy carries into the conversational NPC work below, where an
+LLM is deliberately confined to *understanding* the player while authored content stays in
+control of what characters say.
 
 ---
 
@@ -115,14 +121,67 @@ To try voice alone, open `Assets/Scenes/VoiceInputTestScene.unity`.
 
 ---
 
-## Bangla NPC negotiation pipeline
+## Conversational NPCs: the local AI stack
 
-A second, more experimental system: negotiating with NPCs by **speaking Bangla**, with the
-NPC answering in spoken Bangla. Rather than a chatbot, this is intent-matching against what
-the merchant is willing to accept, and the negotiation outcome determines item quality.
+The project's most substantial system. You talk to NPCs with your actual voice and they
+answer out loud — **entirely offline**, with no API keys, no per-request cost, and nothing
+leaving the machine. Three game modes are built on it:
 
-> **This system lives on the `Coop-Mode-With-PC` branch**, not on `Full-Game-without-VR`.
-> Check that branch out to see the implementation and its documentation.
+| Mode | Scripts | Premise |
+|---|---|---|
+| **Griz the merchant** | `Scripts/GrizNPC/` | Haggle out loud; how well you negotiate sets the item's quality tier |
+| **Gnomes & Gaslight** | `Scripts/Interrogation/` | Victorian whodunnit — question suspects by speaking, fill a case board |
+| **Terminal Leak** | `Scripts/TerminalLeak/` | Talk your way past a sentinel AI |
+
+### The key design decision
+
+The LLM is **only allowed to classify intent**, never to speak for a character:
+
+> *"The LLM only CLASSIFIES what the player means (intent + offered amount) —
+> `GrizBrain`'s state machine and authored lines still decide what he says, so no
+> hallucinated prices and no broken character."* — `LlamaIntentService.cs`
+
+This is the architectural heart of the system. It means a merchant can never be talked into
+an impossible price, can never break character, and can never invent items — while the
+player still gets to speak freely instead of picking from a dialogue menu. Suspects in the
+interrogation mode are constrained the same way, with commits specifically fixing them
+"dodging every question with invented nonsense" and "free-associating false-give content
+before it's earned."
+
+### Graceful degradation
+
+Every AI subprocess is optional and independently fails safe. If llama.cpp is not installed,
+`LlamaIntentService.IsReady` stays false and callers fall back to a **keyword classifier** —
+the game remains playable with the components still in the scene. Editor menus
+(`Tools > Griz > Check Llama Setup`) verify each piece.
+
+### Runtime shape
+
+Three MIT-licensed native binaries run as **separate subprocesses** that Unity queries over
+localhost, rather than being embedded in-engine:
+
+```
+llama.cpp  (llama-server.exe, port 8731)  → intent classification
+whisper.cpp                               → speech to text
+piper                                     → text to speech
+```
+
+Supporting systems: `MouthLipSync` and `FacialExpressions` drive visemes and mood from the
+generated audio; `GrizHeadLook` handles gaze; `CompanionBrain` and `NpcSwitcher` manage
+multiple characters.
+
+> **Note:** binaries and model weights live in gitignored `StreamingAssets/` subfolders
+> (`llama/`, `whisper/`, `piper/`) because they are multi-GB, machine-specific, and freely
+> re-downloadable. A fresh clone needs them fetched via the `Tools >` setup menus. The
+> conversational modes will fall back or stay inert until then; **rhythm combat is
+> unaffected** and runs out of the box.
+
+---
+
+## Bangla speech pipeline
+
+An extension of the above: NPCs that understand and reply in **spoken Bangla**, using a
+custom-trained voice.
 
 ```
 Bangla speech
@@ -133,20 +192,28 @@ Bangla speech
           → Piper bn_BD voice → spoken reply
 ```
 
-Two findings from building it are worth knowing before touching this code:
+Four hard-won findings, each of which cost real debugging time:
 
-1. **Transcribe, never translate, at the ASR step.** Whisper's `--translate` is not usable
-   here (turbo cannot translate, and fine-tunes lose the translation task). Translation is a
-   separate NLLB stage.
-2. **The hard bug was script, not accuracy.** Stock Whisper medium transcribed Bangla speech
-   into **Devanagari** script, which silently poisoned the downstream translation. A
-   Bengali.AI fine-tune fixed it: correct transcript in ~1.1s versus 15.7s and wrong script.
+1. **Transcribe, never translate, at the ASR step.** Whisper's `--translate` is unusable here
+   (turbo cannot translate; fine-tunes lose the translation task). Translation is a separate
+   NLLB stage.
+2. **The hard bug was script, not accuracy.** Stock Whisper medium transcribed Bangla into
+   **Devanagari**, which silently poisoned downstream translation — the root cause of the
+   whole recognition saga. A Bengali.AI fine-tune fixed it: correct transcript in ~1.1s
+   versus 15.7s and the wrong alphabet.
+3. **The LLM always writes English.** Its Bangla output is unreliable, so generation happens
+   in English and NLLB handles the final en→bn hop.
+4. **The Bangla voice required patching espeak-ng itself.** The stock `bn_dict` phonemizer
+   silently deleted vowels after nukta letters (য়/ড়/ঢ়) and missed word-final inherent-vowel
+   rules, breaking common words. The patched dictionary is a **source-level fix outside
+   Unity's control** — if `bn_dict` is ever replaced, these words regress silently with no
+   error. See `DOC/UNITY_INTEGRATION.md`.
 
-Full write-up: `Assets/#MainProject/DOC/BANGLA_ASR_PROJECT.md` and
-`BANGLA_TTS_PROJECT.md`, both on the `Coop-Mode-With-PC` branch.
+The voice itself was fine-tuned from a Hindi Piper checkpoint on ~46 minutes of
+single-speaker Bangla audio (OpenSLR SLR37).
 
-> Note: Unity's IMGUI cannot shape Bengali text, so debug overlays render it as broken
-> glyphs. Inspect Bangla output in an external editor, not the in-game console.
+> Unity's IMGUI cannot shape Bengali text, so debug overlays render it as broken glyphs.
+> Inspect Bangla output in an external editor, not the in-game console.
 
 ---
 
@@ -162,14 +229,19 @@ Assets/
       Card System/       Card manager, element system
       Shop System/       Card data, database, inventory, shop UI
       AI script/         Bot opponent
+      GrizNPC/           Local LLM/TTS/ASR NPC stack, lip sync, expressions
+      Interrogation/     Gnomes & Gaslight: case board, suspects, intro sequence
+      TerminalLeak/      Sentinel AI encounter
       Tutorial/, UI/, VFX/, Camera/, Sound Scripts/, VR/
     Characters/, Environment/, Models/, VFX/, Audio/, Prefabs/, Shaders/
     DOC/                 Design documents
   Scripts/               Shared/template scripts (interaction, UI, Steamworks)
-  Scenes/                Menu, Lobby, RhythmTest, TrackEditor, Tutorial, VoiceInputTest
-  StreamingAssets/       Speech models
+  Scenes/                Menu, Lobby, RhythmTest, TrackEditor, Griz/NPC tests
+  StreamingAssets/       Vosk model (committed); llama/whisper/piper (gitignored)
   Mirror/                Networking (third party)
   vosk-unity-asr-master/ Speech recognition (third party)
+
+nllb-tools/              Bangla translation server (Python; weights gitignored)
 ```
 
 Vendored third-party packages sit at `Assets/` root; first-party work is under
@@ -196,9 +268,17 @@ Useful scenes:
 | `Scenes/RhythmTest.unity` | Combat/beat loop in isolation |
 | `Scenes/VoiceInputTestScene.unity` | Voice recognition in isolation |
 | `Scenes/TrackEditor.unity` | Author beat maps for songs |
+| `Scenes/GrizTest.unity` | Griz the merchant — talk-to-haggle |
+| `Scenes/MultiNpcTest.unity` | Multiple conversational NPCs |
+| `Scenes/CompanionTest.unity` | Companion NPC behaviour |
 
 Beat maps are authored with a **minimum 1.5s gap** between a player's beats, so there is
 always time to declare a card and then execute it.
+
+**Rhythm combat runs on a fresh clone.** The conversational NPC scenes additionally need the
+local AI binaries and models fetched through the `Tools >` setup menus (see the section
+above); without them those scenes fall back to keyword matching or stay inert rather than
+erroring.
 
 ---
 
@@ -222,38 +302,48 @@ In `Assets/#MainProject/DOC/`:
 
 | Document | Contents |
 |---|---|
-| `DESIGN.md` | Current single-player systems — the record of what is built |
-| `DESIGN_COOP.md` | Where the game is going: 2-player co-op roguelite |
+| `DESIGN.md` | Single-player combat systems — the record of what is built |
+| `DESIGN_COOP.md` | 2-player co-op roguelite direction, voice-NPC hub design |
+| `BANGLA_ASR_PROJECT.md` | Bangla speech recognition: model selection, A/B results |
+| `BANGLA_TTS_PROJECT.md` | Training the custom Bangla Piper voice |
+| `UNITY_INTEGRATION.md` | Wiring the Bangla voice into Unity; the espeak-ng patch |
+| `GRIZ_SHOWCASE_SCRIPT.md` | Demo script for the merchant NPC |
+| `TERMINAL_LEAK_FINAL_GDD.txt` | Terminal Leak design |
 
-On the `Coop-Mode-With-PC` branch, the same folder additionally holds
-`BANGLA_ASR_PROJECT.md` and `BANGLA_TTS_PROJECT.md` (speech pipeline, model selection,
-findings).
-
-`DESIGN_COOP.md` is the most current design thinking and documents several reversed
-decisions with reasoning, which is useful for understanding why the code looks as it does.
+`DESIGN_COOP.md` is the most current design thinking and documents several **reversed
+decisions with their reasoning**, which is the fastest way to understand why the code looks
+the way it does.
 
 ---
 
 ## Branches
 
+`main` carries the current work. The others are kept for history:
+
 | Branch | Contents |
 |---|---|
-| `Full-Game-without-VR` | PC flat build — the main line of work |
+| `main` | Current line of work — combat, conversational NPCs, Bangla pipeline |
+| `Full-Game-without-VR` | Earlier PC flat build, before the NPC/AI work |
 | `Elemental-Card-Changes` | VR (Meta Quest) build |
-| `Coop-Mode-With-PC`, `Coop-Branch` | Co-op direction from `DESIGN_COOP.md` |
-| `NLP-Branch` | Language/NPC experiments |
-| `New-Card-System`, `Redo-The-cardsystem` | Card system iterations |
+| `NLP-Branch` | Early language/NPC experiments |
 
 ---
 
 ## Third-party dependencies
 
-Unity packages (see `Packages/manifest.json`): Universal RP 14.0.12, TextMeshPro 3.0.7,
-Input System, Post Processing 3.4.0, Newtonsoft JSON 3.2.1.
+Unity packages (see `Packages/manifest.json`): Universal RP 14.0.12, Input System 1.14.0,
+Post Processing 3.4.0, Newtonsoft JSON 3.2.1, Timeline 1.7.7, AI Navigation 1.1.6.
 
 Vendored under `Assets/`: Mirror (networking, MIT), Vosk (speech recognition, Apache 2.0),
 Steamworks.NET, PlayFlowCloud, plus VFX and animation packages (KriptoFX, Kevin Iglesias,
 Lyrebird-Studio, _Creepy_Cat, DoubleL, SoundManagerPackage).
+
+Local AI runtimes, fetched at setup rather than committed, each running as a separate
+localhost subprocess: **llama.cpp** (intent classification), **whisper.cpp** (speech to
+text), **piper** (speech synthesis), and **NLLB-200 distilled 600M** via CTranslate2
+(Bangla translation). The runtimes are MIT-licensed; the **model weights carry their own
+separate licenses**, which anyone shipping commercially should check per model — Meta's
+NLLB-200 in particular is not permissively licensed for commercial use.
 
 > Anyone redistributing or shipping this project commercially should verify the license terms
 > of the vendored art, VFX, and audio packages above, as several are Asset Store packs whose

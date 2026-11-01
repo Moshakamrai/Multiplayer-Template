@@ -48,6 +48,30 @@ is holding it in place, so no prompt injection can move it.
 
 ---
 
+## Try it in 30 seconds
+
+`Tools > Offline AI NPC > Create Demo Scene`, then press Play and type at the merchant.
+
+**This works with no model installed** — it runs on the keyword fallback, which is exactly
+what your players get on a machine where setup failed. Try:
+
+| Say | What happens |
+|---|---|
+| `hello` | He quotes the asking price |
+| `that's too much` | Concedes 10%, never past his floor |
+| `I'll give you 70 gold` | Counters by meeting in the middle |
+| `okay` | Closes at the counteroffer |
+| `cheaper` ×10 | Stops dead at `minPrice` — the floor is arithmetic, not a prompt |
+| `20 gold or else` | Read as a **threat**, not an offer. Price stands |
+| `I'll kill you` | Second threat and he refuses to trade at all |
+| `this is a rip off` | Insult — the price goes **up** |
+
+The status line at the top tells you whether replies came from the LLM or the fallback. Once
+a model is installed the same scene starts understanding phrasings nobody wrote keywords for,
+while every number above stays exactly as your code computed it.
+
+---
+
 ## Quick start
 
 ### 1. Install the model

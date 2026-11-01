@@ -29,6 +29,8 @@ namespace OfflineAINPC.Demo
         int _counterOffer;          // >0 while a counteroffer is on the table
         bool _greeted;
         bool _sold;
+        int _threats;
+        bool _refusing;             // threatened twice — will not trade at all
 
         void Awake() { _price = askingPrice; }
 
@@ -56,9 +58,21 @@ namespace OfflineAINPC.Demo
             if (_sold && result.intent != "greet")
                 return "Deal's done. Go on, enjoy it.";
 
+            // Refusal outranks everything except a fresh greeting. Enforced here in code, so
+            // no amount of persuasion reopens the shop — the same principle as the price floor.
+            if (_refusing && result.intent != "greet")
+                return "I said we're done.";
+
             switch (result.intent)
             {
                 case "greet":
+                    if (_refusing)
+                    {
+                        // A civil re-approach reopens trade, so the demo can't dead-end.
+                        _refusing = false;
+                        _threats = 0;
+                        return $"...Fine. {_price} gold, and keep it civil this time.";
+                    }
                     if (_greeted) return "You again. Still got that " + itemName + " if you want it.";
                     _greeted = true;
                     return $"Aye. {Cap(itemName)}, {_price} gold. Interested?";
@@ -92,6 +106,20 @@ namespace OfflineAINPC.Demo
                     _price = Mathf.RoundToInt(_price * 1.1f);
                     _counterOffer = 0;
                     return $"Price just went up. {_price} gold. Mind your mouth.";
+
+                case "threaten":
+                    // Note this is reached even for "20 gold or else" — the intent set gives
+                    // threaten a higher fallbackPriority than offer, so a threat wrapped around
+                    // a number is still a threat. Worth keeping: it is the clearest example of
+                    // why priority ordering exists.
+                    _threats++;
+                    if (_threats >= 2)
+                    {
+                        _refusing = true;
+                        _counterOffer = 0;
+                        return "No. We're done — take your threats elsewhere.";
+                    }
+                    return "Try it and you'll leave with fewer fingers. Price stands.";
 
                 case "flatter":
                     return "Flattery's free. The sword isn't.";

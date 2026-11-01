@@ -97,3 +97,10 @@ crashlytics-build.properties
 # converted ggml, test wavs). The deliverable ggml lives in StreamingAssets/whisper/
 # (itself gitignored); the process is documented in Assets/#MainProject/DOC/BANGLA_ASR_PROJECT.md
 /bangla-asr-tools/
+
+# Belt-and-braces: model weights are never source, wherever they turn up.
+# These patterns catch a stray `git add -A` that the directory rules above miss.
+*.safetensors
+*.ckpt
+*.onnx
+ggml-*.bin

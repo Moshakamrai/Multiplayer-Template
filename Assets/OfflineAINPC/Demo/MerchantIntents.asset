@@ -1,0 +1,125 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5b486a37c17f55c44a4dd6513a4fce0e, type: 3}
+  m_Name: MerchantIntents
+  m_EditorClassIdentifier:
+  situation: a customer haggling with a merchant who sells exactly one item
+  intents:
+  - id: greet
+    whenToUse: a greeting or hail with no other content
+    fallbackKeywords:
+    - hello
+    - hi
+    - hey
+    - greetings
+    - good day
+    fallbackPriority: 0
+  - id: inventory
+    whenToUse: asking what is for sale, or saying they want or need an item
+    fallbackKeywords:
+    - what do you have
+    - what are you selling
+    - show me
+    - inventory
+    - stock
+    - i need a
+    - i want a
+    fallbackPriority: 0
+  - id: askinfo
+    whenToUse: asking about the item itself - its quality, history, or condition
+    fallbackKeywords:
+    - tell me about
+    - is it good
+    - what's it made of
+    - how old
+    fallbackPriority: 0
+  - id: haggle
+    whenToUse: wants a lower price but does NOT name a specific amount
+    fallbackKeywords:
+    - cheaper
+    - discount
+    - lower
+    - too much
+    - expensive
+    - come down
+    - best price
+    fallbackPriority: 0
+  - id: offer
+    whenToUse: names a specific amount they will pay, e.g. "forty gold" or "make it 80"
+    fallbackKeywords:
+    - gold for it
+    - i'll give
+    - ill give
+    - how about
+    - i'll pay
+    - ill pay
+    fallbackPriority: 1
+  - id: accept
+    whenToUse: agrees to the merchant's open counteroffer - only valid when counteroffer_open
+      is true
+    fallbackKeywords:
+    - okay
+    - fine
+    - alright
+    - agreed
+    - deal then
+    fallbackPriority: 0
+  - id: buy
+    whenToUse: wants to complete the purchase at the current price, e.g. "I'll take
+      it" or "sold". If they say buy about something that is NOT item_for_sale, that
+      is inventory instead
+    fallbackKeywords:
+    - i'll take it
+    - ill take it
+    - sold
+    - deal
+    - i'll buy it
+    - ill buy it
+    fallbackPriority: 2
+  - id: flatter
+    whenToUse: compliments the merchant or the goods
+    fallbackKeywords:
+    - nice
+    - lovely
+    - beautiful
+    - you're the best
+    - fine work
+    fallbackPriority: 0
+  - id: insult
+    whenToUse: mockery, abuse, or accusations of cheating
+    fallbackKeywords:
+    - scam
+    - thief
+    - rip off
+    - ripoff
+    - stupid
+    - garbage
+    - crook
+    fallbackPriority: 3
+  - id: threaten
+    whenToUse: any threat of violence or consequences. Outranks an offer - "twenty
+      gold or else" is a threat, not an offer
+    fallbackKeywords:
+    - or else
+    - kill
+    - hurt you
+    - you'll regret
+    - youll regret
+    - break your
+    fallbackPriority: 10
+  - id: unknown
+    whenToUse:
+    fallbackKeywords: []
+    fallbackPriority: 0
+  extractAmount: 1
+  amountMeaning: the gold amount if the customer proposes a price, else 0
+  fallbackIntentId: unknown

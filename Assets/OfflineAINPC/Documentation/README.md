@@ -48,12 +48,18 @@ is holding it in place, so no prompt injection can move it.
 
 ---
 
-## Try it in 30 seconds
+## Verify it works in 30 seconds
 
 `Tools > Offline AI NPC > Create Demo Scene`, then press Play and type at the merchant.
 
-**This works with no model installed** — it runs on the keyword fallback, which is exactly
-what your players get on a machine where setup failed. Try:
+This is a **smoke test, not a showcase** — a plain text console with no model, no mic and no
+character art, so it runs the instant the package is imported and before you download
+anything. Its job is to prove the negotiation logic and the fallback path are sound. For
+what the toolkit looks like with voice and a character attached, see
+[the full voice loop](#the-full-voice-loop-speech-in-speech-out) below.
+
+**It works with no model installed**, which is also exactly what your players get on a
+machine where setup failed. Try:
 
 | Say | What happens |
 |---|---|
@@ -128,6 +134,35 @@ public class Guard : NpcConversation
 
 Add a `LocalLlmService` to the scene, assign it plus your intent set, hook `onNpcLine` to
 your dialogue UI, and call `Say("...")` with typed text or a speech transcript.
+
+---
+
+## The full voice loop (speech in, speech out)
+
+This package covers **text in → intent → text out**, which is the part that keeps an LLM
+under control. The surrounding voice layers are separate concerns and deliberately not
+bundled, so you can use whatever you already have:
+
+```
+        [ your STT ]            THIS PACKAGE             [ your TTS ]
+  microphone → transcript → Classify → Respond → line → spoken audio
+```
+
+Both ends are a single call. `Say(transcript)` is the input side; `onNpcLine` is the output
+side — hook it straight to a TTS component:
+
+```csharp
+merchant.onNpcLine.AddListener(line => myTts.Speak(line));
+```
+
+Anything that produces a string works for input: Unity's `Microphone` plus a local
+whisper.cpp subprocess, a cloud STT, or plain typing. The same pattern used for llama.cpp
+here — a local binary in `StreamingAssets`, driven as a subprocess and polled over
+localhost — applies directly to whisper.cpp and Piper if you want the whole stack offline.
+
+> A full speech-in/speech-out implementation on top of this architecture, with lip sync and
+> facial expressions, exists in the author's own project. If a packaged voice layer would be
+> useful to you, say so — it is the most likely next addition.
 
 ---
 

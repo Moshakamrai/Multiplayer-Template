@@ -76,3 +76,22 @@ crashlytics-build.properties
 # Temporary auto-generated Android Assets
 /[Aa]ssets/[Ss]treamingAssets/aa.meta
 /[Aa]ssets/[Ss]treamingAssets/aa/*
+
+# ──────────────────────────────────────────────────────────────────────────
+# Out-of-engine ML tooling (Bangla speech pipeline)
+#
+# These directories hold multi-GB model weights, a cloned upstream repo, and
+# scratch audio. They are developer tooling, not part of the Unity project,
+# and must never enter git history — the weights alone are ~2 GB and are all
+# re-downloadable from Hugging Face. Keep the Python scripts by committing
+# them deliberately if ever needed; never `git add -A` these paths.
+# ──────────────────────────────────────────────────────────────────────────
+/bangla-asr-tools/
+/nllb-tools/
+/piper-tools/
+
+# Model weights and scratch audio, wherever they appear outside Assets/
+*.safetensors
+*.ckpt
+*.onnx
+/**/ggml-*.bin

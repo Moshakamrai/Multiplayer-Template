@@ -1,0 +1,19 @@
+{
+    "name": "OfflineAINPC.Demo.Editor",
+    "rootNamespace": "OfflineAINPC.EditorTools",
+    "references": [
+        "OfflineAINPC",
+        "OfflineAINPC.Demo"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
